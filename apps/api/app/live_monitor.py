@@ -14,6 +14,7 @@ from services.market_data import (
     CoinbasePublicMarketDataAdapter,
     DataQualityMonitor,
     MarketTick,
+    PublicMarketDataAdapter,
     compute_orderbook_metrics,
 )
 
@@ -25,17 +26,25 @@ from .websockets import hub
 
 _HISTORY_LIMIT = 512
 _STALE_AFTER_SECONDS = 10.0
+_SOURCE_MESSAGE_STALE_SECONDS = 30.0
+
+
+def _age_seconds(value: datetime | None, *, now: datetime) -> float | None:
+    if value is None or value.tzinfo is None or value.utcoffset() is None:
+        return None
+    return max((now - value).total_seconds(), 0.0)
 
 
 class LiveCryptoMonitor:
-    def __init__(self) -> None:
-        self._adapter = CoinbasePublicMarketDataAdapter()
+    def __init__(self, adapter: PublicMarketDataAdapter | None = None) -> None:
+        self._adapter = adapter or CoinbasePublicMarketDataAdapter()
         self._quality = DataQualityMonitor(stale_after_seconds=_STALE_AFTER_SECONDS)
         self._task: asyncio.Task[None] | None = None
         self._latest: dict[str, MarketTick] = {}
         self._history: dict[str, deque[MarketTick]] = defaultdict(
             lambda: deque(maxlen=_HISTORY_LIMIT)
         )
+        self._symbol_connection_generation: dict[str, int] = {}
         self._last_error: str | None = None
 
     @property
@@ -76,9 +85,25 @@ class LiveCryptoMonitor:
         )
 
     def source_health(self) -> dict[str, object]:
+        now = datetime.now(UTC)
+        health = self._adapter.health()
+        last_message_age = _age_seconds(health.last_message_at, now=now)
+        last_tick_age = _age_seconds(health.last_tick_at, now=now)
+        message_fresh = bool(
+            health.connected
+            and last_message_age is not None
+            and last_message_age <= _SOURCE_MESSAGE_STALE_SECONDS
+        )
         return {
             "source": "PUBLIC_READ_ONLY",
-            **asdict(self._adapter.health()),
+            **asdict(health),
+            "message_fresh": message_fresh,
+            "last_message_age_seconds": (
+                round(last_message_age, 6) if last_message_age is not None else None
+            ),
+            "last_tick_age_seconds": (
+                round(last_tick_age, 6) if last_tick_age is not None else None
+            ),
             "expected_symbols": list(self._adapter.symbols),
             "financial_connectivity": False,
             "real_money_execution": False,
@@ -86,10 +111,14 @@ class LiveCryptoMonitor:
 
     def status(self) -> dict[str, object]:
         now = datetime.now(UTC)
+        feed_health = self.source_health()
+        connected = bool(feed_health["connected"])
+        current_generation = int(feed_health["connection_generation"])
         symbol_health: dict[str, dict[str, object]] = {}
         missing_symbols: list[str] = []
         stale_symbols: list[str] = []
         fresh_symbols: list[str] = []
+        current_connection_symbols: list[str] = []
 
         for symbol in self._adapter.symbols:
             tick = self._latest.get(symbol)
@@ -98,6 +127,8 @@ class LiveCryptoMonitor:
                 symbol_health[symbol] = {
                     "observed": False,
                     "fresh": False,
+                    "current_connection": False,
+                    "connection_generation": None,
                     "latest_observed_at": None,
                     "age_seconds": None,
                 }
@@ -105,13 +136,23 @@ class LiveCryptoMonitor:
 
             age_seconds = max((now - tick.timestamp).total_seconds(), 0.0)
             fresh = age_seconds <= _STALE_AFTER_SECONDS
+            observed_generation = self._symbol_connection_generation.get(symbol)
+            current_connection = bool(
+                connected
+                and current_generation > 0
+                and observed_generation == current_generation
+            )
             if fresh:
                 fresh_symbols.append(symbol)
             else:
                 stale_symbols.append(symbol)
+            if current_connection:
+                current_connection_symbols.append(symbol)
             symbol_health[symbol] = {
                 "observed": True,
                 "fresh": fresh,
+                "current_connection": current_connection,
+                "connection_generation": observed_generation,
                 "latest_observed_at": tick.timestamp.isoformat(),
                 "age_seconds": round(age_seconds, 6),
             }
@@ -125,19 +166,27 @@ class LiveCryptoMonitor:
             latest_age_seconds = max((now - latest).total_seconds(), 0.0)
 
         all_symbols_fresh = not missing_symbols and not stale_symbols
+        all_symbols_current_connection = bool(
+            connected
+            and current_generation > 0
+            and not missing_symbols
+            and len(current_connection_symbols) == len(self._adapter.symbols)
+        )
         return {
             "mode": SystemMode.LIVE_MONITORING,
             "running": self.running,
             "receiving_data": bool(fresh_symbols),
             "complete": not missing_symbols,
             "all_symbols_fresh": all_symbols_fresh,
+            "all_symbols_current_connection": all_symbols_current_connection,
+            "source_message_fresh": bool(feed_health["message_fresh"]),
             "stale": bool(stale_symbols) or not self._latest,
             "source": "PUBLIC_READ_ONLY",
             "latest_observed_at": latest.isoformat() if latest is not None else None,
             "last_frame_age_seconds": (
                 round(latest_age_seconds, 6) if latest_age_seconds is not None else None
             ),
-            "feed_health": self.source_health(),
+            "feed_health": feed_health,
             "financial_connectivity": False,
             "real_money_execution": False,
             "expected_symbols": list(self._adapter.symbols),
@@ -145,6 +194,7 @@ class LiveCryptoMonitor:
             "fresh_symbols": fresh_symbols,
             "missing_symbols": missing_symbols,
             "stale_symbols": stale_symbols,
+            "current_connection_symbols": current_connection_symbols,
             "symbol_health": symbol_health,
             "history_limit_per_symbol": _HISTORY_LIMIT,
             "last_error": self._last_error,
@@ -179,6 +229,9 @@ class LiveCryptoMonitor:
 
         self._latest[tick.symbol] = tick
         self._history[tick.symbol].append(tick)
+        self._symbol_connection_generation[tick.symbol] = (
+            self._adapter.health().connection_generation
+        )
         metrics.increment("live_market_frames")
         book = compute_orderbook_metrics(tick)
         await hub.broadcast(
@@ -287,11 +340,14 @@ def live_ready(response: Response) -> dict[str, object]:
     status = live_monitor.status()
     feed_health = status["feed_health"]
     connected = isinstance(feed_health, dict) and bool(feed_health.get("connected"))
+    message_fresh = isinstance(feed_health, dict) and bool(feed_health.get("message_fresh"))
     ready = bool(
         status["running"]
         and connected
+        and message_fresh
         and status["receiving_data"]
         and status["all_symbols_fresh"]
+        and status["all_symbols_current_connection"]
     )
     if not ready:
         response.status_code = 503
