@@ -202,7 +202,10 @@ def model_calibration() -> dict[str, object]:
         "brier_score": None,
         "log_loss": None,
         "expected_calibration_error": None,
-        "note": "Submit labeled observations to /research/calibration to compute calibration metrics.",
+        "note": (
+            "Submit labeled observations to /research/calibration to compute "
+            "calibration metrics."
+        ),
     }
 
 
