@@ -1,0 +1,96 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Monitor running",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "targets": [{"expr": "proto_live_running", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
+    },
+    {
+      "type": "stat",
+      "title": "Public feed connected",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "targets": [{"expr": "proto_live_connected", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
+    },
+    {
+      "type": "stat",
+      "title": "All symbol receipts fresh",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "targets": [{"expr": "proto_live_all_symbols_receipts_fresh", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
+    },
+    {
+      "type": "stat",
+      "title": "Persistence healthy",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "targets": [{"expr": "proto_live_persistence_healthy", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
+    },
+    {
+      "type": "stat",
+      "title": "Financial connectivity invariant",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "targets": [{"expr": "proto_live_financial_connectivity", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
+    },
+    {
+      "type": "stat",
+      "title": "Real-money execution invariant",
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "targets": [{"expr": "proto_live_real_money_execution", "refId": "A"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Receipt age by symbol",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [{"expr": "proto_live_symbol_receipt_age_seconds", "legendFormat": "{{symbol}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Source age by symbol",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [{"expr": "proto_live_symbol_source_age_seconds", "legendFormat": "{{symbol}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Feed recovery telemetry",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "targets": [
+        {"expr": "proto_live_reconnects_total", "legendFormat": "reconnects", "refId": "A"},
+        {"expr": "proto_live_parse_errors_total", "legendFormat": "parse errors", "refId": "B"},
+        {"expr": "proto_live_message_timeouts_total", "legendFormat": "message timeouts", "refId": "C"},
+        {"expr": "proto_live_sequence_rejections_current_connection", "legendFormat": "sequence rejections", "refId": "D"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Durability telemetry",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [
+        {"expr": "proto_live_persisted_current_connection", "legendFormat": "persisted", "refId": "A"},
+        {"expr": "proto_live_persistence_write_failures_current_connection", "legendFormat": "write failures", "refId": "B"},
+        {"expr": "proto_live_persistence_read_failures", "legendFormat": "read failures", "refId": "C"},
+        {"expr": "proto_live_journal_pruned_rows", "legendFormat": "pruned rows", "refId": "D"}
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["proto", "live-monitoring", "read-only"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timezone": "browser",
+  "title": "Proto Live Monitoring",
+  "uid": "proto-live-read-only",
+  "version": 1
+}
