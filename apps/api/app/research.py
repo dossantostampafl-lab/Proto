@@ -11,11 +11,13 @@ from .calibration import (
     calibration_error,
     log_loss,
 )
+from .demo import router as demo_router
 from .models import MarketSnapshot
 from .observability import RuntimeMetrics
 from .replay import HistoricalReplay, ReplayFrame
 
 router = APIRouter(prefix="/research", tags=["research"])
+router.include_router(demo_router)
 metrics = RuntimeMetrics()
 
 
