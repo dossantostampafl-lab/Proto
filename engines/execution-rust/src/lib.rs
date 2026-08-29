@@ -35,7 +35,12 @@ pub enum TransitionError {
 }
 
 impl SimulatedOrder {
-    pub fn new(command_id: Uuid, idempotency_key: String, price: Decimal, quantity: Decimal) -> Self {
+    pub fn new(
+        command_id: Uuid,
+        idempotency_key: String,
+        price: Decimal,
+        quantity: Decimal,
+    ) -> Self {
         Self {
             order_id: Uuid::new_v4(),
             command_id,
@@ -111,15 +116,14 @@ mod tests {
 
     #[test]
     fn rejects_overfill() {
-        let mut order = SimulatedOrder::new(
-            Uuid::new_v4(),
-            "cmd-2".into(),
-            Decimal::ONE,
-            Decimal::ONE,
-        );
+        let mut order =
+            SimulatedOrder::new(Uuid::new_v4(), "cmd-2".into(), Decimal::ONE, Decimal::ONE);
         order.transition(OrderState::Validated).unwrap();
         order.transition(OrderState::Queued).unwrap();
         order.transition(OrderState::Resting).unwrap();
-        assert_eq!(order.apply_fill(Decimal::new(2, 0)), Err(TransitionError::InvalidFill));
+        assert_eq!(
+            order.apply_fill(Decimal::new(2, 0)),
+            Err(TransitionError::InvalidFill)
+        );
     }
 }
