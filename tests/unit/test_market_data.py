@@ -8,85 +8,135 @@ from services.market_data.core import (
 )
 
 
-def _tick(**overrides: object) -> MarketTick:
-    payload: dict[str, object] = {
-        "timestamp": datetime(2026, 8, 29, 0, 0, tzinfo=UTC),
-        "venue": "synthetic",
-        "symbol": "BTC",
-        "bid": 60_000.0,
-        "ask": 60_010.0,
-        "last": 60_005.0,
-        "volume": 12.0,
-        "bid_size": 3.0,
-        "ask_size": 1.0,
-        "sequence": 10,
-    }
-    payload.update(overrides)
-    return MarketTick(**payload)
+def _tick(
+    *,
+    sequence: int = 1,
+    timestamp: datetime | None = None,
+    bid: float = 100.0,
+    ask: float = 101.0,
+    last: float = 100.5,
+    bid_size: float = 2.0,
+    ask_size: float = 1.0,
+    volume: float = 4.0,
+) -> MarketTick:
+    return MarketTick(
+        timestamp=timestamp or datetime(2026, 1, 1, tzinfo=UTC),
+        venue="synthetic",
+        symbol="BTC",
+        bid=bid,
+        ask=ask,
+        last=last,
+        volume=volume,
+        bid_size=bid_size,
+        ask_size=ask_size,
+        sequence=sequence,
+    )
 
 
-def test_orderbook_metrics_use_size_weighted_microprice() -> None:
+def test_orderbook_metrics_are_deterministic() -> None:
     metrics = compute_orderbook_metrics(_tick())
 
-    assert metrics.mid_price == 60_005.0
-    assert metrics.spread == 10.0
-    assert metrics.depth == 4.0
-    assert metrics.imbalance == 0.5
-    assert metrics.microprice == 60_007.5
+    assert metrics.best_bid == 100.0
+    assert metrics.best_ask == 101.0
+    assert metrics.mid_price == 100.5
+    assert metrics.spread == 1.0
+    assert metrics.depth == 3.0
+    assert round(metrics.imbalance, 6) == round(1 / 3, 6)
+    assert round(metrics.microprice, 6) == round((101 * 2 + 100 * 1) / 3, 6)
 
 
-def test_quality_monitor_rejects_duplicate_sequence() -> None:
-    monitor = DataQualityMonitor(stale_after_seconds=30)
-    now = datetime(2026, 8, 29, 0, 0, 1, tzinfo=UTC)
+def test_data_quality_accepts_valid_monotonic_ticks() -> None:
+    monitor = DataQualityMonitor(stale_after_seconds=5.0)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
 
-    first = monitor.evaluate(_tick(), now=now)
-    duplicate = monitor.evaluate(_tick(), now=now)
+    first = monitor.evaluate(_tick(sequence=1, timestamp=base), now=base)
+    second = monitor.evaluate(
+        _tick(sequence=2, timestamp=base + timedelta(seconds=1)),
+        now=base + timedelta(seconds=1),
+    )
 
     assert first.valid is True
-    assert duplicate.valid is False
+    assert second.valid is True
+    assert first.issues == []
+    assert second.issues == []
+
+
+def test_data_quality_rejects_duplicate_and_out_of_order_sequence() -> None:
+    monitor = DataQualityMonitor(stale_after_seconds=5.0)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    monitor.evaluate(_tick(sequence=10, timestamp=base), now=base)
+
+    duplicate = monitor.evaluate(
+        _tick(sequence=10, timestamp=base + timedelta(seconds=1)),
+        now=base + timedelta(seconds=1),
+    )
+    out_of_order = monitor.evaluate(
+        _tick(sequence=9, timestamp=base + timedelta(seconds=2)),
+        now=base + timedelta(seconds=2),
+    )
+
     assert DataQualityIssue.DUPLICATE_SEQUENCE in duplicate.issues
+    assert DataQualityIssue.OUT_OF_ORDER_SEQUENCE in out_of_order.issues
 
 
-def test_quality_monitor_detects_stale_invalid_and_negative_data() -> None:
-    monitor = DataQualityMonitor(stale_after_seconds=5)
-    tick = _tick(
-        timestamp=datetime(2026, 8, 29, 0, 0, tzinfo=UTC),
-        bid=101.0,
-        ask=100.0,
-        bid_size=-1.0,
-        volume=-2.0,
+def test_data_quality_rejects_timestamp_regression_and_stale_feed() -> None:
+    monitor = DataQualityMonitor(stale_after_seconds=2.0)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    monitor.evaluate(_tick(sequence=1, timestamp=base), now=base)
+
+    regressed = monitor.evaluate(
+        _tick(sequence=2, timestamp=base - timedelta(milliseconds=1)),
+        now=base,
+    )
+    stale = monitor.evaluate(
+        _tick(sequence=2, timestamp=base + timedelta(seconds=1)),
+        now=base + timedelta(seconds=4),
     )
 
-    report = monitor.evaluate(
-        tick,
-        now=datetime(2026, 8, 29, 0, 0, 10, tzinfo=UTC),
+    assert DataQualityIssue.OUT_OF_ORDER_TIMESTAMP in regressed.issues
+    assert DataQualityIssue.STALE_FEED in stale.issues
+
+
+def test_data_quality_rejects_price_jump_invalid_spread_and_negative_size() -> None:
+    monitor = DataQualityMonitor(max_relative_price_jump=0.05)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    monitor.evaluate(_tick(sequence=1, timestamp=base), now=base)
+
+    jump = monitor.evaluate(
+        _tick(
+            sequence=2,
+            timestamp=base + timedelta(seconds=1),
+            bid=120.0,
+            ask=121.0,
+            last=120.5,
+        ),
+        now=base + timedelta(seconds=1),
+    )
+    malformed = monitor.evaluate(
+        _tick(
+            sequence=2,
+            timestamp=base + timedelta(seconds=1),
+            bid=102.0,
+            ask=101.0,
+            bid_size=-1.0,
+        ),
+        now=base + timedelta(seconds=1),
     )
 
-    assert report.valid is False
-    assert DataQualityIssue.STALE_FEED in report.issues
-    assert DataQualityIssue.INVALID_SPREAD in report.issues
-    assert DataQualityIssue.NEGATIVE_SIZE in report.issues
-    assert DataQualityIssue.NEGATIVE_VOLUME in report.issues
+    assert DataQualityIssue.PRICE_JUMP in jump.issues
+    assert DataQualityIssue.INVALID_SPREAD in malformed.issues
+    assert DataQualityIssue.NEGATIVE_SIZE in malformed.issues
 
 
-def test_quality_monitor_detects_out_of_order_and_price_jump() -> None:
-    monitor = DataQualityMonitor(
-        stale_after_seconds=120,
-        max_relative_price_jump=0.05,
-    )
-    now = datetime(2026, 8, 29, 0, 1, tzinfo=UTC)
-    first = _tick()
-    monitor.evaluate(first, now=now)
+def test_data_quality_reset_recovers_state_after_fault_injection() -> None:
+    monitor = DataQualityMonitor()
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    monitor.evaluate(_tick(sequence=5, timestamp=base), now=base)
+    rejected = monitor.evaluate(_tick(sequence=4, timestamp=base), now=base)
+    assert rejected.valid is False
 
-    later = _tick(
-        timestamp=first.timestamp - timedelta(seconds=1),
-        sequence=9,
-        bid=70_000.0,
-        ask=70_010.0,
-        last=70_005.0,
-    )
-    report = monitor.evaluate(later, now=now)
+    monitor.reset()
+    recovered = monitor.evaluate(_tick(sequence=1, timestamp=base), now=base)
 
-    assert DataQualityIssue.OUT_OF_ORDER_SEQUENCE in report.issues
-    assert DataQualityIssue.OUT_OF_ORDER_TIMESTAMP in report.issues
-    assert DataQualityIssue.PRICE_JUMP in report.issues
+    assert recovered.valid is True
+    assert recovered.issues == []
