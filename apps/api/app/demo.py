@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Iterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from services.market_data.adapters import SyntheticAdapter
 from services.market_data.core import MarketTick
@@ -163,23 +165,7 @@ class DemoEngine:
         }
 
 
-demo_engine = DemoEngine()
-
-
-@router.get("/status")
-def demo_status() -> dict[str, object]:
-    return demo_engine.status()
-
-
-@router.post("/reset")
-def demo_reset() -> dict[str, object]:
-    demo_engine.reset()
-    return demo_engine.status()
-
-
-@router.post("/tick")
-async def demo_tick() -> dict[str, object]:
-    frame = demo_engine.next_frame()
+async def publish_demo_frame(frame: dict[str, object]) -> None:
     for feed in frame["model_feed"]:
         await hub.broadcast("market-data", {"type": "model-feed", "data": feed})
         await hub.broadcast(
@@ -203,4 +189,78 @@ async def demo_tick() -> dict[str, object]:
         "analytics",
         {"type": "resolution-grid", "data": frame["resolution_grid"]},
     )
+
+
+class DemoController:
+    def __init__(self, engine: DemoEngine) -> None:
+        self.engine = engine
+        self._task: asyncio.Task[None] | None = None
+        self.interval_ms = 1_000
+
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    def status(self) -> dict[str, object]:
+        return {
+            **self.engine.status(),
+            "running": self.running,
+            "interval_ms": self.interval_ms,
+        }
+
+    async def _run(self) -> None:
+        while True:
+            frame = self.engine.next_frame()
+            await publish_demo_frame(frame)
+            await asyncio.sleep(self.interval_ms / 1_000.0)
+
+    def start(self, interval_ms: int) -> dict[str, object]:
+        self.interval_ms = interval_ms
+        if not self.running:
+            self._task = asyncio.create_task(self._run())
+        return self.status()
+
+    async def stop(self) -> dict[str, object]:
+        task = self._task
+        self._task = None
+        if task is not None and not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        return self.status()
+
+    async def reset(self) -> dict[str, object]:
+        await self.stop()
+        self.engine.reset()
+        return self.status()
+
+
+demo_engine = DemoEngine()
+demo_controller = DemoController(demo_engine)
+
+
+@router.get("/status")
+def demo_status() -> dict[str, object]:
+    return demo_controller.status()
+
+
+@router.post("/start")
+def demo_start(interval_ms: int = Query(default=1_000, ge=100, le=60_000)) -> dict[str, object]:
+    return demo_controller.start(interval_ms)
+
+
+@router.post("/stop")
+async def demo_stop() -> dict[str, object]:
+    return await demo_controller.stop()
+
+
+@router.post("/reset")
+async def demo_reset() -> dict[str, object]:
+    return await demo_controller.reset()
+
+
+@router.post("/tick")
+async def demo_tick() -> dict[str, object]:
+    frame = demo_engine.next_frame()
+    await publish_demo_frame(frame)
     return frame
