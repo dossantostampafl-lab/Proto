@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from math import isfinite
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,6 +49,7 @@ class DataQualityIssue(StrEnum):
     STALE_FEED = "STALE_FEED"
     FUTURE_TIMESTAMP = "FUTURE_TIMESTAMP"
     NAIVE_TIMESTAMP = "NAIVE_TIMESTAMP"
+    NON_FINITE_VALUE = "NON_FINITE_VALUE"
     PRICE_JUMP = "PRICE_JUMP"
     INVALID_SPREAD = "INVALID_SPREAD"
     NEGATIVE_SIZE = "NEGATIVE_SIZE"
@@ -93,16 +95,31 @@ class DataQualityMonitor:
         if current_time.tzinfo is None or current_time.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
 
-        if min(tick.bid, tick.ask, tick.last) <= 0:
-            issues.append(DataQualityIssue.NON_POSITIVE_PRICE)
-        if tick.ask < tick.bid:
-            issues.append(DataQualityIssue.INVALID_SPREAD)
-        if tick.bid_size < 0 or tick.ask_size < 0:
-            issues.append(DataQualityIssue.NEGATIVE_SIZE)
-        if tick.volume < 0:
-            issues.append(DataQualityIssue.NEGATIVE_VOLUME)
+        numeric_values = (
+            tick.bid,
+            tick.ask,
+            tick.last,
+            tick.volume,
+            tick.bid_size,
+            tick.ask_size,
+        )
+        numeric_values_finite = all(isfinite(value) for value in numeric_values)
+        if not numeric_values_finite:
+            issues.append(DataQualityIssue.NON_FINITE_VALUE)
+        else:
+            if min(tick.bid, tick.ask, tick.last) <= 0:
+                issues.append(DataQualityIssue.NON_POSITIVE_PRICE)
+            if tick.ask < tick.bid:
+                issues.append(DataQualityIssue.INVALID_SPREAD)
+            if tick.bid_size < 0 or tick.ask_size < 0:
+                issues.append(DataQualityIssue.NEGATIVE_SIZE)
+            if tick.volume < 0:
+                issues.append(DataQualityIssue.NEGATIVE_VOLUME)
 
-        timestamp_aware = tick.timestamp.tzinfo is not None and tick.timestamp.utcoffset() is not None
+        timestamp_aware = (
+            tick.timestamp.tzinfo is not None
+            and tick.timestamp.utcoffset() is not None
+        )
         if not timestamp_aware:
             issues.append(DataQualityIssue.NAIVE_TIMESTAMP)
         else:
@@ -123,11 +140,12 @@ class DataQualityMonitor:
             if timestamp_aware and tick.timestamp < previous.timestamp:
                 issues.append(DataQualityIssue.OUT_OF_ORDER_TIMESTAMP)
 
-            previous_mid = previous.mid
-            if previous_mid > 0:
-                relative_jump = abs(tick.mid - previous_mid) / previous_mid
-                if relative_jump > self.max_relative_price_jump:
-                    issues.append(DataQualityIssue.PRICE_JUMP)
+            if numeric_values_finite:
+                previous_mid = previous.mid
+                if isfinite(previous_mid) and previous_mid > 0:
+                    relative_jump = abs(tick.mid - previous_mid) / previous_mid
+                    if relative_jump > self.max_relative_price_jump:
+                        issues.append(DataQualityIssue.PRICE_JUMP)
 
         if not issues:
             self._last_by_key[key] = tick
