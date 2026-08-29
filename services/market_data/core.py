@@ -46,6 +46,8 @@ class DataQualityIssue(StrEnum):
     OUT_OF_ORDER_SEQUENCE = "OUT_OF_ORDER_SEQUENCE"
     OUT_OF_ORDER_TIMESTAMP = "OUT_OF_ORDER_TIMESTAMP"
     STALE_FEED = "STALE_FEED"
+    FUTURE_TIMESTAMP = "FUTURE_TIMESTAMP"
+    NAIVE_TIMESTAMP = "NAIVE_TIMESTAMP"
     PRICE_JUMP = "PRICE_JUMP"
     INVALID_SPREAD = "INVALID_SPREAD"
     NEGATIVE_SIZE = "NEGATIVE_SIZE"
@@ -64,9 +66,17 @@ class DataQualityMonitor:
         *,
         stale_after_seconds: float = 5.0,
         max_relative_price_jump: float = 0.20,
+        max_future_skew_seconds: float = 1.0,
     ) -> None:
+        if stale_after_seconds <= 0:
+            raise ValueError("stale_after_seconds must be positive")
+        if max_relative_price_jump < 0:
+            raise ValueError("max_relative_price_jump must be non-negative")
+        if max_future_skew_seconds < 0:
+            raise ValueError("max_future_skew_seconds must be non-negative")
         self.stale_after_seconds = stale_after_seconds
         self.max_relative_price_jump = max_relative_price_jump
+        self.max_future_skew_seconds = max_future_skew_seconds
         self._last_by_key: dict[tuple[str, str], MarketTick] = {}
 
     def reset(self) -> None:
@@ -80,6 +90,8 @@ class DataQualityMonitor:
     ) -> DataQualityReport:
         issues: list[DataQualityIssue] = []
         current_time = now or datetime.now(UTC)
+        if current_time.tzinfo is None or current_time.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
 
         if min(tick.bid, tick.ask, tick.last) <= 0:
             issues.append(DataQualityIssue.NON_POSITIVE_PRICE)
@@ -90,9 +102,15 @@ class DataQualityMonitor:
         if tick.volume < 0:
             issues.append(DataQualityIssue.NEGATIVE_VOLUME)
 
-        age_seconds = (current_time - tick.timestamp).total_seconds()
-        if age_seconds > self.stale_after_seconds:
-            issues.append(DataQualityIssue.STALE_FEED)
+        timestamp_aware = tick.timestamp.tzinfo is not None and tick.timestamp.utcoffset() is not None
+        if not timestamp_aware:
+            issues.append(DataQualityIssue.NAIVE_TIMESTAMP)
+        else:
+            age_seconds = (current_time - tick.timestamp).total_seconds()
+            if age_seconds > self.stale_after_seconds:
+                issues.append(DataQualityIssue.STALE_FEED)
+            elif age_seconds < -self.max_future_skew_seconds:
+                issues.append(DataQualityIssue.FUTURE_TIMESTAMP)
 
         key = (tick.venue, tick.symbol)
         previous = self._last_by_key.get(key)
@@ -102,7 +120,7 @@ class DataQualityMonitor:
             elif tick.sequence < previous.sequence:
                 issues.append(DataQualityIssue.OUT_OF_ORDER_SEQUENCE)
 
-            if tick.timestamp < previous.timestamp:
+            if timestamp_aware and tick.timestamp < previous.timestamp:
                 issues.append(DataQualityIssue.OUT_OF_ORDER_TIMESTAMP)
 
             previous_mid = previous.mid
