@@ -20,6 +20,7 @@ from .observability import RuntimeMetrics
 from .replay import HistoricalReplay, ReplayFrame
 from .safety_surface import router as safety_router
 from .surface import router as surface_router
+from .websockets import hub
 
 router = APIRouter(tags=["research"])
 router.include_router(surface_router)
@@ -99,12 +100,13 @@ def replay(request: ReplayRequest) -> dict[str, object]:
 
 @router.get("/research/metrics")
 def runtime_metrics() -> dict[str, object]:
-    return metrics.snapshot()
+    return {**metrics.snapshot(), "websocket": hub.snapshot()}
 
 
 @router.get("/metrics/prometheus", response_class=PlainTextResponse)
 def prometheus_metrics() -> str:
     snapshot = metrics.snapshot()
+    websocket = hub.snapshot()
     counters = snapshot["counters"]
     lines = [
         "# HELP proto_http_requests_total Total observed HTTP requests.",
@@ -119,7 +121,27 @@ def prometheus_metrics() -> str:
         "# HELP proto_simulation_latency_ms Average simulation latency in milliseconds.",
         "# TYPE proto_simulation_latency_ms gauge",
         f"proto_simulation_latency_ms {snapshot['average_simulation_latency_ms']}",
+        "# HELP proto_ws_connections Current WebSocket connections.",
+        "# TYPE proto_ws_connections gauge",
+        f"proto_ws_connections {websocket['total_connections']}",
+        "# HELP proto_ws_broadcasts_total WebSocket broadcast attempts.",
+        "# TYPE proto_ws_broadcasts_total counter",
+        f"proto_ws_broadcasts_total {websocket['broadcast_count']}",
+        "# HELP proto_ws_send_failures_total WebSocket send failures.",
+        "# TYPE proto_ws_send_failures_total counter",
+        f"proto_ws_send_failures_total {websocket['send_failures']}",
+        "# HELP proto_ws_origin_rejections_total WebSocket origin rejections.",
+        "# TYPE proto_ws_origin_rejections_total counter",
+        f"proto_ws_origin_rejections_total {websocket['origin_rejections']}",
+        "# HELP proto_ws_capacity_rejections_total WebSocket capacity rejections.",
+        "# TYPE proto_ws_capacity_rejections_total counter",
+        f"proto_ws_capacity_rejections_total {websocket['capacity_rejections']}",
+        "# HELP proto_ws_oversized_messages_total Oversized WebSocket frames.",
+        "# TYPE proto_ws_oversized_messages_total counter",
+        f"proto_ws_oversized_messages_total {websocket['oversized_messages']}",
     ]
+    for channel, value in websocket["connections"].items():
+        lines.append(f'proto_ws_connections_by_channel{{channel="{channel}"}} {value}')
     for name, value in sorted(counters.items()):
         safe_name = "".join(character if character.isalnum() else "_" for character in name)
         lines.extend(
