@@ -9,6 +9,18 @@ from uuid import uuid4
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from services.events.journal import (
+    HashChainJournal,
+    JournalRecord,
+    ResearchEvent,
+)
+from services.market_data.replay import (
+    MarketDataEvent,
+    ReplayBatch,
+    ReplaySummary,
+    select_replay_window,
+    summarize_replay,
+)
 from services.quant.calibration import (
     CalibrationBatch,
     CalibrationMetrics,
@@ -70,6 +82,7 @@ app.add_middleware(
 runtime = RuntimeState()
 simulator = PaperSimulator()
 portfolio = PaperPortfolio()
+research_journal = HashChainJournal()
 
 
 @app.middleware("http")
@@ -193,6 +206,46 @@ def edge(snapshot: MarketSnapshot) -> EdgeBreakdown:
         latency_penalty=0.0005,
         minimum_edge=settings.minimum_net_edge,
     )
+
+
+@app.post("/research/replay/summary", response_model=ReplaySummary)
+def replay_summary(batch: ReplayBatch) -> ReplaySummary:
+    return summarize_replay(batch)
+
+
+@app.post("/research/replay/window", response_model=list[MarketDataEvent])
+def replay_window(
+    batch: ReplayBatch,
+    after_sequence: int = Query(default=-1, ge=-1),
+    limit: int = Query(default=100, ge=1, le=1_000),
+) -> list[MarketDataEvent]:
+    return select_replay_window(
+        batch,
+        after_sequence=after_sequence,
+        limit=limit,
+    )
+
+
+@app.post("/research/events", response_model=JournalRecord)
+def append_research_event(event: ResearchEvent) -> JournalRecord:
+    return research_journal.append(event)
+
+
+@app.get("/research/events", response_model=list[JournalRecord])
+def list_research_events(
+    limit: int = Query(default=100, ge=1, le=1_000),
+) -> list[JournalRecord]:
+    return research_journal.list(limit)
+
+
+@app.get("/research/events/verify")
+def verify_research_events() -> dict[str, object]:
+    records = research_journal.list(research_journal.max_records)
+    return {
+        "valid": research_journal.verify(),
+        "count": len(records),
+        "mode": SystemMode.SIMULATION,
+    }
 
 
 @app.get("/risk")
