@@ -203,6 +203,8 @@ class LiveCryptoMonitor:
                         "timestamp": tick.timestamp.isoformat(),
                         "source": "PUBLIC_READ_ONLY",
                         "symbol": tick.symbol,
+                        "connection_generation": health.connection_generation,
+                        "sequence": tick.sequence,
                         "best_bid": book.best_bid,
                         "best_ask": book.best_ask,
                         "bid_size": tick.bid_size,
@@ -237,13 +239,16 @@ class LiveCryptoMonitor:
                 },
             )
 
-    @staticmethod
-    def _market_payload(tick: MarketTick) -> dict[str, object]:
+    def _market_payload(self, tick: MarketTick) -> dict[str, object]:
         return {
             "timestamp": tick.timestamp.isoformat(),
             "source": "PUBLIC_READ_ONLY",
             "venue": tick.venue,
             "symbol": tick.symbol,
+            "connection_generation": self._symbol_connection_generation.get(
+                tick.symbol,
+                self._connection_generation,
+            ),
             "bid": tick.bid,
             "ask": tick.ask,
             "mid": tick.mid,
