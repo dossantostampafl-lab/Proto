@@ -39,7 +39,13 @@ def _decode_payload(message: str | bytes | Mapping[str, Any]) -> Mapping[str, An
             payload = json.loads(message)
         else:
             payload = dict(message)
-    except (UnicodeDecodeError, UnicodeEncodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+    except (
+        UnicodeDecodeError,
+        UnicodeEncodeError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+    ) as error:
         raise PublicCryptoFeedError("invalid public feed payload") from error
     return _as_mapping(payload)
 
