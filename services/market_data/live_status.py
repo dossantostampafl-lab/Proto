@@ -112,6 +112,7 @@ def live_readiness_failures(
     connected: bool,
     message_fresh: bool,
     coverage: Mapping[str, object],
+    parse_degraded: bool = False,
 ) -> list[str]:
     failures: list[str] = []
     if not running:
@@ -120,6 +121,8 @@ def live_readiness_failures(
         failures.append("SOURCE_DISCONNECTED")
     elif not message_fresh:
         failures.append("SOURCE_MESSAGES_STALE")
+    if connected and parse_degraded:
+        failures.append("SOURCE_PARSE_DEGRADED")
 
     if not bool(coverage.get("receiving_data")):
         failures.append("NO_FRESH_DATA")
