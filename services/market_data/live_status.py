@@ -106,13 +106,21 @@ def evaluate_live_coverage(
     }
 
 
+def _parse_degraded(coverage: Mapping[str, object]) -> bool:
+    feed_health = coverage.get("feed_health")
+    if not isinstance(feed_health, Mapping):
+        return False
+    value = feed_health.get("consecutive_parse_errors", 0)
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def live_readiness_failures(
     *,
     running: bool,
     connected: bool,
     message_fresh: bool,
     coverage: Mapping[str, object],
-    parse_degraded: bool = False,
+    parse_degraded: bool | None = None,
 ) -> list[str]:
     failures: list[str] = []
     if not running:
@@ -121,7 +129,9 @@ def live_readiness_failures(
         failures.append("SOURCE_DISCONNECTED")
     elif not message_fresh:
         failures.append("SOURCE_MESSAGES_STALE")
-    if connected and parse_degraded:
+
+    degraded = _parse_degraded(coverage) if parse_degraded is None else parse_degraded
+    if connected and degraded:
         failures.append("SOURCE_PARSE_DEGRADED")
 
     if not bool(coverage.get("receiving_data")):
