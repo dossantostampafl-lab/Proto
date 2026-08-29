@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -14,6 +15,31 @@ class SilentWebSocket:
     async def recv(self) -> str:
         await asyncio.sleep(0.05)
         return "{}"
+
+
+def _valid_ticker_message() -> str:
+    return json.dumps(
+        {
+            "channel": "ticker",
+            "timestamp": "2026-08-29T20:15:00Z",
+            "sequence_num": 42,
+            "events": [
+                {
+                    "tickers": [
+                        {
+                            "product_id": "BTC-USD",
+                            "price": "61000.25",
+                            "best_bid": "61000.00",
+                            "best_ask": "61000.50",
+                            "best_bid_quantity": "1.2",
+                            "best_ask_quantity": "0.8",
+                            "volume_24_h": "123.4",
+                        }
+                    ]
+                }
+            ],
+        }
+    )
 
 
 def test_public_feed_health_starts_disconnected_without_credentials() -> None:
@@ -65,7 +91,7 @@ def test_public_feed_rejects_invalid_parse_error_budget(value: object) -> None:
         CoinbasePublicMarketDataAdapter(max_consecutive_parse_errors=value)  # type: ignore[arg-type]
 
 
-def test_public_feed_tolerates_bounded_parse_errors_and_recovers() -> None:
+def test_public_feed_parse_degradation_survives_heartbeat_until_ticker_recovers() -> None:
     adapter = CoinbasePublicMarketDataAdapter(max_consecutive_parse_errors=2)
 
     assert adapter._parse_message("not-json") == []
@@ -75,6 +101,13 @@ def test_public_feed_tolerates_bounded_parse_errors_and_recovers() -> None:
     assert degraded.last_error == "PublicCryptoFeedError"
 
     assert adapter._parse_message('{"channel":"heartbeats"}') == []
+    heartbeat_only = adapter.health()
+    assert heartbeat_only.parse_error_count == 1
+    assert heartbeat_only.consecutive_parse_errors == 1
+    assert heartbeat_only.last_error == "PublicCryptoFeedError"
+
+    recovered_ticks = adapter._parse_message(_valid_ticker_message())
+    assert len(recovered_ticks) == 1
     recovered = adapter.health()
     assert recovered.parse_error_count == 1
     assert recovered.consecutive_parse_errors == 0
@@ -85,6 +118,7 @@ def test_public_feed_escalates_after_parse_error_budget_is_exhausted() -> None:
     adapter = CoinbasePublicMarketDataAdapter(max_consecutive_parse_errors=2)
 
     assert adapter._parse_message("not-json") == []
+    assert adapter._parse_message('{"channel":"heartbeats"}') == []
     with pytest.raises(PublicCryptoFeedError, match="invalid public feed payload"):
         adapter._parse_message("still-not-json")
 
