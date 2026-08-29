@@ -5,6 +5,7 @@ LIVE_SCOPE = (
     Path("apps/api/app/live_monitor.py"),
     Path("services/market_data/live.py"),
     Path("services/market_data/live_status.py"),
+    Path("services/market_data/public_feed_parser.py"),
 )
 PUBLIC_FEED = Path("services/market_data/live.py")
 
