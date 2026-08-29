@@ -22,7 +22,7 @@ from .live import (
     PublicMarketDataAdapter,
     parse_public_ticker_message,
 )
-from .live_status import evaluate_live_coverage
+from .live_status import evaluate_live_coverage, live_readiness_failures
 
 __all__ = [
     "CSVReplayAdapter",
@@ -41,5 +41,6 @@ __all__ = [
     "SyntheticAdapter",
     "compute_orderbook_metrics",
     "evaluate_live_coverage",
+    "live_readiness_failures",
     "parse_public_ticker_message",
 ]
