@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from services.quant.core import (
@@ -30,6 +30,7 @@ from .research import metrics
 from .research import router as research_router
 from .settings import settings
 from .simulation import PaperSimulator
+from .websockets import hub
 
 persistence_engine = build_engine(settings.database_url) if settings.persistence_enabled else None
 persistent_journal = (
@@ -146,6 +147,8 @@ async def simulate(request: SimulationRequest) -> SimulationResult:
         portfolio.apply_fill(request.order, result.fill)
         if persistent_journal is not None:
             await persistent_journal.append(request.order, result.fill)
+        await hub.broadcast("fills", {"type": "fill", "data": result.fill.model_dump(mode="json")})
+        await hub.broadcast("portfolio", {"type": "portfolio", "data": portfolio.snapshot()})
     else:
         metrics.increment("simulation_rejected")
     return result
@@ -157,9 +160,11 @@ def get_portfolio() -> dict[str, object]:
 
 
 @app.post("/v1/portfolio/mark")
-def mark_portfolio(request: PortfolioMarkRequest) -> dict[str, object]:
+async def mark_portfolio(request: PortfolioMarkRequest) -> dict[str, object]:
     marks = {mark.asset: mark.price for mark in request.marks}
-    return portfolio.snapshot(marks)
+    snapshot = portfolio.snapshot(marks)
+    await hub.broadcast("portfolio", {"type": "portfolio", "data": snapshot})
+    return snapshot
 
 
 @app.get("/v1/fills")
@@ -173,42 +178,83 @@ async def get_fills(limit: int = Query(default=100, ge=1, le=1_000)) -> dict[str
 
 
 @app.post("/simulation/start", response_model=RuntimeState)
-def simulation_start() -> RuntimeState:
+async def simulation_start() -> RuntimeState:
     if runtime.kill_switch != KillSwitchState.ARMED:
         runtime.running = False
         return runtime
     runtime.mode = SystemMode.SIMULATION
     runtime.running = True
+    await hub.broadcast("analytics", {"type": "runtime", "data": runtime.model_dump(mode="json")})
     return runtime
 
 
 @app.post("/simulation/stop", response_model=RuntimeState)
-def simulation_stop() -> RuntimeState:
+async def simulation_stop() -> RuntimeState:
     runtime.running = False
+    await hub.broadcast("analytics", {"type": "runtime", "data": runtime.model_dump(mode="json")})
     return runtime
 
 
 @app.post("/simulation/reset", response_model=RuntimeState)
-def simulation_reset() -> RuntimeState:
+async def simulation_reset() -> RuntimeState:
     global runtime
     runtime = RuntimeState()
     portfolio.reset()
     metrics.reset()
+    await hub.broadcast("portfolio", {"type": "portfolio", "data": portfolio.snapshot()})
+    await hub.broadcast("analytics", {"type": "runtime", "data": runtime.model_dump(mode="json")})
     return runtime
 
 
 @app.post("/killswitch/trigger", response_model=RuntimeState)
-def killswitch_trigger() -> RuntimeState:
+async def killswitch_trigger() -> RuntimeState:
     runtime.kill_switch = KillSwitchState.TRIGGERED
     runtime.running = False
     metrics.increment("kill_switch_triggers")
+    await hub.broadcast("risk", {"type": "risk", "data": risk()})
     return runtime
 
 
 @app.post("/killswitch/reset", response_model=RuntimeState)
-def killswitch_reset() -> RuntimeState:
+async def killswitch_reset() -> RuntimeState:
     if runtime.kill_switch == KillSwitchState.LOCKED:
         runtime.kill_switch = KillSwitchState.RESET_PENDING
     else:
         runtime.kill_switch = KillSwitchState.ARMED
+    await hub.broadcast("risk", {"type": "risk", "data": risk()})
     return runtime
+
+
+@app.websocket("/ws/market-data")
+async def ws_market_data(websocket: WebSocket) -> None:
+    await hub.serve("market-data", websocket)
+
+
+@app.websocket("/ws/orderbook")
+async def ws_orderbook(websocket: WebSocket) -> None:
+    await hub.serve("orderbook", websocket)
+
+
+@app.websocket("/ws/signals")
+async def ws_signals(websocket: WebSocket) -> None:
+    await hub.serve("signals", websocket)
+
+
+@app.websocket("/ws/risk")
+async def ws_risk(websocket: WebSocket) -> None:
+    await hub.serve("risk", websocket)
+
+
+@app.websocket("/ws/portfolio")
+async def ws_portfolio(websocket: WebSocket) -> None:
+    await hub.serve("portfolio", websocket)
+
+
+@app.websocket("/ws/fills")
+async def ws_fills(websocket: WebSocket) -> None:
+    await hub.serve("fills", websocket)
+
+
+@app.websocket("/ws/analytics")
+async def ws_analytics(websocket: WebSocket) -> None:
+    await hub.serve("analytics", websocket)
