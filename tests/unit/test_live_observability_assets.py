@@ -7,6 +7,7 @@ _ALERTS = Path("infra/monitoring/live-alerts.yml")
 _DASHBOARD = Path("infra/monitoring/grafana/dashboards/live-monitoring.json")
 _LIVE_METRICS = Path("apps/api/app/live_metrics.py")
 _DOCKER_COMPOSE = Path("docker-compose.yml")
+_LIVE_COMPOSE = Path("docker-compose.live.yml")
 
 _METRIC_PATTERN = re.compile(r"\bproto_live_[a-z0-9_]+\b")
 
@@ -57,3 +58,18 @@ def test_compose_mounts_alerts_dashboard_and_persistent_prometheus_storage() -> 
     assert "proto_prometheus:/prometheus" in compose
     assert "./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro" in compose
     assert "./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro" in compose
+
+
+def test_live_only_staging_compose_has_no_legacy_web_and_binds_admin_ports_locally() -> None:
+    compose = _LIVE_COMPOSE.read_text(encoding="utf-8")
+
+    assert "apps.api.app.live_app:app" not in compose  # image entrypoint owns the app target
+    assert "\n  web:\n" not in compose
+    assert '"127.0.0.1:8000:8000"' in compose
+    assert '"127.0.0.1:9090:9090"' in compose
+    assert '"127.0.0.1:3000:3000"' in compose
+    assert "read_only: true" in compose
+    assert "no-new-privileges:true" in compose
+    assert "cap_drop:" in compose
+    assert "PROTO_DB_PASSWORD:?set PROTO_DB_PASSWORD" in compose
+    assert "GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD" in compose
