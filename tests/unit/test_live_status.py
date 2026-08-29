@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from services.market_data.core import MarketTick
 from services.market_data.live_status import (
     evaluate_live_coverage,
@@ -20,6 +22,19 @@ def _tick(symbol: str, observed_at: datetime) -> MarketTick:
         ask_size=1.0,
         sequence=1,
     )
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, float("inf"), float("nan")])
+def test_live_coverage_rejects_invalid_freshness_threshold(value: float) -> None:
+    with pytest.raises(ValueError, match="finite and positive"):
+        evaluate_live_coverage(
+            expected_symbols=("BTC",),
+            latest={},
+            symbol_connection_generation={},
+            current_generation=0,
+            connected=False,
+            stale_after_seconds=value,
+        )
 
 
 def test_live_coverage_reports_missing_and_stale_symbols() -> None:
