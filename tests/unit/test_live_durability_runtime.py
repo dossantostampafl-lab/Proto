@@ -7,7 +7,7 @@ import pytest
 from apps.api.app.live_durability import LiveDurabilityRuntime
 from apps.api.app.live_monitor import LiveCryptoMonitor
 from apps.api.app.settings import Settings
-from services.market_data import MarketTick, PublicFeedHealth
+from services.market_data import LiveTickJournalError, MarketTick, PublicFeedHealth
 
 
 class StaticAdapter:
@@ -91,3 +91,27 @@ async def test_live_durability_runtime_persists_and_recovers_history(tmp_path: P
         assert restarted_monitor.snapshot("BTC") is None
     finally:
         await restarted_runtime.stop(monitor=restarted_monitor)
+
+
+@pytest.mark.asyncio
+async def test_migration_managed_runtime_fails_closed_when_schema_is_missing(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "missing-live-schema.db"
+    settings = Settings(
+        persistence_enabled=True,
+        live_database_auto_create=False,
+        database_url=f"sqlite+aiosqlite:///{database_path}",
+        live_history_retention_seconds=3600,
+    )
+    monitor = LiveCryptoMonitor(StaticAdapter())
+    runtime = LiveDurabilityRuntime()
+
+    with pytest.raises(LiveTickJournalError):
+        await runtime.start(monitor=monitor, settings=settings)
+
+    assert runtime.running is False
+    persistence = monitor.persistence_status()
+    assert persistence["configured"] is False
+    assert persistence["required"] is True
+    assert persistence["healthy"] is False
