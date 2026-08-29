@@ -220,6 +220,10 @@ class LiveCryptoMonitor:
         }
 
     async def ingest_tick(self, tick: MarketTick) -> bool:
+        if tick.symbol not in self._adapter.symbols:
+            metrics.increment("live_market_unexpected_symbol")
+            return False
+
         report = self._quality.evaluate(tick)
         if not report.valid:
             metrics.increment("live_market_frames_rejected")
