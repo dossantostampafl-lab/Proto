@@ -26,7 +26,8 @@ from .models import (
 from .observability import LatencyTimer
 from .persistence import AsyncSqlFillJournal, build_engine, init_database
 from .portfolio import PaperPortfolio
-from .research import metrics, router as research_router
+from .research import metrics
+from .research import router as research_router
 from .settings import settings
 from .simulation import PaperSimulator
 
