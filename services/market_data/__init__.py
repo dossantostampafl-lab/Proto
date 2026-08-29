@@ -1,10 +1,11 @@
-"""Normalized market-data contracts and adapters for research/simulation."""
+"""Normalized market-data contracts and adapters for research/simulation/read-only data."""
 
 from .adapters import (
     CSVReplayAdapter,
     HistoricalReplayAdapter,
     MarketDataAdapter,
     MockPredictionMarketAdapter,
+    PublicReadOnlyHTTPAdapter,
     SyntheticAdapter,
 )
 from .core import (
@@ -26,6 +27,7 @@ __all__ = [
     "MarketTick",
     "MockPredictionMarketAdapter",
     "OrderBookMetrics",
+    "PublicReadOnlyHTTPAdapter",
     "SyntheticAdapter",
     "compute_orderbook_metrics",
 ]
