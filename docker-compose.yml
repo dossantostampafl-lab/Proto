@@ -6,7 +6,8 @@ services:
     environment:
       APP_ENV: development
       APP_MODE: SIMULATION
-      DATABASE_URL: postgresql://proto:proto@postgres:5432/proto
+      DATABASE_URL: postgresql+psycopg://proto:proto@postgres:5432/proto
+      PERSISTENCE_ENABLED: "true"
     ports:
       - "8000:8000"
     depends_on:
