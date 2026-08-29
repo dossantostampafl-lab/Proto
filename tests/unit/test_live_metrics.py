@@ -9,6 +9,10 @@ def _status() -> dict[str, object]:
         "all_symbols_current_connection": True,
         "last_receipt_age_seconds": 0.25,
         "last_sequence_by_symbol": {"BTC": 42},
+        "sequence_rejections_current_connection": 3,
+        "sequence_rejections_by_symbol": {
+            "BTC": {"duplicate": 2, "regression": 1, "total": 3}
+        },
         "expected_symbols": ["BTC"],
         "feed_health": {
             "connected": True,
@@ -43,8 +47,17 @@ def test_live_prometheus_renders_read_only_invariants_and_finite_values() -> Non
     assert "proto_live_real_money_execution 0" in body
     assert "proto_live_connection_generation 3" in body
     assert "proto_live_all_symbols_receipts_fresh 1" in body
+    assert "proto_live_sequence_rejections_current_connection 3" in body
     assert 'proto_live_symbol_receipt_fresh{symbol="BTC"} 1' in body
     assert 'proto_live_symbol_last_sequence{symbol="BTC"} 42' in body
+    assert (
+        'proto_live_symbol_sequence_duplicate_rejections_current_connection{symbol="BTC"} 2'
+        in body
+    )
+    assert (
+        'proto_live_symbol_sequence_regression_rejections_current_connection{symbol="BTC"} 1'
+        in body
+    )
     assert 'proto_live_symbol_receipt_age_seconds{symbol="BTC"} 0.2' in body
 
 
@@ -68,6 +81,7 @@ def test_live_prometheus_marks_stale_receipts_without_financial_capabilities() -
 def test_live_prometheus_omits_non_finite_numeric_telemetry() -> None:
     status = _status()
     status["last_receipt_age_seconds"] = float("nan")
+    status["sequence_rejections_current_connection"] = float("nan")
     health = status["feed_health"]
     assert isinstance(health, dict)
     health["last_message_age_seconds"] = float("inf")
@@ -82,5 +96,6 @@ def test_live_prometheus_omits_non_finite_numeric_telemetry() -> None:
     assert "proto_live_last_receipt_age_seconds" not in body
     assert "proto_live_last_message_age_seconds" not in body
     assert "proto_live_symbol_source_age_seconds" not in body
+    assert "proto_live_sequence_rejections_current_connection nan" not in body.lower()
     assert " nan" not in body.lower()
     assert " inf" not in body.lower()
