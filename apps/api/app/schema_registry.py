@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, MetaData, String, Table, Column
+from sqlalchemy import JSON, Column, DateTime, MetaData, String, Table
 
 canonical_metadata = MetaData()
 
