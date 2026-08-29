@@ -65,6 +65,8 @@ Accepted live observations keep the external source clock separate from the appl
 - `source_to_server_delta_ms` is the signed difference between the two clocks in milliseconds;
 - `server_observed_at` marks when a source-health snapshot was assembled by Proto.
 
+The live status also exposes `receipt_age_seconds` per symbol and `last_receipt_age_seconds` globally. This allows operations to distinguish an old source timestamp from a feed that has stopped reaching Proto.
+
 This separation prevents network delay and clock skew from being hidden inside a single timestamp. The source timestamp remains part of the canonical data-quality/freshness checks, while the receive timestamp is operational telemetry. Both are cleared with accepted snapshots when the connection generation changes.
 
 ## Connection health and reconnect isolation
@@ -88,7 +90,7 @@ The public WebSocket receive loop is timeout-bounded. A socket that remains open
 
 Malformed public frames use a small consecutive-error budget. Isolated parser failures are counted without immediately tearing down a healthy socket, but repeated failures cross the budget and force a reconnect. Heartbeat/control frames do not clear parser degradation; only valid ticker data does.
 
-Readiness requires BTC, ETH and SOL to have fresh observations from the current connection generation. The source heartbeat/message age is checked independently, so a connected socket without recent messages remains not ready.
+Readiness requires BTC, ETH and SOL to have fresh observations from the current connection generation. The source heartbeat/message age is checked independently, so a connected socket without recent messages remains not ready. A `503` readiness response also includes `Retry-After: 1` for health-check clients and remains non-cacheable.
 
 `GET /live/ready` is fail-closed and reports deterministic `readiness_failures`, including conditions such as:
 
@@ -105,14 +107,17 @@ Readiness requires BTC, ETH and SOL to have fresh observations from the current 
 
 The HTTP monitoring surface is intentionally read-only. Starting and stopping the monitor is an internal lifecycle concern controlled by `LIVE_MONITORING_AUTOSTART`, not a public HTTP operation.
 
-- `GET /live/status` - live monitor state, freshness, per-symbol connection generation and public-feed health;
+- `GET /live/status` - live monitor state, source and receive freshness, per-symbol connection generation and public-feed health;
 - `GET /live/source-health` - transport counters, reconnect generation, heartbeat/message age and current public-feed state;
 - `GET /live/ready` - fail-closed readiness check with explicit failure reasons;
 - `GET /live/market-data` - accepted public snapshots;
 - `GET /live/market-data/{symbol}` - one accepted public snapshot;
-- `GET /live/analytics/{symbol}` - bounded descriptive analytics.
+- `GET /live/analytics/{symbol}` - bounded descriptive analytics;
+- `GET /live/metrics/prometheus` - read-only Prometheus gauges/counters for live transport, freshness and BTC/ETH/SOL receipt ages.
 
-All `/live` monitoring responses, including missing-symbol responses, use `Cache-Control: no-store, max-age=0`. This prevents browsers, reverse proxies and intermediate caches from serving stale monitoring state as though it were current.
+The live Prometheus endpoint publishes `proto_live_financial_connectivity 0` and `proto_live_real_money_execution 0` as explicit invariant gauges. `infra/monitoring/prometheus.yml` scrapes it as a separate `proto-live-read-only` job so the existing API metrics job remains unchanged.
+
+All `/live` monitoring responses, including missing-symbol responses and the Prometheus surface, use `Cache-Control: no-store, max-age=0`. This prevents browsers, reverse proxies and intermediate caches from serving stale monitoring state as though it were current.
 
 WebSocket channels `market-data` and `orderbook` carry only normalized public monitoring payloads when this live monitor is the producer. Fanout to the two channels is concurrent, failed peers are pruned, send operations are timeout-bounded, origins are checked, message sizes are bounded and per-channel connection capacity is enforced with an async lock to prevent concurrent admission races.
 
