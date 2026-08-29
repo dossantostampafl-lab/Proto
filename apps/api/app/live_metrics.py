@@ -84,6 +84,10 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
 
     symbol_health = status.get("symbol_health")
     expected_symbols = status.get("expected_symbols")
+    last_sequences = status.get("last_sequence_by_symbol")
+    sequence_map: Mapping[str, object] = (
+        last_sequences if isinstance(last_sequences, Mapping) else {}
+    )
     if isinstance(symbol_health, Mapping) and isinstance(expected_symbols, list):
         for symbol in expected_symbols:
             if not isinstance(symbol, str):
@@ -102,6 +106,12 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
             lines.append(
                 "proto_live_symbol_current_connection"
                 f"{labels} {_metric_bool(item.get('current_connection'))}"
+            )
+            _append_optional_gauge(
+                lines,
+                metric="proto_live_symbol_last_sequence",
+                value=sequence_map.get(symbol),
+                labels=labels,
             )
             _append_optional_gauge(
                 lines,
