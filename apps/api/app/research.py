@@ -12,6 +12,7 @@ from .calibration import (
     calibration_error,
     log_loss,
 )
+from .lifecycle import router as lifecycle_router
 from .models import MarketSnapshot
 from .observability import RuntimeMetrics
 from .replay import HistoricalReplay, ReplayFrame
@@ -19,6 +20,7 @@ from .surface import router as surface_router
 
 router = APIRouter(tags=["research"])
 router.include_router(surface_router)
+router.include_router(lifecycle_router)
 metrics = RuntimeMetrics()
 
 
