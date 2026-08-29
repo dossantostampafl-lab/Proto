@@ -19,10 +19,12 @@ jobs:
         run: python -m pip install --upgrade graphifyy
       - name: Build local code-only knowledge graph
         run: graphify . --code-only --no-viz
+      - name: Build Graphify community report
+        run: graphify cluster-only .
       - name: Verify Graphify outputs
         run: |
-          test -f graphify-out/graph.json
-          test -f graphify-out/GRAPH_REPORT.md
+          test -s graphify-out/graph.json
+          test -s graphify-out/GRAPH_REPORT.md
       - name: Upload Graphify knowledge graph
         uses: actions/upload-artifact@v4
         with:
@@ -30,5 +32,6 @@ jobs:
           path: |
             graphify-out/graph.json
             graphify-out/GRAPH_REPORT.md
+            graphify-out/.graphify_analysis.json
           if-no-files-found: error
           retention-days: 14
