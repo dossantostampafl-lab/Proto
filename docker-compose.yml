@@ -4,17 +4,27 @@ services:
       context: .
       dockerfile: Dockerfile.api
     environment:
-      APP_ENV: development
-      SYSTEM_MODE: SIMULATION
+      APP_ENV: live-monitoring
+      SYSTEM_MODE: LIVE_MONITORING
+      LIVE_MONITORING_AUTOSTART: "true"
       DATABASE_URL: postgresql+asyncpg://prediction:prediction@postgres:5432/prediction_quant
       REDIS_URL: redis://redis:6379/0
       PERSISTENCE_ENABLED: "true"
-      MINIMUM_NET_EDGE: "0.01"
-      MINIMUM_CONFIDENCE: "0.55"
-      MAX_NOTIONAL: "100000"
-      MAX_DAILY_DRAWDOWN: "5000"
+      HTTP_RATE_LIMIT_PER_MINUTE: "600"
     ports:
       - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/live/ready', timeout=2).read()
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
