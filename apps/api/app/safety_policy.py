@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
-
 
 _ALLOWED_MODES = frozenset({"SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY"})
 _FORBIDDEN_MODE_TOKENS = frozenset({"LIVE", "REAL_MONEY", "PRODUCTION_TRADING"})
@@ -21,9 +18,7 @@ class SafetyPolicyState:
 def validate_sandbox_mode(system_mode: str) -> SafetyPolicyState:
     normalized = system_mode.strip().upper()
     if normalized in _FORBIDDEN_MODE_TOKENS or normalized not in _ALLOWED_MODES:
-        raise SafetyPolicyError(
-            "runtime mode is outside the synthetic-only safety boundary"
-        )
+        raise SafetyPolicyError("runtime mode is outside the synthetic-only safety boundary")
     return SafetyPolicyState(
         synthetic_only=True,
         allowed_modes=tuple(sorted(_ALLOWED_MODES)),
