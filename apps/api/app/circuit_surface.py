@@ -4,9 +4,12 @@ from fastapi import APIRouter
 
 from services.safety import evaluate_circuit_breakers
 
+from .app_state import persistence_engine
 from .event_state import event_runtime
 from .live_monitor import live_monitor
 from .models import SystemMode
+from .persistence import database_ready
+from .reconciliation_service import reconciliation_status
 from .settings import settings
 
 router = APIRouter(prefix="/safety", tags=["safety"])
@@ -14,17 +17,15 @@ router = APIRouter(prefix="/safety", tags=["safety"])
 
 @router.get("/circuit-breakers")
 async def circuit_breaker_status() -> dict[str, object]:
-    from . import main as api_main
-
     live_status = live_monitor.status()
     event_status = event_runtime.snapshot()
 
-    if settings.persistence_enabled and api_main.persistence_engine is not None:
-        database_available = await api_main.database_ready(api_main.persistence_engine)
+    if settings.persistence_enabled and persistence_engine is not None:
+        database_available = await database_ready(persistence_engine)
     else:
         database_available = True
 
-    reconciliation = await api_main.reconciliation_status()
+    reconciliation = await reconciliation_status()
     live_mode = settings.system_mode == SystemMode.LIVE_MONITORING.value
     data_fresh = bool(live_status["receiving_data"]) if live_mode else True
 
