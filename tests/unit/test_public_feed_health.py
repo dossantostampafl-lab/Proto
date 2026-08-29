@@ -1,3 +1,5 @@
+import pytest
+
 from services.market_data.live import CoinbasePublicMarketDataAdapter
 
 
@@ -18,24 +20,44 @@ def test_public_feed_health_starts_disconnected_without_credentials() -> None:
     assert health.last_tick_at is None
     assert health.last_error is None
     assert adapter.products == ("BTC-USD", "ETH-USD", "SOL-USD")
+    assert adapter.endpoint == "wss://advanced-trade-ws.coinbase.com"
 
 
 def test_public_feed_rejects_unsupported_products() -> None:
-    try:
+    with pytest.raises(ValueError, match="unsupported public products"):
         CoinbasePublicMarketDataAdapter(products=("DOGE-USD",))
-    except ValueError as error:
-        assert "unsupported public products" in str(error)
-    else:
-        raise AssertionError("unsupported product must fail closed")
 
 
 def test_public_feed_rejects_invalid_reconnect_intervals() -> None:
-    try:
+    with pytest.raises(ValueError, match="invalid reconnect interval"):
         CoinbasePublicMarketDataAdapter(
             reconnect_min_seconds=5.0,
             reconnect_max_seconds=1.0,
         )
-    except ValueError as error:
-        assert str(error) == "invalid reconnect interval"
-    else:
-        raise AssertionError("invalid reconnect interval must fail closed")
+
+
+@pytest.mark.parametrize(
+    "endpoint,match",
+    [
+        ("ws://advanced-trade-ws.coinbase.com", "must use wss"),
+        ("wss://example.invalid", "host is not allowlisted"),
+        (
+            "wss://user:secret@advanced-trade-ws.coinbase.com",
+            "must not contain credentials",
+        ),
+        (
+            "wss://advanced-trade-ws.coinbase.com:8443",
+            "standard TLS port",
+        ),
+        (
+            "wss://advanced-trade-ws.coinbase.com/feed?token=ignored",
+            "must not contain path parameters or query data",
+        ),
+    ],
+)
+def test_public_feed_rejects_noncanonical_websocket_endpoints(
+    endpoint: str,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        CoinbasePublicMarketDataAdapter(endpoint=endpoint)
