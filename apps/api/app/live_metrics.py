@@ -57,6 +57,11 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
         "proto_live_all_symbols_current_connection "
         f"{_metric_bool(status.get('all_symbols_current_connection'))}",
         (
+            "# HELP proto_live_sequence_rejections_current_connection "
+            "Rejected duplicate or regressing sequences in the current connection generation."
+        ),
+        "# TYPE proto_live_sequence_rejections_current_connection gauge",
+        (
             "# HELP proto_live_financial_connectivity "
             "Financial account connectivity capability; invariant zero."
         ),
@@ -66,6 +71,11 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
         "# TYPE proto_live_real_money_execution gauge",
         "proto_live_real_money_execution 0",
     ]
+    _append_optional_gauge(
+        lines,
+        metric="proto_live_sequence_rejections_current_connection",
+        value=status.get("sequence_rejections_current_connection"),
+    )
     for metric, key in (
         ("proto_live_connection_generation", "connection_generation"),
         ("proto_live_connection_attempts_total", "connection_attempts"),
@@ -87,6 +97,10 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
     last_sequences = status.get("last_sequence_by_symbol")
     sequence_map: Mapping[str, object] = (
         last_sequences if isinstance(last_sequences, Mapping) else {}
+    )
+    sequence_rejections = status.get("sequence_rejections_by_symbol")
+    rejection_map: Mapping[str, object] = (
+        sequence_rejections if isinstance(sequence_rejections, Mapping) else {}
     )
     if isinstance(symbol_health, Mapping) and isinstance(expected_symbols, list):
         for symbol in expected_symbols:
@@ -113,6 +127,20 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
                 value=sequence_map.get(symbol),
                 labels=labels,
             )
+            symbol_rejections = rejection_map.get(symbol)
+            if isinstance(symbol_rejections, Mapping):
+                _append_optional_gauge(
+                    lines,
+                    metric="proto_live_symbol_sequence_duplicate_rejections_current_connection",
+                    value=symbol_rejections.get("duplicate"),
+                    labels=labels,
+                )
+                _append_optional_gauge(
+                    lines,
+                    metric="proto_live_symbol_sequence_regression_rejections_current_connection",
+                    value=symbol_rejections.get("regression"),
+                    labels=labels,
+                )
             _append_optional_gauge(
                 lines,
                 metric="proto_live_symbol_source_age_seconds",
