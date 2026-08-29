@@ -1,11 +1,18 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from services.market_data.adapters import (
     CSVReplayAdapter,
     HistoricalReplayAdapter,
     SyntheticAdapter,
 )
 from services.market_data.core import MarketTick
+from services.market_data.live import (
+    CoinbasePublicMarketDataAdapter,
+    PublicCryptoFeedError,
+    parse_public_ticker_message,
+)
 
 
 def test_synthetic_adapter_is_deterministic() -> None:
@@ -64,3 +71,61 @@ def test_historical_adapter_orders_timestamp_then_sequence() -> None:
     ticks = list(HistoricalReplayAdapter([late, early]).stream())
 
     assert [tick.sequence for tick in ticks] == [1, 2]
+
+
+def test_public_ticker_parser_normalizes_supported_crypto() -> None:
+    payload = {
+        "channel": "ticker",
+        "timestamp": "2026-08-29T20:15:00Z",
+        "sequence_num": 42,
+        "events": [
+            {
+                "tickers": [
+                    {
+                        "product_id": "BTC-USD",
+                        "price": "61000.25",
+                        "best_bid": "61000.00",
+                        "best_ask": "61000.50",
+                        "best_bid_quantity": "1.2",
+                        "best_ask_quantity": "0.8",
+                        "volume_24_h": "123.4",
+                    }
+                ]
+            }
+        ],
+    }
+
+    ticks = parse_public_ticker_message(payload)
+
+    assert len(ticks) == 1
+    tick = ticks[0]
+    assert tick.venue == "coinbase-public"
+    assert tick.symbol == "BTC"
+    assert tick.sequence == 42
+    assert tick.mid == pytest.approx(61000.25)
+    assert tick.bid_size == pytest.approx(1.2)
+    assert tick.ask_size == pytest.approx(0.8)
+
+
+def test_public_ticker_parser_ignores_non_ticker_channels() -> None:
+    assert parse_public_ticker_message({"channel": "heartbeats"}) == []
+
+
+def test_public_ticker_parser_rejects_malformed_frames() -> None:
+    with pytest.raises(PublicCryptoFeedError):
+        parse_public_ticker_message(
+            {
+                "channel": "ticker",
+                "timestamp": "2026-08-29T20:15:00Z",
+                "sequence_num": 1,
+                "events": "not-an-array",
+            }
+        )
+
+
+def test_public_adapter_accepts_only_read_only_crypto_products() -> None:
+    adapter = CoinbasePublicMarketDataAdapter(products=("BTC-USD", "ETH-USD", "SOL-USD"))
+    assert adapter.products == ("BTC-USD", "ETH-USD", "SOL-USD")
+
+    with pytest.raises(ValueError):
+        CoinbasePublicMarketDataAdapter(products=("DOGE-USD",))
