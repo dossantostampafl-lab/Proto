@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .safety_policy import validate_sandbox_mode
 
 
 class Settings(BaseSettings):
@@ -15,6 +18,12 @@ class Settings(BaseSettings):
     max_position: float = 10.0
     max_notional: float = 100_000.0
     max_daily_drawdown: float = 5_000.0
+
+    @field_validator("system_mode")
+    @classmethod
+    def enforce_sandbox_mode(cls, value: str) -> str:
+        validate_sandbox_mode(value)
+        return value.strip().upper()
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
