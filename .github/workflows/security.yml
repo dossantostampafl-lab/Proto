@@ -33,8 +33,17 @@ jobs:
             echo 'rkyv 0.7 is active; remove or upgrade it before merging.' >&2
             exit 1
           fi
+      - name: Cache pinned cargo-audit
+        id: cargo-audit-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
       - name: Install pinned cargo-audit
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
         run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Verify cargo-audit version
+        run: cargo audit --version
       - name: Audit Rust lockfile
         run: |
           # rust_decimal keeps rkyv 0.7 as an optional compatibility dependency in
