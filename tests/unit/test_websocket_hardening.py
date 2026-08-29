@@ -28,6 +28,12 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
+class SlowAcceptWebSocket(FakeWebSocket):
+    async def accept(self) -> None:
+        await asyncio.sleep(0.01)
+        await super().accept()
+
+
 class CoordinatedWebSocket(FakeWebSocket):
     def __init__(self, ready: asyncio.Event, starts: list[int]) -> None:
         super().__init__()
@@ -40,6 +46,15 @@ class CoordinatedWebSocket(FakeWebSocket):
             self._ready.set()
         await self._ready.wait()
         await super().send_json(payload)
+
+
+def test_hub_rejects_invalid_resource_limits() -> None:
+    with pytest.raises(ValueError, match="max_connections_per_channel"):
+        WebSocketHub(max_connections_per_channel=0)
+    with pytest.raises(ValueError, match="max_message_chars"):
+        WebSocketHub(max_message_chars=0)
+    with pytest.raises(ValueError, match="send_timeout_seconds"):
+        WebSocketHub(send_timeout_seconds=0)
 
 
 @pytest.mark.asyncio
@@ -56,6 +71,23 @@ async def test_hub_rejects_cross_origin_and_channel_overflow() -> None:
     assert allowed.accepted is True
     assert overflow.closed == (1013, "channel capacity reached")
     assert cross_origin.closed == (1008, "origin not allowed")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_connects_cannot_exceed_channel_capacity() -> None:
+    hub = WebSocketHub(max_connections_per_channel=1)
+    first = SlowAcceptWebSocket()
+    second = SlowAcceptWebSocket()
+
+    results = await asyncio.gather(
+        hub.connect("market-data", first),  # type: ignore[arg-type]
+        hub.connect("market-data", second),  # type: ignore[arg-type]
+    )
+
+    assert sorted(results) == [False, True]
+    assert hub.connection_count("market-data") == 1
+    assert sum(socket.accepted for socket in (first, second)) == 1
+    assert sum(socket.closed == (1013, "channel capacity reached") for socket in (first, second)) == 1
 
 
 @pytest.mark.asyncio
@@ -87,4 +119,3 @@ async def test_broadcast_fanout_starts_peers_concurrently() -> None:
     assert len(starts) == 2
     assert first.sent == [{"type": "frame"}]
     assert second.sent == [{"type": "frame"}]
-
