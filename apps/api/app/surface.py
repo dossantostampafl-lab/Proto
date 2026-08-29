@@ -169,6 +169,48 @@ def data_quality(symbol: str) -> dict[str, object]:
     }
 
 
+@router.get("/portfolio")
+def canonical_portfolio() -> dict[str, object]:
+    from . import main as api_main
+
+    snapshot = api_main.portfolio.snapshot()
+    return {
+        **snapshot,
+        "source": "SIMULATION_PORTFOLIO",
+        "real_money_execution": False,
+    }
+
+
+@router.get("/positions")
+def canonical_positions() -> dict[str, object]:
+    from . import main as api_main
+
+    snapshot = api_main.portfolio.snapshot()
+    return {
+        "mode": snapshot["mode"],
+        "source": "SIMULATION_PORTFOLIO",
+        "real_money_execution": False,
+        "count": len(snapshot["positions"]),
+        "positions": snapshot["positions"],
+    }
+
+
+@router.get("/pnl")
+def canonical_pnl() -> dict[str, object]:
+    from . import main as api_main
+
+    snapshot = api_main.portfolio.snapshot()
+    return {
+        "mode": snapshot["mode"],
+        "source": "SIMULATION_PORTFOLIO",
+        "real_money_execution": False,
+        "realized_pnl": snapshot["total_realized_pnl"],
+        "unrealized_pnl": snapshot["total_unrealized_pnl"],
+        "fees": snapshot["total_fees"],
+        "pnl_after_fees": snapshot["total_pnl_after_fees"],
+    }
+
+
 @router.get("/models")
 def models() -> list[dict[str, object]]:
     return [
