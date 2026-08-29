@@ -17,7 +17,7 @@ from .calibration import (
 from .circuit_surface import router as circuit_router
 from .event_surface import router as event_router
 from .lifecycle import router as lifecycle_router
-from .live_monitor import router as live_router
+from .live_routes import router as live_router
 from .metrics_state import metrics
 from .models import MarketSnapshot
 from .replay import HistoricalReplay, ReplayFrame
