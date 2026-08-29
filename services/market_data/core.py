@@ -70,12 +70,12 @@ class DataQualityMonitor:
         max_relative_price_jump: float = 0.20,
         max_future_skew_seconds: float = 1.0,
     ) -> None:
-        if stale_after_seconds <= 0:
-            raise ValueError("stale_after_seconds must be positive")
-        if max_relative_price_jump < 0:
-            raise ValueError("max_relative_price_jump must be non-negative")
-        if max_future_skew_seconds < 0:
-            raise ValueError("max_future_skew_seconds must be non-negative")
+        if not isfinite(stale_after_seconds) or stale_after_seconds <= 0:
+            raise ValueError("stale_after_seconds must be positive and finite")
+        if not isfinite(max_relative_price_jump) or max_relative_price_jump < 0:
+            raise ValueError("max_relative_price_jump must be non-negative and finite")
+        if not isfinite(max_future_skew_seconds) or max_future_skew_seconds < 0:
+            raise ValueError("max_future_skew_seconds must be non-negative and finite")
         self.stale_after_seconds = stale_after_seconds
         self.max_relative_price_jump = max_relative_price_jump
         self.max_future_skew_seconds = max_future_skew_seconds
