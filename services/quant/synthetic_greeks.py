@@ -51,9 +51,12 @@ def synthetic_greeks(inputs: BinaryContractInputs) -> SyntheticGreeks:
     inputs.validate()
     base = threshold_probability(inputs)
 
-    spot_step = max(inputs.spot * 1e-4, 1e-8)
+    spot_step = min(max(inputs.spot * 1e-4, 1e-12), inputs.spot * 0.25)
     vol_step = max(inputs.volatility * 1e-4, 1e-6)
-    time_step = min(max(inputs.time_to_expiry_years * 1e-4, 1e-7), inputs.time_to_expiry_years * 0.25)
+    time_step = min(
+        max(inputs.time_to_expiry_years * 1e-4, 1e-7),
+        inputs.time_to_expiry_years * 0.25,
+    )
 
     up_spot = threshold_probability(
         BinaryContractInputs(
@@ -102,7 +105,10 @@ def synthetic_greeks(inputs: BinaryContractInputs) -> SyntheticGreeks:
             time_to_expiry_years=inputs.time_to_expiry_years + time_step,
         )
     )
-    earlier_time = max(inputs.time_to_expiry_years - time_step, inputs.time_to_expiry_years * 0.5)
+    earlier_time = max(
+        inputs.time_to_expiry_years - time_step,
+        inputs.time_to_expiry_years * 0.5,
+    )
     earlier = threshold_probability(
         BinaryContractInputs(
             spot=inputs.spot,
