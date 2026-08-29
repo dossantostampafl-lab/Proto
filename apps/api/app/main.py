@@ -23,8 +23,10 @@ from .models import (
     SimulationResult,
     SystemMode,
 )
+from .observability import LatencyTimer
 from .persistence import AsyncSqlFillJournal, build_engine, init_database
 from .portfolio import PaperPortfolio
+from .research import metrics, router as research_router
 from .settings import settings
 from .simulation import PaperSimulator
 
@@ -55,6 +57,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+app.include_router(research_router)
 
 runtime = RuntimeState()
 simulator = PaperSimulator()
@@ -87,6 +90,7 @@ def markets() -> list[dict[str, str]]:
 
 @app.post("/probability/estimate", response_model=ProbabilityEstimate)
 def probability(snapshot: MarketSnapshot) -> ProbabilityEstimate:
+    metrics.increment("probability_requests")
     return estimate_probability(
         market_probability=snapshot.market_probability,
         volatility=snapshot.volatility,
@@ -96,6 +100,7 @@ def probability(snapshot: MarketSnapshot) -> ProbabilityEstimate:
 
 @app.post("/edge/evaluate", response_model=EdgeBreakdown)
 def edge(snapshot: MarketSnapshot) -> EdgeBreakdown:
+    metrics.increment("edge_requests")
     estimate = probability(snapshot)
     spread_cost = max(snapshot.ask - snapshot.bid, 0.0) / max(snapshot.ask + snapshot.bid, 1e-9)
     return compute_edge(
@@ -127,14 +132,21 @@ def risk() -> dict[str, object]:
 
 @app.post("/v1/simulate", response_model=SimulationResult)
 async def simulate(request: SimulationRequest) -> SimulationResult:
+    metrics.increment("simulation_requests")
     if not runtime.running or runtime.kill_switch != KillSwitchState.ARMED:
+        metrics.increment("simulation_rejected")
         return SimulationResult(accepted=False, reason="simulation halted")
 
-    result = simulator.simulate(request)
+    with LatencyTimer(metrics):
+        result = simulator.simulate(request)
+
     if result.accepted and result.fill is not None:
+        metrics.increment("simulation_accepted")
         portfolio.apply_fill(request.order, result.fill)
         if persistent_journal is not None:
             await persistent_journal.append(request.order, result.fill)
+    else:
+        metrics.increment("simulation_rejected")
     return result
 
 
@@ -180,6 +192,7 @@ def simulation_reset() -> RuntimeState:
     global runtime
     runtime = RuntimeState()
     portfolio.reset()
+    metrics.reset()
     return runtime
 
 
@@ -187,6 +200,7 @@ def simulation_reset() -> RuntimeState:
 def killswitch_trigger() -> RuntimeState:
     runtime.kill_switch = KillSwitchState.TRIGGERED
     runtime.running = False
+    metrics.increment("kill_switch_triggers")
     return runtime
 
 
