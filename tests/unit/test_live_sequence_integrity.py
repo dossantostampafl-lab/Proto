@@ -55,3 +55,21 @@ async def test_live_monitor_rejects_duplicate_and_regressing_sequences() -> None
     assert analytics is not None
     assert analytics["sample_count"] == 2
     assert status["last_sequence_by_symbol"] == {"BTC": 11}
+    assert status["sequence_rejections_current_connection"] == 2
+    rejection_map = status["sequence_rejections_by_symbol"]
+    assert isinstance(rejection_map, dict)
+    assert rejection_map["BTC"] == {
+        "duplicate": 1,
+        "regression": 1,
+        "total": 2,
+    }
+    assert rejection_map["ETH"] == {
+        "duplicate": 0,
+        "regression": 0,
+        "total": 0,
+    }
+    assert rejection_map["SOL"] == {
+        "duplicate": 0,
+        "regression": 0,
+        "total": 0,
+    }
