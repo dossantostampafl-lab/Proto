@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Iterator
 
 from fastapi import APIRouter, Query
 
@@ -245,7 +245,9 @@ def demo_status() -> dict[str, object]:
 
 
 @router.post("/start")
-def demo_start(interval_ms: int = Query(default=1_000, ge=100, le=60_000)) -> dict[str, object]:
+def demo_start(
+    interval_ms: int = Query(default=1_000, ge=100, le=60_000),
+) -> dict[str, object]:
     return demo_controller.start(interval_ms)
 
 
