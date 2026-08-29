@@ -104,3 +104,30 @@ def evaluate_live_coverage(
         "current_connection_symbols": current_connection_symbols,
         "symbol_health": symbol_health,
     }
+
+
+def live_readiness_failures(
+    *,
+    running: bool,
+    connected: bool,
+    message_fresh: bool,
+    coverage: Mapping[str, object],
+) -> list[str]:
+    failures: list[str] = []
+    if not running:
+        failures.append("MONITOR_STOPPED")
+    if not connected:
+        failures.append("SOURCE_DISCONNECTED")
+    elif not message_fresh:
+        failures.append("SOURCE_MESSAGES_STALE")
+
+    if not bool(coverage.get("receiving_data")):
+        failures.append("NO_FRESH_DATA")
+    if not bool(coverage.get("complete")):
+        failures.append("INCOMPLETE_SYMBOL_COVERAGE")
+    elif not bool(coverage.get("all_symbols_fresh")):
+        failures.append("STALE_SYMBOL_COVERAGE")
+
+    if connected and not bool(coverage.get("all_symbols_current_connection")):
+        failures.append("CURRENT_CONNECTION_INCOMPLETE")
+    return failures
