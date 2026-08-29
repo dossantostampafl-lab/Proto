@@ -7,6 +7,7 @@ def test_public_feed_health_starts_disconnected_without_credentials() -> None:
     health = adapter.health()
 
     assert health.connected is False
+    assert health.connection_generation == 0
     assert health.connection_attempts == 0
     assert health.reconnect_count == 0
     assert health.frames_received == 0
