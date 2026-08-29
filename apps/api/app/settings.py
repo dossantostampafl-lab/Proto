@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .safety_policy import SafetyPolicyError, validate_runtime_mode
@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     event_bus_backend: str = "memory"
     persistence_enabled: bool = False
+    http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
     minimum_net_edge: float = 0.01
     minimum_confidence: float = 0.55
     max_position: float = 10.0
