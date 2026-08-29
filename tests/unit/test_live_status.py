@@ -125,7 +125,25 @@ def test_readiness_failures_are_empty_for_healthy_live_coverage() -> None:
             "complete": True,
             "all_symbols_fresh": True,
             "all_symbols_current_connection": True,
+            "feed_health": {"consecutive_parse_errors": 0},
         },
     )
 
     assert failures == []
+
+
+def test_readiness_fails_closed_while_public_parser_is_degraded() -> None:
+    failures = live_readiness_failures(
+        running=True,
+        connected=True,
+        message_fresh=True,
+        coverage={
+            "receiving_data": True,
+            "complete": True,
+            "all_symbols_fresh": True,
+            "all_symbols_current_connection": True,
+            "feed_health": {"consecutive_parse_errors": 1},
+        },
+    )
+
+    assert failures == ["SOURCE_PARSE_DEGRADED"]
