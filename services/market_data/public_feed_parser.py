@@ -62,6 +62,18 @@ def _parse_timestamp(value: object) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def _parse_sequence(value: object) -> int:
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise PublicCryptoFeedError("ticker sequence is invalid")
+    try:
+        sequence = int(value)
+    except ValueError as error:
+        raise PublicCryptoFeedError("ticker sequence is invalid") from error
+    if sequence < 0:
+        raise PublicCryptoFeedError("ticker sequence must be non-negative")
+    return sequence
+
+
 def parse_public_ticker_message(
     message: str | bytes | Mapping[str, Any],
 ) -> list[MarketTick]:
@@ -70,12 +82,7 @@ def parse_public_ticker_message(
         return []
 
     timestamp = _parse_timestamp(root.get("timestamp"))
-    try:
-        sequence = int(root.get("sequence_num", 0))
-    except (TypeError, ValueError) as error:
-        raise PublicCryptoFeedError("ticker sequence is invalid") from error
-    if sequence < 0:
-        raise PublicCryptoFeedError("ticker sequence must be non-negative")
+    sequence = _parse_sequence(root.get("sequence_num"))
 
     events = root.get("events", [])
     if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
