@@ -38,7 +38,10 @@ def calculate_live_market_analytics(ticks: list[MarketTick]) -> LiveMarketAnalyt
 
     ordered = sorted(ticks, key=lambda tick: (tick.timestamp, tick.sequence))
     mids = [tick.mid for tick in ordered]
-    log_returns = [log(current / previous) for previous, current in zip(mids, mids[1:])]
+    log_returns = [
+        log(current / previous)
+        for previous, current in zip(mids, mids[1:], strict=False)
+    ]
     realized_volatility = sqrt(sum(value * value for value in log_returns))
     first_mid = mids[0]
     last_mid = mids[-1]
