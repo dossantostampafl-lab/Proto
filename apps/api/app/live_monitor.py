@@ -24,12 +24,13 @@ from .settings import settings
 from .websockets import hub
 
 _HISTORY_LIMIT = 512
+_STALE_AFTER_SECONDS = 10.0
 
 
 class LiveCryptoMonitor:
     def __init__(self) -> None:
         self._adapter = CoinbasePublicMarketDataAdapter()
-        self._quality = DataQualityMonitor(stale_after_seconds=10.0)
+        self._quality = DataQualityMonitor(stale_after_seconds=_STALE_AFTER_SECONDS)
         self._task: asyncio.Task[None] | None = None
         self._latest: dict[str, MarketTick] = {}
         self._history: dict[str, deque[MarketTick]] = defaultdict(
@@ -78,32 +79,73 @@ class LiveCryptoMonitor:
         return {
             "source": "PUBLIC_READ_ONLY",
             **asdict(self._adapter.health()),
+            "expected_symbols": list(self._adapter.symbols),
             "financial_connectivity": False,
             "real_money_execution": False,
         }
 
     def status(self) -> dict[str, object]:
+        now = datetime.now(UTC)
+        symbol_health: dict[str, dict[str, object]] = {}
+        missing_symbols: list[str] = []
+        stale_symbols: list[str] = []
+        fresh_symbols: list[str] = []
+
+        for symbol in self._adapter.symbols:
+            tick = self._latest.get(symbol)
+            if tick is None:
+                missing_symbols.append(symbol)
+                symbol_health[symbol] = {
+                    "observed": False,
+                    "fresh": False,
+                    "latest_observed_at": None,
+                    "age_seconds": None,
+                }
+                continue
+
+            age_seconds = max((now - tick.timestamp).total_seconds(), 0.0)
+            fresh = age_seconds <= _STALE_AFTER_SECONDS
+            if fresh:
+                fresh_symbols.append(symbol)
+            else:
+                stale_symbols.append(symbol)
+            symbol_health[symbol] = {
+                "observed": True,
+                "fresh": fresh,
+                "latest_observed_at": tick.timestamp.isoformat(),
+                "age_seconds": round(age_seconds, 6),
+            }
+
         latest = max(
             (tick.timestamp for tick in self._latest.values()),
             default=None,
         )
-        age_seconds: float | None = None
-        stale = True
+        latest_age_seconds: float | None = None
         if latest is not None:
-            age_seconds = max((datetime.now(UTC) - latest).total_seconds(), 0.0)
-            stale = age_seconds > 10.0
+            latest_age_seconds = max((now - latest).total_seconds(), 0.0)
+
+        all_symbols_fresh = not missing_symbols and not stale_symbols
         return {
             "mode": SystemMode.LIVE_MONITORING,
             "running": self.running,
-            "receiving_data": bool(self._latest) and not stale,
-            "stale": stale,
+            "receiving_data": bool(fresh_symbols),
+            "complete": not missing_symbols,
+            "all_symbols_fresh": all_symbols_fresh,
+            "stale": bool(stale_symbols) or not self._latest,
             "source": "PUBLIC_READ_ONLY",
             "latest_observed_at": latest.isoformat() if latest is not None else None,
-            "last_frame_age_seconds": round(age_seconds, 6) if age_seconds is not None else None,
+            "last_frame_age_seconds": (
+                round(latest_age_seconds, 6) if latest_age_seconds is not None else None
+            ),
             "feed_health": self.source_health(),
             "financial_connectivity": False,
             "real_money_execution": False,
+            "expected_symbols": list(self._adapter.symbols),
             "symbols": sorted(self._latest),
+            "fresh_symbols": fresh_symbols,
+            "missing_symbols": missing_symbols,
+            "stale_symbols": stale_symbols,
+            "symbol_health": symbol_health,
             "history_limit_per_symbol": _HISTORY_LIMIT,
             "last_error": self._last_error,
         }
@@ -243,7 +285,14 @@ def live_source_health() -> dict[str, object]:
 @router.get("/ready")
 def live_ready(response: Response) -> dict[str, object]:
     status = live_monitor.status()
-    ready = bool(status["running"] and status["receiving_data"] and not status["stale"])
+    feed_health = status["feed_health"]
+    connected = isinstance(feed_health, dict) and bool(feed_health.get("connected"))
+    ready = bool(
+        status["running"]
+        and connected
+        and status["receiving_data"]
+        and status["all_symbols_fresh"]
+    )
     if not ready:
         response.status_code = 503
     return {
