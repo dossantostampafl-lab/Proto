@@ -32,6 +32,10 @@ def _age_seconds(value: datetime | None, *, now: datetime) -> float | None:
     return max((now - value).total_seconds(), 0.0)
 
 
+def _source_to_server_delta_ms(*, source_at: datetime, received_at: datetime) -> float:
+    return round((received_at - source_at).total_seconds() * 1_000.0, 3)
+
+
 class LiveCryptoMonitor:
     def __init__(self, adapter: PublicMarketDataAdapter | None = None) -> None:
         self._adapter = adapter or CoinbasePublicMarketDataAdapter()
@@ -41,6 +45,7 @@ class LiveCryptoMonitor:
         self._history: dict[str, deque[MarketTick]] = defaultdict(
             lambda: deque(maxlen=_HISTORY_LIMIT)
         )
+        self._received_at: dict[str, datetime] = {}
         self._symbol_connection_generation: dict[str, int] = {}
         self._connection_generation = self._adapter.health().connection_generation
         self._last_error: str | None = None
@@ -94,6 +99,7 @@ class LiveCryptoMonitor:
         )
         return {
             "source": "PUBLIC_READ_ONLY",
+            "server_observed_at": now.isoformat(),
             **asdict(health),
             "message_fresh": message_fresh,
             "last_message_age_seconds": (
@@ -140,12 +146,25 @@ class LiveCryptoMonitor:
         return self._market_payload(tick) if tick is not None else None
 
     def analytics(self, symbol: str) -> dict[str, object] | None:
-        history = self._history.get(symbol.upper())
+        normalized_symbol = symbol.upper()
+        history = self._history.get(normalized_symbol)
         if not history:
             return None
         result = calculate_live_market_analytics(list(history))
+        latest_tick = history[-1]
+        received_at = self._received_at.get(normalized_symbol)
         return {
             **asdict(result),
+            "latest_source_at": latest_tick.timestamp.isoformat(),
+            "latest_received_at": received_at.isoformat() if received_at is not None else None,
+            "latest_source_to_server_delta_ms": (
+                _source_to_server_delta_ms(
+                    source_at=latest_tick.timestamp,
+                    received_at=received_at,
+                )
+                if received_at is not None
+                else None
+            ),
             "source": "PUBLIC_READ_ONLY_DESCRIPTIVE",
             "financial_connectivity": False,
             "real_money_execution": False,
@@ -158,6 +177,7 @@ class LiveCryptoMonitor:
         self._quality.reset()
         self._latest.clear()
         self._history.clear()
+        self._received_at.clear()
         self._symbol_connection_generation.clear()
         metrics.increment("live_market_connection_generation_changes")
 
@@ -175,11 +195,17 @@ class LiveCryptoMonitor:
                 metrics.increment(f"live_data_quality_{issue.value.lower()}")
             return False
 
+        received_at = datetime.now(UTC)
         self._latest[tick.symbol] = tick
         self._history[tick.symbol].append(tick)
+        self._received_at[tick.symbol] = received_at
         self._symbol_connection_generation[tick.symbol] = health.connection_generation
         metrics.increment("live_market_frames")
         book = compute_orderbook_metrics(tick)
+        source_to_server_delta_ms = _source_to_server_delta_ms(
+            source_at=tick.timestamp,
+            received_at=received_at,
+        )
         await asyncio.gather(
             hub.broadcast(
                 "market-data",
@@ -191,6 +217,8 @@ class LiveCryptoMonitor:
                     "type": "orderbook",
                     "data": {
                         "timestamp": tick.timestamp.isoformat(),
+                        "received_at": received_at.isoformat(),
+                        "source_to_server_delta_ms": source_to_server_delta_ms,
                         "source": "PUBLIC_READ_ONLY",
                         "symbol": tick.symbol,
                         "connection_generation": health.connection_generation,
@@ -230,8 +258,18 @@ class LiveCryptoMonitor:
             )
 
     def _market_payload(self, tick: MarketTick) -> dict[str, object]:
+        received_at = self._received_at.get(tick.symbol)
         return {
             "timestamp": tick.timestamp.isoformat(),
+            "received_at": received_at.isoformat() if received_at is not None else None,
+            "source_to_server_delta_ms": (
+                _source_to_server_delta_ms(
+                    source_at=tick.timestamp,
+                    received_at=received_at,
+                )
+                if received_at is not None
+                else None
+            ),
             "source": "PUBLIC_READ_ONLY",
             "venue": tick.venue,
             "symbol": tick.symbol,
