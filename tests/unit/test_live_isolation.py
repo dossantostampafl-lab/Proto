@@ -2,6 +2,7 @@ import ast
 from pathlib import Path
 
 LIVE_SCOPE = (
+    Path("apps/api/app/live_metrics.py"),
     Path("apps/api/app/live_monitor.py"),
     Path("apps/api/app/live_routes.py"),
     Path("services/market_data/live.py"),
