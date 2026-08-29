@@ -46,6 +46,7 @@ class LiveCryptoMonitor:
             lambda: deque(maxlen=_HISTORY_LIMIT)
         )
         self._received_at: dict[str, datetime] = {}
+        self._last_sequence: dict[str, int] = {}
         self._symbol_connection_generation: dict[str, int] = {}
         self._connection_generation = self._adapter.health().connection_generation
         self._last_error: str | None = None
@@ -135,6 +136,7 @@ class LiveCryptoMonitor:
             "real_money_execution": False,
             "expected_symbols": list(self._adapter.symbols),
             "symbols": sorted(self._latest),
+            "last_sequence_by_symbol": dict(sorted(self._last_sequence.items())),
             "history_limit_per_symbol": _HISTORY_LIMIT,
             "last_error": self._last_error,
         }
@@ -179,6 +181,7 @@ class LiveCryptoMonitor:
         self._latest.clear()
         self._history.clear()
         self._received_at.clear()
+        self._last_sequence.clear()
         self._symbol_connection_generation.clear()
         metrics.increment("live_market_connection_generation_changes")
 
@@ -196,10 +199,16 @@ class LiveCryptoMonitor:
                 metrics.increment(f"live_data_quality_{issue.value.lower()}")
             return False
 
+        previous_sequence = self._last_sequence.get(tick.symbol)
+        if previous_sequence is not None and tick.sequence <= previous_sequence:
+            metrics.increment("live_market_sequence_regressions")
+            return False
+
         received_at = datetime.now(UTC)
         self._latest[tick.symbol] = tick
         self._history[tick.symbol].append(tick)
         self._received_at[tick.symbol] = received_at
+        self._last_sequence[tick.symbol] = tick.sequence
         self._symbol_connection_generation[tick.symbol] = health.connection_generation
         metrics.increment("live_market_frames")
         book = compute_orderbook_metrics(tick)

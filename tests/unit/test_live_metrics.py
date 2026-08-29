@@ -8,6 +8,7 @@ def _status() -> dict[str, object]:
         "all_symbols_receipts_fresh": True,
         "all_symbols_current_connection": True,
         "last_receipt_age_seconds": 0.25,
+        "last_sequence_by_symbol": {"BTC": 42},
         "expected_symbols": ["BTC"],
         "feed_health": {
             "connected": True,
@@ -43,6 +44,7 @@ def test_live_prometheus_renders_read_only_invariants_and_finite_values() -> Non
     assert "proto_live_connection_generation 3" in body
     assert "proto_live_all_symbols_receipts_fresh 1" in body
     assert 'proto_live_symbol_receipt_fresh{symbol="BTC"} 1' in body
+    assert 'proto_live_symbol_last_sequence{symbol="BTC"} 42' in body
     assert 'proto_live_symbol_receipt_age_seconds{symbol="BTC"} 0.2' in body
 
 
