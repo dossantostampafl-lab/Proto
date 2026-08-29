@@ -4,10 +4,10 @@ import json
 import pytest
 
 from services.market_data.live import (
+    _MAX_PUBLIC_FRAME_BYTES,
     CoinbasePublicMarketDataAdapter,
     PublicCryptoFeedError,
     PublicFeedTimeoutError,
-    _MAX_PUBLIC_FRAME_BYTES,
     _receive_with_timeout,
     parse_public_ticker_message,
 )
