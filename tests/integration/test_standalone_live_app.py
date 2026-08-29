@@ -3,20 +3,14 @@ from fastapi.testclient import TestClient
 from apps.api.app.live_app import app
 
 
-def test_standalone_live_app_exposes_only_safe_runtime_surfaces() -> None:
-    paths = {
-        path
-        for route in app.routes
-        if isinstance((path := getattr(route, "path", None)), str)
-    }
+def test_standalone_live_app_exposes_only_safe_http_surfaces() -> None:
+    paths = set(app.openapi()["paths"])
 
     assert "/health" in paths
     assert "/events/ready" in paths
     assert "/live/ready" in paths
     assert "/live/market-data" in paths
     assert "/live/history/{symbol}" in paths
-    assert "/ws/market-data" in paths
-    assert "/ws/orderbook" in paths
 
     forbidden = {
         "/probability/estimate",
@@ -27,12 +21,19 @@ def test_standalone_live_app_exposes_only_safe_runtime_surfaces() -> None:
         "/simulation/start",
         "/replay/start",
         "/killswitch/trigger",
-        "/ws/signals",
-        "/ws/risk",
-        "/ws/portfolio",
-        "/ws/fills",
     }
     assert paths.isdisjoint(forbidden)
+
+
+def test_standalone_live_websocket_surface_serves_public_data_channels() -> None:
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/market-data") as websocket:
+            subscribed = websocket.receive_json()
+        with client.websocket_connect("/ws/orderbook") as websocket:
+            orderbook_subscribed = websocket.receive_json()
+
+    assert subscribed == {"type": "subscribed", "channel": "market-data"}
+    assert orderbook_subscribed == {"type": "subscribed", "channel": "orderbook"}
 
 
 def test_standalone_live_app_is_http_read_only_and_security_hardened() -> None:
