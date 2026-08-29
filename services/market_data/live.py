@@ -259,8 +259,9 @@ class CoinbasePublicMarketDataAdapter:
             if self._consecutive_parse_errors >= self.max_consecutive_parse_errors:
                 raise
             return []
-        self._consecutive_parse_errors = 0
-        self._last_error = None
+        if ticks:
+            self._consecutive_parse_errors = 0
+            self._last_error = None
         return ticks
 
     async def stream(self) -> AsyncIterator[MarketTick]:
@@ -292,7 +293,6 @@ class CoinbasePublicMarketDataAdapter:
                     await websocket.send(
                         json.dumps({"type": "subscribe", "channel": "heartbeats"})
                     )
-                    delay = self.reconnect_min_seconds
                     while True:
                         try:
                             message = await _receive_with_timeout(
@@ -306,6 +306,8 @@ class CoinbasePublicMarketDataAdapter:
                         self._frames_received += 1
                         self._last_message_at = observed_at
                         ticks = self._parse_message(message)
+                        if ticks:
+                            delay = self.reconnect_min_seconds
                         for tick in ticks:
                             self._ticks_emitted += 1
                             self._last_tick_at = observed_at
