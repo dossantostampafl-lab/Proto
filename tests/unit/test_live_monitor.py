@@ -242,6 +242,18 @@ async def test_live_monitor_rejects_stale_public_market_data() -> None:
     assert monitor.snapshot("BTC") is None
 
 
+@pytest.mark.asyncio
+async def test_live_monitor_rejects_unconfigured_symbol_at_ingress() -> None:
+    monitor = LiveCryptoMonitor()
+    unexpected = _tick().model_copy(update={"symbol": "DOGE"})
+
+    accepted = await monitor.ingest_tick(unexpected)
+
+    assert accepted is False
+    assert monitor.snapshot("DOGE") is None
+    assert "DOGE" not in monitor.status()["symbols"]
+
+
 def test_live_unknown_symbol_has_no_fabricated_snapshot() -> None:
     response = client.get("/live/market-data/DOGE")
 
