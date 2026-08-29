@@ -1,5 +1,8 @@
+from sqlalchemy import inspect
+
 from apps.api.app.models import Asset, Fill, Side, SimulationOrder
 from apps.api.app.persistence import AsyncSqlFillJournal, build_engine, init_database
+from apps.api.app.schema_registry import CANONICAL_TABLE_NAMES
 
 
 async def test_async_fill_journal_persists_and_deduplicates_order() -> None:
@@ -34,5 +37,20 @@ async def test_async_fill_journal_persists_and_deduplicates_order() -> None:
     assert records[0]["market_id"] == "btc-usd-paper"
     assert records[0]["asset"] == "BTC"
     assert records[0]["side"] == "BUY"
+
+    await engine.dispose()
+
+
+async def test_init_database_creates_canonical_research_tables() -> None:
+    engine = build_engine("sqlite+aiosqlite:///:memory:")
+    await init_database(engine)
+
+    async with engine.connect() as connection:
+        table_names = await connection.run_sync(
+            lambda sync_connection: set(inspect(sync_connection).get_table_names())
+        )
+
+    assert set(CANONICAL_TABLE_NAMES).issubset(table_names)
+    assert "simulation_fills" in table_names
 
     await engine.dispose()
