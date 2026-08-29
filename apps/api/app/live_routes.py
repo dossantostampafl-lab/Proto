@@ -157,11 +157,17 @@ def live_prometheus_metrics(response: Response) -> str:
         "# HELP proto_live_all_symbols_fresh Whether BTC ETH and SOL source timestamps are fresh.",
         "# TYPE proto_live_all_symbols_fresh gauge",
         f"proto_live_all_symbols_fresh {_metric_bool(status.get('all_symbols_fresh'))}",
-        "# HELP proto_live_all_symbols_current_connection Whether all symbols are from the current socket generation.",
+        (
+            "# HELP proto_live_all_symbols_current_connection "
+            "Whether all symbols are from the current socket generation."
+        ),
         "# TYPE proto_live_all_symbols_current_connection gauge",
         "proto_live_all_symbols_current_connection "
         f"{_metric_bool(status.get('all_symbols_current_connection'))}",
-        "# HELP proto_live_financial_connectivity Financial account connectivity capability; invariant zero.",
+        (
+            "# HELP proto_live_financial_connectivity "
+            "Financial account connectivity capability; invariant zero."
+        ),
         "# TYPE proto_live_financial_connectivity gauge",
         "proto_live_financial_connectivity 0",
         "# HELP proto_live_real_money_execution Real-money execution capability; invariant zero.",
