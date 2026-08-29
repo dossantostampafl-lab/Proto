@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from math import isfinite
 
 from .core import MarketTick
 
@@ -16,8 +17,8 @@ def evaluate_live_coverage(
     stale_after_seconds: float,
     now: datetime | None = None,
 ) -> dict[str, object]:
-    if stale_after_seconds <= 0:
-        raise ValueError("stale_after_seconds must be positive")
+    if not isfinite(stale_after_seconds) or stale_after_seconds <= 0:
+        raise ValueError("stale_after_seconds must be finite and positive")
     current_time = now or datetime.now(UTC)
     if current_time.tzinfo is None or current_time.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
