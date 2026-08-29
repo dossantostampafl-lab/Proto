@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
@@ -120,7 +121,10 @@ def live_market_data_symbol(symbol: str, response: Response) -> dict[str, object
 async def live_persisted_history(
     symbol: str,
     response: Response,
-    limit: int = Query(default=100, ge=1, le=settings.live_history_query_max),
+    limit: Annotated[
+        int,
+        Query(ge=1, le=settings.live_history_query_max),
+    ] = 100,
 ) -> dict[str, object]:
     _mark_no_store(response)
     normalized_symbol = symbol.strip().upper()
