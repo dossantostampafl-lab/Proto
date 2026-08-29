@@ -44,6 +44,7 @@ class PublicFeedHealth:
     last_tick_at: datetime | None
     last_error: str | None
     message_timeout_count: int = 0
+    consecutive_parse_errors: int = 0
 
 
 class PublicMarketDataAdapter(Protocol):
@@ -183,6 +184,7 @@ class CoinbasePublicMarketDataAdapter:
         reconnect_min_seconds: float = 0.5,
         reconnect_max_seconds: float = 15.0,
         message_timeout_seconds: float = 35.0,
+        max_consecutive_parse_errors: int = 3,
     ) -> None:
         resolved_products = tuple(dict.fromkeys(products))
         if not resolved_products:
@@ -200,11 +202,18 @@ class CoinbasePublicMarketDataAdapter:
             raise ValueError("invalid reconnect interval")
         if not isfinite(message_timeout_seconds) or message_timeout_seconds <= 0:
             raise ValueError("message_timeout_seconds must be positive and finite")
+        if (
+            isinstance(max_consecutive_parse_errors, bool)
+            or not isinstance(max_consecutive_parse_errors, int)
+            or max_consecutive_parse_errors <= 0
+        ):
+            raise ValueError("max_consecutive_parse_errors must be a positive integer")
         self.products = resolved_products
         self.endpoint = _validate_public_endpoint(endpoint)
         self.reconnect_min_seconds = reconnect_min_seconds
         self.reconnect_max_seconds = reconnect_max_seconds
         self.message_timeout_seconds = message_timeout_seconds
+        self.max_consecutive_parse_errors = max_consecutive_parse_errors
         self._connected = False
         self._connection_generation = 0
         self._connection_attempts = 0
@@ -212,6 +221,7 @@ class CoinbasePublicMarketDataAdapter:
         self._frames_received = 0
         self._ticks_emitted = 0
         self._parse_error_count = 0
+        self._consecutive_parse_errors = 0
         self._message_timeout_count = 0
         self._connected_since: datetime | None = None
         self._last_message_at: datetime | None = None
@@ -236,7 +246,22 @@ class CoinbasePublicMarketDataAdapter:
             last_tick_at=self._last_tick_at,
             last_error=self._last_error,
             message_timeout_count=self._message_timeout_count,
+            consecutive_parse_errors=self._consecutive_parse_errors,
         )
+
+    def _parse_message(self, message: str | bytes) -> list[MarketTick]:
+        try:
+            ticks = parse_public_ticker_message(message)
+        except PublicCryptoFeedError as error:
+            self._parse_error_count += 1
+            self._consecutive_parse_errors += 1
+            self._last_error = type(error).__name__
+            if self._consecutive_parse_errors >= self.max_consecutive_parse_errors:
+                raise
+            return []
+        self._consecutive_parse_errors = 0
+        self._last_error = None
+        return ticks
 
     async def stream(self) -> AsyncIterator[MarketTick]:
         delay = self.reconnect_min_seconds
@@ -254,6 +279,7 @@ class CoinbasePublicMarketDataAdapter:
                     self._connection_generation += 1
                     self._connected_since = datetime.now(UTC)
                     self._last_error = None
+                    self._consecutive_parse_errors = 0
                     await websocket.send(
                         json.dumps(
                             {
@@ -279,11 +305,7 @@ class CoinbasePublicMarketDataAdapter:
                         observed_at = datetime.now(UTC)
                         self._frames_received += 1
                         self._last_message_at = observed_at
-                        try:
-                            ticks = parse_public_ticker_message(message)
-                        except PublicCryptoFeedError:
-                            self._parse_error_count += 1
-                            raise
+                        ticks = self._parse_message(message)
                         for tick in ticks:
                             self._ticks_emitted += 1
                             self._last_tick_at = observed_at
