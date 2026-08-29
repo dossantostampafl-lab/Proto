@@ -77,3 +77,25 @@ class SimulationResult(BaseModel):
     accepted: bool
     reason: str
     fill: Fill | None = None
+
+
+class EdgeRequest(BaseModel):
+    market_id: str = Field(min_length=1, max_length=120)
+    yes_bid: float = Field(ge=0, le=1)
+    yes_ask: float = Field(ge=0, le=1)
+    fair_probability: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_binary_book(self) -> EdgeRequest:
+        if self.yes_ask < self.yes_bid:
+            raise ValueError("yes_ask must be greater than or equal to yes_bid")
+        return self
+
+
+class EdgeEstimate(BaseModel):
+    market_id: str
+    market_mid_probability: float
+    fair_probability: float
+    edge: float
+    edge_bps: float
+    side: str
