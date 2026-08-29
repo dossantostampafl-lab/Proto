@@ -3,6 +3,7 @@ from pathlib import Path
 
 LIVE_SCOPE = (
     Path("apps/api/app/live_app.py"),
+    Path("apps/api/app/live_database.py"),
     Path("apps/api/app/live_durability.py"),
     Path("apps/api/app/live_metrics.py"),
     Path("apps/api/app/live_monitor.py"),
@@ -20,6 +21,7 @@ DOCKERFILE = Path("Dockerfile.api")
 _FORBIDDEN_LIVE_IMPORT_PREFIXES = (
     "apps.api.app.main",
     "apps.api.app.lifecycle",
+    "apps.api.app.persistence",
     "apps.api.app.portfolio",
     "apps.api.app.replay",
     "apps.api.app.research",
