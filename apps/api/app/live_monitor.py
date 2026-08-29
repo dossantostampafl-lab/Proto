@@ -47,6 +47,9 @@ class LiveCryptoMonitor:
         )
         self._received_at: dict[str, datetime] = {}
         self._last_sequence: dict[str, int] = {}
+        self._sequence_rejections: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"duplicate": 0, "regression": 0}
+        )
         self._symbol_connection_generation: dict[str, int] = {}
         self._connection_generation = self._adapter.health().connection_generation
         self._last_error: str | None = None
@@ -114,6 +117,22 @@ class LiveCryptoMonitor:
             "real_money_execution": False,
         }
 
+    def _sequence_rejection_snapshot(self) -> tuple[int, dict[str, dict[str, int]]]:
+        by_symbol: dict[str, dict[str, int]] = {}
+        total = 0
+        for symbol in self._adapter.symbols:
+            counts = self._sequence_rejections.get(symbol, {})
+            duplicate = int(counts.get("duplicate", 0))
+            regression = int(counts.get("regression", 0))
+            symbol_total = duplicate + regression
+            total += symbol_total
+            by_symbol[symbol] = {
+                "duplicate": duplicate,
+                "regression": regression,
+                "total": symbol_total,
+            }
+        return total, by_symbol
+
     def status(self) -> dict[str, object]:
         feed_health = self.source_health()
         coverage = evaluate_live_coverage(
@@ -124,6 +143,9 @@ class LiveCryptoMonitor:
             connected=bool(feed_health["connected"]),
             stale_after_seconds=_STALE_AFTER_SECONDS,
             received_times=self._received_at,
+        )
+        sequence_rejections_total, sequence_rejections_by_symbol = (
+            self._sequence_rejection_snapshot()
         )
         return {
             "mode": SystemMode.LIVE_MONITORING,
@@ -137,6 +159,8 @@ class LiveCryptoMonitor:
             "expected_symbols": list(self._adapter.symbols),
             "symbols": sorted(self._latest),
             "last_sequence_by_symbol": dict(sorted(self._last_sequence.items())),
+            "sequence_rejections_current_connection": sequence_rejections_total,
+            "sequence_rejections_by_symbol": sequence_rejections_by_symbol,
             "history_limit_per_symbol": _HISTORY_LIMIT,
             "last_error": self._last_error,
         }
@@ -182,8 +206,15 @@ class LiveCryptoMonitor:
         self._history.clear()
         self._received_at.clear()
         self._last_sequence.clear()
+        self._sequence_rejections.clear()
         self._symbol_connection_generation.clear()
         metrics.increment("live_market_connection_generation_changes")
+
+    def _record_sequence_rejection(self, symbol: str, reason: str) -> None:
+        counts = self._sequence_rejections[symbol]
+        counts[reason] += 1
+        metrics.increment("live_market_sequence_rejections")
+        metrics.increment(f"live_market_sequence_{reason}_rejections")
 
     async def ingest_tick(self, tick: MarketTick) -> bool:
         if tick.symbol not in self._adapter.symbols:
@@ -200,9 +231,13 @@ class LiveCryptoMonitor:
             return False
 
         previous_sequence = self._last_sequence.get(tick.symbol)
-        if previous_sequence is not None and tick.sequence <= previous_sequence:
-            metrics.increment("live_market_sequence_regressions")
-            return False
+        if previous_sequence is not None:
+            if tick.sequence == previous_sequence:
+                self._record_sequence_rejection(tick.symbol, "duplicate")
+                return False
+            if tick.sequence < previous_sequence:
+                self._record_sequence_rejection(tick.symbol, "regression")
+                return False
 
         received_at = datetime.now(UTC)
         self._latest[tick.symbol] = tick
