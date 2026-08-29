@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query, WebSocket
+from fastapi import FastAPI, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from services.quant.core import (
@@ -26,6 +26,7 @@ from .models import (
 from .observability import LatencyTimer
 from .persistence import AsyncSqlFillJournal, build_engine, init_database
 from .portfolio import PaperPortfolio
+from .replay import ReplaySession, ReplayStartRequest
 from .research import metrics
 from .research import router as research_router
 from .settings import settings
@@ -64,6 +65,7 @@ app.include_router(research_router)
 runtime = RuntimeState()
 simulator = PaperSimulator()
 portfolio = PaperPortfolio()
+replay_session = ReplaySession()
 
 
 @app.get("/health")
@@ -147,8 +149,14 @@ async def simulate(request: SimulationRequest) -> SimulationResult:
         portfolio.apply_fill(request.order, result.fill)
         if persistent_journal is not None:
             await persistent_journal.append(request.order, result.fill)
-        await hub.broadcast("fills", {"type": "fill", "data": result.fill.model_dump(mode="json")})
-        await hub.broadcast("portfolio", {"type": "portfolio", "data": portfolio.snapshot()})
+        await hub.broadcast(
+            "fills",
+            {"type": "fill", "data": result.fill.model_dump(mode="json")},
+        )
+        await hub.broadcast(
+            "portfolio",
+            {"type": "portfolio", "data": portfolio.snapshot()},
+        )
     else:
         metrics.increment("simulation_rejected")
     return result
@@ -182,16 +190,23 @@ async def simulation_start() -> RuntimeState:
     if runtime.kill_switch != KillSwitchState.ARMED:
         runtime.running = False
         return runtime
+    replay_session.reset()
     runtime.mode = SystemMode.SIMULATION
     runtime.running = True
-    await hub.broadcast("analytics", {"type": "runtime", "data": runtime.model_dump(mode="json")})
+    await hub.broadcast(
+        "analytics",
+        {"type": "runtime", "data": runtime.model_dump(mode="json")},
+    )
     return runtime
 
 
 @app.post("/simulation/stop", response_model=RuntimeState)
 async def simulation_stop() -> RuntimeState:
     runtime.running = False
-    await hub.broadcast("analytics", {"type": "runtime", "data": runtime.model_dump(mode="json")})
+    await hub.broadcast(
+        "analytics",
+        {"type": "runtime", "data": runtime.model_dump(mode="json")},
+    )
     return runtime
 
 
@@ -199,17 +214,140 @@ async def simulation_stop() -> RuntimeState:
 async def simulation_reset() -> RuntimeState:
     global runtime
     runtime = RuntimeState()
+    replay_session.reset()
     portfolio.reset()
     metrics.reset()
     await hub.broadcast("portfolio", {"type": "portfolio", "data": portfolio.snapshot()})
-    await hub.broadcast("analytics", {"type": "runtime", "data": runtime.model_dump(mode="json")})
+    await hub.broadcast(
+        "analytics",
+        {"type": "runtime", "data": runtime.model_dump(mode="json")},
+    )
     return runtime
+
+
+def _replay_speed_value(speed: str) -> int:
+    if speed == "MAX":
+        return 100
+    return int(speed.removesuffix("x"))
+
+
+def _replay_failure(error: RuntimeError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(error))
+
+
+@app.get("/replay/status")
+def replay_status() -> dict[str, object]:
+    return {"mode": SystemMode.HISTORICAL_REPLAY, **replay_session.status()}
+
+
+@app.post("/replay/start")
+async def replay_start(request: ReplayStartRequest) -> dict[str, object]:
+    if runtime.kill_switch != KillSwitchState.ARMED:
+        raise HTTPException(status_code=409, detail="kill switch is not armed")
+    status = replay_session.start(request)
+    runtime.mode = SystemMode.HISTORICAL_REPLAY
+    runtime.running = True
+    runtime.replay_speed = _replay_speed_value(request.speed)
+    metrics.increment("replay_session_starts")
+    await hub.broadcast("analytics", {"type": "replay", "data": status})
+    return {"mode": runtime.mode, **status}
+
+
+@app.post("/replay/pause")
+async def replay_pause() -> dict[str, object]:
+    try:
+        status = replay_session.pause()
+    except RuntimeError as error:
+        raise _replay_failure(error) from error
+    runtime.running = False
+    await hub.broadcast("analytics", {"type": "replay", "data": status})
+    return {"mode": runtime.mode, **status}
+
+
+@app.post("/replay/resume")
+async def replay_resume() -> dict[str, object]:
+    if runtime.kill_switch != KillSwitchState.ARMED:
+        raise HTTPException(status_code=409, detail="kill switch is not armed")
+    try:
+        status = replay_session.resume()
+    except RuntimeError as error:
+        raise _replay_failure(error) from error
+    runtime.mode = SystemMode.HISTORICAL_REPLAY
+    runtime.running = True
+    await hub.broadcast("analytics", {"type": "replay", "data": status})
+    return {"mode": runtime.mode, **status}
+
+
+@app.post("/replay/step")
+async def replay_step() -> dict[str, object]:
+    if runtime.kill_switch != KillSwitchState.ARMED:
+        raise HTTPException(status_code=409, detail="kill switch is not armed")
+    try:
+        frame = replay_session.step()
+    except RuntimeError as error:
+        raise _replay_failure(error) from error
+
+    status = replay_session.status()
+    if frame is None:
+        runtime.running = False
+        await hub.broadcast("analytics", {"type": "replay", "data": status})
+        return {"mode": runtime.mode, "frame": None, **status}
+
+    snapshot = frame.snapshot
+    mid = (snapshot.bid + snapshot.ask) / 2
+    spread = snapshot.ask - snapshot.bid
+    market_data = {
+        "timestamp": frame.timestamp,
+        "market_id": snapshot.market_id,
+        "symbol": snapshot.symbol,
+        "bid": snapshot.bid,
+        "ask": snapshot.ask,
+        "mid": mid,
+        "spread": spread,
+        "market_probability": snapshot.market_probability,
+        "volatility": snapshot.volatility,
+    }
+    orderbook = {
+        "timestamp": frame.timestamp,
+        "symbol": snapshot.symbol,
+        "best_bid": snapshot.bid,
+        "best_ask": snapshot.ask,
+        "bid_size": snapshot.bid_size,
+        "ask_size": snapshot.ask_size,
+        "mid_price": mid,
+        "spread": spread,
+        "imbalance": snapshot.imbalance,
+    }
+    await hub.broadcast("market-data", {"type": "market-data", "data": market_data})
+    await hub.broadcast("orderbook", {"type": "orderbook", "data": orderbook})
+    await hub.broadcast("analytics", {"type": "replay", "data": status})
+    metrics.increment("replay_session_steps")
+    if status["finished"]:
+        runtime.running = False
+    return {"mode": runtime.mode, "frame": market_data, **status}
+
+
+@app.post("/replay/restart")
+async def replay_restart() -> dict[str, object]:
+    if runtime.kill_switch != KillSwitchState.ARMED:
+        raise HTTPException(status_code=409, detail="kill switch is not armed")
+    try:
+        status = replay_session.restart()
+    except RuntimeError as error:
+        raise _replay_failure(error) from error
+    runtime.mode = SystemMode.HISTORICAL_REPLAY
+    runtime.running = True
+    metrics.increment("replay_session_restarts")
+    await hub.broadcast("analytics", {"type": "replay", "data": status})
+    return {"mode": runtime.mode, **status}
 
 
 @app.post("/killswitch/trigger", response_model=RuntimeState)
 async def killswitch_trigger() -> RuntimeState:
     runtime.kill_switch = KillSwitchState.TRIGGERED
     runtime.running = False
+    if replay_session.active and not replay_session.paused:
+        replay_session.pause()
     metrics.increment("kill_switch_triggers")
     await hub.broadcast("risk", {"type": "risk", "data": risk()})
     return runtime
