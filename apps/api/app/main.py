@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from time import perf_counter
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from services.quant.core import (
@@ -23,8 +26,8 @@ from .models import (
     SimulationResult,
     SystemMode,
 )
-from .observability import LatencyTimer
-from .persistence import AsyncSqlFillJournal, build_engine, init_database
+from .observability import LatencyTimer, access_log
+from .persistence import AsyncSqlFillJournal, build_engine, database_ready, init_database
 from .portfolio import PaperPortfolio
 from .replay import ReplaySession, ReplayStartRequest
 from .research import metrics
@@ -33,6 +36,7 @@ from .settings import settings
 from .simulation import PaperSimulator
 from .websockets import hub
 
+logger = logging.getLogger("proto.api")
 persistence_engine = build_engine(settings.database_url) if settings.persistence_enabled else None
 persistent_journal = (
     AsyncSqlFillJournal(persistence_engine) if persistence_engine is not None else None
@@ -58,7 +62,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Request-ID"],
 )
 app.include_router(research_router)
 
@@ -68,6 +72,49 @@ portfolio = PaperPortfolio()
 replay_session = ReplaySession()
 
 
+@app.middleware("http")
+async def observe_request(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    started = perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        latency_ms = (perf_counter() - started) * 1_000
+        metrics.record_http(
+            path=request.url.path,
+            status_code=500,
+            latency_ms=latency_ms,
+        )
+        logger.exception(
+            access_log(
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status_code=500,
+                latency_ms=latency_ms,
+            )
+        )
+        raise
+
+    latency_ms = (perf_counter() - started) * 1_000
+    metrics.record_http(
+        path=request.url.path,
+        status_code=response.status_code,
+        latency_ms=latency_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        access_log(
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            latency_ms=latency_ms,
+        )
+    )
+    return response
+
+
 @app.get("/health")
 def health() -> dict[str, object]:
     return {
@@ -75,6 +122,33 @@ def health() -> dict[str, object]:
         "mode": runtime.mode,
         "version": __version__,
         "persistence_enabled": settings.persistence_enabled,
+    }
+
+
+@app.get("/ready")
+async def ready(response: Response) -> dict[str, object]:
+    if persistence_engine is None:
+        return {
+            "status": "ready",
+            "database": "disabled",
+            "mode": runtime.mode,
+        }
+    ready_state = await database_ready(persistence_engine)
+    if not ready_state:
+        response.status_code = 503
+    return {
+        "status": "ready" if ready_state else "not_ready",
+        "database": "ready" if ready_state else "unavailable",
+        "mode": runtime.mode,
+    }
+
+
+@app.get("/metrics")
+def system_metrics() -> dict[str, object]:
+    return {
+        "mode": runtime.mode,
+        "real_money_execution": False,
+        **metrics.snapshot(),
     }
 
 
