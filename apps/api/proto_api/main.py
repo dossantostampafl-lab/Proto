@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 
 from . import __version__
-from .models import EdgeEstimate, EdgeRequest, RunMode, SimulationRequest, SimulationResult
+from .models import (
+    EdgeEstimate,
+    EdgeRequest,
+    PortfolioMarkRequest,
+    RunMode,
+    SimulationRequest,
+    SimulationResult,
+)
 from .portfolio import PaperPortfolio
 from .quant import estimate_binary_edge
 from .simulation import PaperSimulator
@@ -42,6 +49,18 @@ def edge(request: EdgeRequest) -> EdgeEstimate:
 @app.get("/v1/portfolio")
 def get_portfolio() -> dict[str, object]:
     return portfolio.snapshot()
+
+
+@app.post("/v1/portfolio/mark")
+def mark_portfolio(request: PortfolioMarkRequest) -> dict[str, object]:
+    marks = {mark.asset: mark.price for mark in request.marks}
+    return portfolio.snapshot(marks)
+
+
+@app.get("/v1/fills")
+def get_fills(limit: int = Query(default=100, ge=1, le=1_000)) -> dict[str, object]:
+    entries = portfolio.journal(limit)
+    return {"mode": RunMode.SIMULATION, "count": len(entries), "fills": entries}
 
 
 @app.post("/v1/portfolio/reset")
