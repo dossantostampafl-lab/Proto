@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from services.market_data import LiveTickJournalError, MarketTick, PersistedLiveTick
 
-from .persistence import Base
+from .live_database import LiveBase
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -19,7 +19,7 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-class LiveMarketTickRecord(Base):
+class LiveMarketTickRecord(LiveBase):
     __tablename__ = "live_market_ticks"
     __table_args__ = (
         UniqueConstraint(
