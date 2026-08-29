@@ -23,11 +23,13 @@ The current adapter consumes the public Coinbase market-data WebSocket for:
 - `ETH-USD` -> `ETH`;
 - `SOL-USD` -> `SOL`.
 
-Frames are normalized into the canonical `MarketTick` contract before they are accepted by the live monitor.
+Frames are normalized into the canonical `MarketTick` contract before they are accepted by the live monitor. The parser rejects malformed JSON, invalid sequences, timezone-naive timestamps and unsupported products.
 
 ## Data-quality gate
 
-A frame is rejected when the canonical data-quality checks fail. The live readiness endpoint remains fail-closed when there are no fresh accepted frames.
+A frame is rejected when the canonical data-quality checks fail. Checks include stale data, excessive future clock skew, timezone-naive timestamps, invalid spreads, negative sizes or volume, duplicate/out-of-order sequences, out-of-order timestamps and excessive one-frame price jumps.
+
+The live readiness endpoint remains fail-closed when there are no fresh accepted frames.
 
 The monitor keeps only a bounded in-memory history per symbol for descriptive measurements such as:
 
@@ -40,10 +42,26 @@ The monitor keeps only a bounded in-memory history per symbol for descriptive me
 
 These measurements are descriptive monitoring outputs. They are not an order or execution interface.
 
+## Connection health
+
+The public adapter exposes operational telemetry without account connectivity:
+
+- connection attempts and reconnect count;
+- connection generation;
+- frames received and normalized ticks emitted;
+- parser error count;
+- current connection start time;
+- last message and last tick receive times;
+- last transport/parser error type.
+
+A reconnect increments the connection generation. The monitor associates every accepted symbol with the generation that produced it. Readiness requires BTC, ETH and SOL to have fresh observations from the current connection generation, which prevents recently cached pre-reconnect observations from being mistaken for a healthy new connection.
+
+The source heartbeat/message age is also checked. A connected socket without recent messages does not become ready.
+
 ## Operational endpoints
 
-- `GET /live/status` - live monitor state, freshness and public-feed health;
-- `GET /live/source-health` - connection attempts, reconnects and current public-feed state;
+- `GET /live/status` - live monitor state, freshness, per-symbol connection generation and public-feed health;
+- `GET /live/source-health` - transport counters, reconnect generation, heartbeat/message age and current public-feed state;
 - `GET /live/ready` - fail-closed readiness check;
 - `GET /live/market-data` - accepted public snapshots;
 - `GET /live/market-data/{symbol}` - one accepted public snapshot;
@@ -55,4 +73,6 @@ WebSocket channels `market-data` and `orderbook` carry only normalized public mo
 
 ## CI and Graphify
 
-Every change remains behind the normal CI, Security and Graphify workflows. The live monitor must remain independently testable without external network access; unit/integration tests inject canonical ticks rather than depending on the public WebSocket.
+Every change remains behind the normal CI, Security and Graphify workflows. Graphify is used to inspect cross-module coupling and guide safe refactors; the public live monitor depends on the `PublicMarketDataAdapter` protocol rather than a concrete transport implementation.
+
+The live monitor must remain independently testable without external network access. Unit and integration tests inject canonical ticks or a read-only adapter stub rather than depending on the public WebSocket.
