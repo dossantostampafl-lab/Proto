@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +23,14 @@ class PublicCryptoFeedError(RuntimeError):
     """Raised when a public crypto market-data frame cannot be normalized safely."""
 
 
+@dataclass(frozen=True, slots=True)
+class PublicFeedHealth:
+    connected: bool
+    connection_attempts: int
+    reconnect_count: int
+    last_error: str | None
+
+
 def _as_mapping(value: object) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise PublicCryptoFeedError("expected object payload")
@@ -34,7 +43,9 @@ def _parse_timestamp(value: object) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def parse_public_ticker_message(message: str | bytes | Mapping[str, Any]) -> list[MarketTick]:
+def parse_public_ticker_message(
+    message: str | bytes | Mapping[str, Any],
+) -> list[MarketTick]:
     if isinstance(message, bytes):
         payload = json.loads(message.decode("utf-8"))
     elif isinstance(message, str):
@@ -57,7 +68,10 @@ def parse_public_ticker_message(message: str | bytes | Mapping[str, Any]) -> lis
     for event_value in events:
         event = _as_mapping(event_value)
         ticker_values = event.get("tickers", [])
-        if not isinstance(ticker_values, Sequence) or isinstance(ticker_values, (str, bytes)):
+        if not isinstance(ticker_values, Sequence) or isinstance(
+            ticker_values,
+            (str, bytes),
+        ):
             raise PublicCryptoFeedError("ticker list must be an array")
         for ticker_value in ticker_values:
             ticker = _as_mapping(ticker_value)
@@ -107,10 +121,23 @@ class CoinbasePublicMarketDataAdapter:
         self.endpoint = endpoint
         self.reconnect_min_seconds = reconnect_min_seconds
         self.reconnect_max_seconds = reconnect_max_seconds
+        self._connected = False
+        self._connection_attempts = 0
+        self._reconnect_count = 0
+        self._last_error: str | None = None
+
+    def health(self) -> PublicFeedHealth:
+        return PublicFeedHealth(
+            connected=self._connected,
+            connection_attempts=self._connection_attempts,
+            reconnect_count=self._reconnect_count,
+            last_error=self._last_error,
+        )
 
     async def stream(self) -> AsyncIterator[MarketTick]:
         delay = self.reconnect_min_seconds
         while True:
+            self._connection_attempts += 1
             try:
                 async with connect(
                     self.endpoint,
@@ -119,6 +146,8 @@ class CoinbasePublicMarketDataAdapter:
                     close_timeout=5,
                     max_size=2**20,
                 ) as websocket:
+                    self._connected = True
+                    self._last_error = None
                     await websocket.send(
                         json.dumps(
                             {
@@ -135,8 +164,15 @@ class CoinbasePublicMarketDataAdapter:
                     async for message in websocket:
                         for tick in parse_public_ticker_message(message):
                             yield tick
+                self._connected = False
+                self._reconnect_count += 1
+                await asyncio.sleep(delay)
             except asyncio.CancelledError:
+                self._connected = False
                 raise
-            except Exception:
+            except Exception as error:
+                self._connected = False
+                self._last_error = type(error).__name__
+                self._reconnect_count += 1
                 await asyncio.sleep(delay)
                 delay = min(delay * 2.0, self.reconnect_max_seconds)
