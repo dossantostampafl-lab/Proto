@@ -61,8 +61,6 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
             "Rejected duplicate or regressing sequences in the current connection generation."
         ),
         "# TYPE proto_live_sequence_rejections_current_connection gauge",
-        "proto_live_sequence_rejections_current_connection "
-        f"{status.get('sequence_rejections_current_connection', 0)}",
         (
             "# HELP proto_live_financial_connectivity "
             "Financial account connectivity capability; invariant zero."
@@ -73,6 +71,11 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
         "# TYPE proto_live_real_money_execution gauge",
         "proto_live_real_money_execution 0",
     ]
+    _append_optional_gauge(
+        lines,
+        metric="proto_live_sequence_rejections_current_connection",
+        value=status.get("sequence_rejections_current_connection"),
+    )
     for metric, key in (
         ("proto_live_connection_generation", "connection_generation"),
         ("proto_live_connection_attempts_total", "connection_attempts"),
