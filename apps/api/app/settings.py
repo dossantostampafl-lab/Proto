@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     system_mode: str = "SIMULATION"
     database_url: str = "sqlite+aiosqlite:///:memory:"
+    redis_url: str = "redis://localhost:6379/0"
+    event_bus_backend: str = "memory"
     persistence_enabled: bool = False
     minimum_net_edge: float = 0.01
     minimum_confidence: float = 0.55
