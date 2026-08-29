@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from math import isfinite
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -25,6 +26,10 @@ class PublicCryptoFeedError(RuntimeError):
     """Raised when a public crypto market-data frame cannot be normalized safely."""
 
 
+class PublicFeedTimeoutError(PublicCryptoFeedError):
+    """Raised when an established public feed stops producing messages."""
+
+
 @dataclass(frozen=True, slots=True)
 class PublicFeedHealth:
     connected: bool
@@ -38,6 +43,7 @@ class PublicFeedHealth:
     last_message_at: datetime | None
     last_tick_at: datetime | None
     last_error: str | None
+    message_timeout_count: int = 0
 
 
 class PublicMarketDataAdapter(Protocol):
@@ -103,6 +109,16 @@ def _validate_public_endpoint(endpoint: str) -> str:
     return endpoint
 
 
+async def _receive_with_timeout(websocket: Any, timeout_seconds: float) -> str | bytes:
+    try:
+        message = await asyncio.wait_for(websocket.recv(), timeout=timeout_seconds)
+    except TimeoutError as error:
+        raise PublicFeedTimeoutError("public feed message timeout") from error
+    if not isinstance(message, (str, bytes)):
+        raise PublicCryptoFeedError("public feed message must be text or bytes")
+    return message
+
+
 def parse_public_ticker_message(
     message: str | bytes | Mapping[str, Any],
 ) -> list[MarketTick]:
@@ -166,6 +182,7 @@ class CoinbasePublicMarketDataAdapter:
         endpoint: str = _COINBASE_PUBLIC_WS,
         reconnect_min_seconds: float = 0.5,
         reconnect_max_seconds: float = 15.0,
+        message_timeout_seconds: float = 35.0,
     ) -> None:
         resolved_products = tuple(dict.fromkeys(products))
         if not resolved_products:
@@ -173,12 +190,21 @@ class CoinbasePublicMarketDataAdapter:
         unsupported = set(resolved_products).difference(_SUPPORTED_PRODUCTS)
         if unsupported:
             raise ValueError(f"unsupported public products: {sorted(unsupported)}")
-        if reconnect_min_seconds <= 0 or reconnect_max_seconds < reconnect_min_seconds:
+        reconnect_values_valid = bool(
+            isfinite(reconnect_min_seconds)
+            and isfinite(reconnect_max_seconds)
+            and reconnect_min_seconds > 0
+            and reconnect_max_seconds >= reconnect_min_seconds
+        )
+        if not reconnect_values_valid:
             raise ValueError("invalid reconnect interval")
+        if not isfinite(message_timeout_seconds) or message_timeout_seconds <= 0:
+            raise ValueError("message_timeout_seconds must be positive and finite")
         self.products = resolved_products
         self.endpoint = _validate_public_endpoint(endpoint)
         self.reconnect_min_seconds = reconnect_min_seconds
         self.reconnect_max_seconds = reconnect_max_seconds
+        self.message_timeout_seconds = message_timeout_seconds
         self._connected = False
         self._connection_generation = 0
         self._connection_attempts = 0
@@ -186,6 +212,7 @@ class CoinbasePublicMarketDataAdapter:
         self._frames_received = 0
         self._ticks_emitted = 0
         self._parse_error_count = 0
+        self._message_timeout_count = 0
         self._connected_since: datetime | None = None
         self._last_message_at: datetime | None = None
         self._last_tick_at: datetime | None = None
@@ -208,6 +235,7 @@ class CoinbasePublicMarketDataAdapter:
             last_message_at=self._last_message_at,
             last_tick_at=self._last_tick_at,
             last_error=self._last_error,
+            message_timeout_count=self._message_timeout_count,
         )
 
     async def stream(self) -> AsyncIterator[MarketTick]:
@@ -239,7 +267,15 @@ class CoinbasePublicMarketDataAdapter:
                         json.dumps({"type": "subscribe", "channel": "heartbeats"})
                     )
                     delay = self.reconnect_min_seconds
-                    async for message in websocket:
+                    while True:
+                        try:
+                            message = await _receive_with_timeout(
+                                websocket,
+                                self.message_timeout_seconds,
+                            )
+                        except PublicFeedTimeoutError:
+                            self._message_timeout_count += 1
+                            raise
                         observed_at = datetime.now(UTC)
                         self._frames_received += 1
                         self._last_message_at = observed_at
@@ -252,10 +288,6 @@ class CoinbasePublicMarketDataAdapter:
                             self._ticks_emitted += 1
                             self._last_tick_at = observed_at
                             yield tick
-                self._connected = False
-                self._connected_since = None
-                self._reconnect_count += 1
-                await asyncio.sleep(delay)
             except asyncio.CancelledError:
                 self._connected = False
                 self._connected_since = None
