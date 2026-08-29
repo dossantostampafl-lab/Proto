@@ -3,12 +3,13 @@ from __future__ import annotations
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .safety_policy import SafetyPolicyError, validate_sandbox_mode
+from .safety_policy import SafetyPolicyError, validate_runtime_mode
 
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    system_mode: str = "SIMULATION"
+    system_mode: str = "LIVE_MONITORING"
+    live_monitoring_autostart: bool = False
     database_url: str = "sqlite+aiosqlite:///:memory:"
     redis_url: str = "redis://localhost:6379/0"
     event_bus_backend: str = "memory"
@@ -21,9 +22,9 @@ class Settings(BaseSettings):
 
     @field_validator("system_mode")
     @classmethod
-    def enforce_sandbox_mode(cls, value: str) -> str:
+    def enforce_runtime_mode(cls, value: str) -> str:
         try:
-            validate_sandbox_mode(value)
+            validate_runtime_mode(value)
         except SafetyPolicyError as error:
             raise ValueError(str(error)) from error
         return value.strip().upper()
