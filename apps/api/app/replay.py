@@ -17,6 +17,13 @@ class ReplayFrame:
     snapshot: MarketSnapshot
 
 
+@dataclass(frozen=True)
+class ReplayCheckpoint:
+    cursor: int
+    speed: ReplaySpeed
+    paused: bool
+
+
 class ReplayFrameInput(BaseModel):
     timestamp: datetime
     snapshot: MarketSnapshot
@@ -153,6 +160,25 @@ class ReplaySession:
         self._speed = speed
         return self.status()
 
+    def checkpoint(self) -> ReplayCheckpoint:
+        engine = self._require_engine()
+        return ReplayCheckpoint(
+            cursor=engine.cursor,
+            speed=self._speed,
+            paused=self._paused,
+        )
+
+    def restore(self, checkpoint: ReplayCheckpoint) -> dict[str, object]:
+        engine = self._require_engine()
+        try:
+            engine.seek(checkpoint.cursor)
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
+        self._speed = checkpoint.speed
+        self._paused = checkpoint.paused or engine.finished
+        self._last_frame = engine.previous()
+        return self.status()
+
     def reset(self) -> None:
         self._engine = None
         self._speed = "1x"
@@ -184,4 +210,3 @@ class ReplaySession:
         if self._engine is None:
             raise RuntimeError("replay session has not been started")
         return self._engine
-
