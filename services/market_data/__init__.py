@@ -18,6 +18,7 @@ from .core import (
 from .live import (
     CoinbasePublicMarketDataAdapter,
     PublicCryptoFeedError,
+    PublicFeedHealth,
     parse_public_ticker_message,
 )
 
@@ -33,6 +34,7 @@ __all__ = [
     "MockPredictionMarketAdapter",
     "OrderBookMetrics",
     "PublicCryptoFeedError",
+    "PublicFeedHealth",
     "SyntheticAdapter",
     "compute_orderbook_metrics",
     "parse_public_ticker_message",
