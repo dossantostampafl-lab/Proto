@@ -70,6 +70,27 @@ type MarketDataFrame = {
   spread: number;
   market_probability: number;
   volatility: number;
+  source?: string;
+  sequence?: number;
+};
+
+type LiveState = "IDLE" | "CONNECTING" | "STREAMING" | "RECONNECTING" | "ERROR" | "STOPPED";
+
+type LiveStatus = {
+  mode: "LIVE_DATA_READ_ONLY";
+  state: LiveState;
+  source: string | null;
+  symbol: string | null;
+  last_tick_at: string | null;
+  last_sequence: number | null;
+  received: number;
+  rejected: number;
+  reconnect_attempts: number;
+  last_error: string | null;
+  stale: boolean;
+  latency_ms: number | null;
+  staleness_ms: number | null;
+  read_only: boolean;
 };
 
 type OrderBookFrame = {
@@ -92,12 +113,42 @@ type StreamEnvelope<T> = {
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 const REPLAY_SPEEDS: ReplaySpeed[] = ["1x", "5x", "10x", "50x", "100x", "MAX"];
+const LIVE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"] as const;
+
+const EMPTY_LIVE_STATUS: LiveStatus = {
+  mode: "LIVE_DATA_READ_ONLY",
+  state: "IDLE",
+  source: null,
+  symbol: null,
+  last_tick_at: null,
+  last_sequence: null,
+  received: 0,
+  rejected: 0,
+  reconnect_attempts: 0,
+  last_error: null,
+  stale: false,
+  latency_ms: null,
+  staleness_ms: null,
+  read_only: true,
+};
 
 function formatNumber(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits,
   }).format(value);
+}
+
+function formatDuration(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (value < 1_000) return `${Math.round(value)} ms`;
+  return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)} s`;
+}
+
+function formatTickTime(value: string | null) {
+  if (!value) return "Waiting for first tick";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleTimeString();
 }
 
 function App() {
@@ -107,10 +158,30 @@ function App() {
   const [replay, setReplay] = useState<ReplayStatus | null>(null);
   const [marketData, setMarketData] = useState<MarketDataFrame | null>(null);
   const [orderBook, setOrderBook] = useState<OrderBookFrame | null>(null);
+  const [live, setLive] = useState<LiveStatus>(EMPTY_LIVE_STATUS);
+  const [liveSource] = useState("binance");
+  const [liveSymbol, setLiveSymbol] = useState<(typeof LIVE_SYMBOLS)[number]>("BTCUSDT");
+  const [liveBusy, setLiveBusy] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const [streamOnline, setStreamOnline] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
   const [seekCursor, setSeekCursor] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  async function refreshLiveStatus() {
+    try {
+      const response = await fetch(`${API_BASE}/live/status`);
+      if (!response.ok) throw new Error(`Live status returned ${response.status}`);
+      const body = (await response.json()) as LiveStatus;
+      setLive(body);
+      if (body.symbol && LIVE_SYMBOLS.includes(body.symbol as (typeof LIVE_SYMBOLS)[number])) {
+        setLiveSymbol(body.symbol as (typeof LIVE_SYMBOLS)[number]);
+      }
+      setLiveError(body.last_error);
+    } catch (statusError) {
+      setLiveError(statusError instanceof Error ? statusError.message : "Live status unavailable");
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +190,7 @@ function App() {
     const sockets = new Set<WebSocket>();
 
     async function refresh() {
+      void refreshLiveStatus();
       try {
         const [healthResponse, portfolioResponse, fillsResponse, replayResponse] = await Promise.all([
           fetch(`${API_BASE}/health`),
@@ -191,8 +263,25 @@ function App() {
         if (message.type === "fill") void refresh();
       });
       openSocket("market-data", (message) => {
-        if (message.type === "market-data" && message.data) {
-          setMarketData(message.data as MarketDataFrame);
+        if ((message.type === "market-data" || message.type === "market_data") && message.data) {
+          const frame = message.data as MarketDataFrame;
+          setMarketData(frame);
+          setLive((current) => {
+            if (current.state !== "STREAMING" && current.state !== "RECONNECTING") return current;
+            const eventTime = new Date(frame.timestamp).valueOf();
+            return {
+              ...current,
+              state: "STREAMING",
+              symbol: frame.symbol || current.symbol,
+              source: frame.source || current.source,
+              last_tick_at: frame.timestamp,
+              last_sequence: frame.sequence ?? current.last_sequence,
+              received: current.received + 1,
+              stale: false,
+              latency_ms: Number.isNaN(eventTime) ? current.latency_ms : Math.max(0, Date.now() - eventTime),
+              staleness_ms: 0,
+            };
+          });
         }
       });
       openSocket("orderbook", (message) => {
@@ -215,7 +304,7 @@ function App() {
 
     void refresh();
     connectStreams();
-    refreshTimer = window.setInterval(() => void refresh(), 30_000);
+    refreshTimer = window.setInterval(() => void refresh(), 10_000);
     reconnectTimer = window.setInterval(() => {
       if (!cancelled && sockets.size === 0) connectStreams();
     }, 5_000);
@@ -258,11 +347,31 @@ function App() {
     }
   }
 
+  async function liveControl(action: "start" | "stop") {
+    setLiveBusy(true);
+    setLiveError(null);
+    try {
+      const response = await fetch(`${API_BASE}/live/${action}`, {
+        method: "POST",
+        headers: action === "start" ? { "Content-Type": "application/json" } : undefined,
+        body: action === "start" ? JSON.stringify({ source: liveSource, symbol: liveSymbol }) : undefined,
+      });
+      const body = (await response.json()) as LiveStatus & { detail?: string };
+      if (!response.ok) throw new Error(body.detail ?? `Live ${action} failed`);
+      setLive(body);
+      setLiveError(body.last_error);
+    } catch (controlError) {
+      setLiveError(controlError instanceof Error ? controlError.message : "Live control failed");
+    } finally {
+      setLiveBusy(false);
+    }
+  }
+
   const metrics = [
     {
       label: "Mode",
-      value: health?.mode ?? "SIMULATION",
-      note: "Real execution disabled",
+      value: live.state === "STREAMING" ? live.mode : (health?.mode ?? "SIMULATION"),
+      note: "Market data only · orders disabled",
     },
     {
       label: "API",
@@ -308,6 +417,69 @@ function App() {
           </article>
         ))}
       </section>
+
+      <section className={`panel livePanel ${live.stale ? "livePanelStale" : ""}`}>
+        <div className="liveIdentity">
+          <div className="liveHeading">
+            <p className="eyebrow">PUBLIC MARKET FEED</p>
+            <span className="readOnlyBadge">READ ONLY</span>
+          </div>
+          <h2>Live data connection</h2>
+          <p className="panelNote">
+            Public prices only. This connection cannot place, modify, or cancel orders.
+          </p>
+        </div>
+
+        <div className="liveTelemetry" aria-label="Live data telemetry">
+          <span>State <b className={`liveState liveState${live.state}`}>{live.state}</b></span>
+          <span>Feed <b>{live.source ?? liveSource} / {live.symbol ?? liveSymbol}</b></span>
+          <span>Last tick <b>{formatTickTime(live.last_tick_at)}</b></span>
+          <span>Latency <b>{formatDuration(live.latency_ms)}</b></span>
+          <span>Staleness <b className={live.stale ? "dangerText" : ""}>{formatDuration(live.staleness_ms)}</b></span>
+          <span>Frames <b>{live.received.toLocaleString()} ok / {live.rejected.toLocaleString()} rejected</b></span>
+          <span>Reconnects <b>{live.reconnect_attempts}</b></span>
+        </div>
+
+        <div className="liveControls" aria-label="Live data controls">
+          <label className="replayField">
+            <span>Source</span>
+            <select aria-label="Live data source" disabled value={liveSource}>
+              <option value="binance">Binance public</option>
+            </select>
+          </label>
+          <label className="replayField">
+            <span>Symbol</span>
+            <select
+              aria-label="Live data symbol"
+              disabled={liveBusy || live.state === "STREAMING" || live.state === "CONNECTING"}
+              value={liveSymbol}
+              onChange={(event) => setLiveSymbol(event.target.value as (typeof LIVE_SYMBOLS)[number])}
+            >
+              {LIVE_SYMBOLS.map((symbol) => <option key={symbol}>{symbol}</option>)}
+            </select>
+          </label>
+          <button
+            className="liveStart"
+            disabled={liveBusy || live.state === "STREAMING" || live.state === "CONNECTING"}
+            onClick={() => void liveControl("start")}
+          >
+            {live.state === "RECONNECTING" ? "Reconnect" : "Connect"}
+          </button>
+          <button
+            disabled={liveBusy || ["IDLE", "STOPPED"].includes(live.state)}
+            onClick={() => void liveControl("stop")}
+          >
+            Disconnect
+          </button>
+        </div>
+      </section>
+
+      {(liveError || live.last_error || live.state === "RECONNECTING") && (
+        <div className="liveMessage" role="status">
+          <strong>{live.state === "RECONNECTING" ? "Reconnecting to public feed" : "Live feed notice"}</strong>
+          <span>{liveError ?? live.last_error ?? "Connection interrupted; automatic retry in progress."}</span>
+        </div>
+      )}
 
       <section className="panel replayPanel">
         <div>
