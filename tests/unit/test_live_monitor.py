@@ -31,6 +31,17 @@ def test_live_routes_are_mounted_with_financial_connectivity_disabled() -> None:
 
     assert response.status_code == 200
     assert body["mode"] == "LIVE_MONITORING"
+    assert body["source"] == "PUBLIC_READ_ONLY"
+    assert body["financial_connectivity"] is False
+    assert body["real_money_execution"] is False
+
+
+def test_live_readiness_fails_closed_without_fresh_frames() -> None:
+    response = client.get("/live/ready")
+    body = response.json()
+
+    assert response.status_code == 503
+    assert body["status"] == "not_ready"
     assert body["financial_connectivity"] is False
     assert body["real_money_execution"] is False
 
@@ -48,6 +59,8 @@ async def test_live_monitor_accepts_fresh_public_market_data() -> None:
     assert snapshot["venue"] == "coinbase-public"
     assert snapshot["symbol"] == "BTC"
     assert snapshot["bid"] < snapshot["ask"]
+    assert snapshot["financial_connectivity"] is False
+    assert snapshot["real_money_execution"] is False
 
 
 @pytest.mark.asyncio
