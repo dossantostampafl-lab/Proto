@@ -14,6 +14,7 @@ from services.market_data import (
     compute_orderbook_metrics,
 )
 
+from .event_state import event_runtime
 from .metrics_state import metrics
 from .models import SystemMode
 from .settings import settings
@@ -38,6 +39,15 @@ class LiveCryptoMonitor:
         self._last_error = None
         self._task = asyncio.create_task(self._run(), name="live-crypto-monitor")
         metrics.increment("live_monitor_starts")
+        await event_runtime.safe_publish(
+            "proto.system",
+            {
+                "event": "live_monitor_started",
+                "mode": SystemMode.LIVE_MONITORING.value,
+                "financial_connectivity": "false",
+                "real_money_execution": "false",
+            },
+        )
 
     async def stop(self) -> None:
         task = self._task
@@ -48,6 +58,13 @@ class LiveCryptoMonitor:
             await task
         self._task = None
         metrics.increment("live_monitor_stops")
+        await event_runtime.safe_publish(
+            "proto.system",
+            {
+                "event": "live_monitor_stopped",
+                "mode": SystemMode.LIVE_MONITORING.value,
+            },
+        )
 
     def status(self) -> dict[str, object]:
         latest = max(
@@ -128,6 +145,13 @@ class LiveCryptoMonitor:
         except Exception as error:
             self._last_error = type(error).__name__
             metrics.increment("live_monitor_failures")
+            await event_runtime.safe_publish(
+                "proto.system",
+                {
+                    "event": "live_monitor_failure",
+                    "error_type": self._last_error,
+                },
+            )
 
     @staticmethod
     def _market_payload(tick: MarketTick) -> dict[str, object]:
