@@ -47,7 +47,7 @@ def test_portfolio_tracks_simulated_position() -> None:
 
 def test_portfolio_realizes_pnl_on_close() -> None:
     _simulate("BUY", 0.01, 61000, 60000, 60010)
-    _simulate("SELL", 0.01, 60900, 60890, 60900)
+    _simulate("SELL", 0.01, 60890, 60890, 60900)
 
     body = client.get("/v1/portfolio").json()
     position = body["positions"][0]
