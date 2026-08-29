@@ -15,6 +15,9 @@ from .core import MarketTick
 
 _COINBASE_PUBLIC_WS = "wss://advanced-trade-ws.coinbase.com"
 _COINBASE_PUBLIC_HOST = "advanced-trade-ws.coinbase.com"
+_MAX_PUBLIC_FRAME_BYTES = 256 * 1024
+_MAX_EVENTS_PER_FRAME = 32
+_MAX_TICKERS_PER_EVENT = 32
 _SUPPORTED_PRODUCTS: dict[str, str] = {
     "BTC-USD": "BTC",
     "ETH-USD": "ETH",
@@ -67,12 +70,16 @@ def _as_mapping(value: object) -> Mapping[str, Any]:
 def _decode_payload(message: str | bytes | Mapping[str, Any]) -> Mapping[str, Any]:
     try:
         if isinstance(message, bytes):
+            if len(message) > _MAX_PUBLIC_FRAME_BYTES:
+                raise PublicCryptoFeedError("public feed payload exceeds size limit")
             payload = json.loads(message.decode("utf-8"))
         elif isinstance(message, str):
+            if len(message.encode("utf-8")) > _MAX_PUBLIC_FRAME_BYTES:
+                raise PublicCryptoFeedError("public feed payload exceeds size limit")
             payload = json.loads(message)
         else:
             payload = dict(message)
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+    except (UnicodeDecodeError, UnicodeEncodeError, json.JSONDecodeError, TypeError, ValueError) as error:
         raise PublicCryptoFeedError("invalid public feed payload") from error
     return _as_mapping(payload)
 
@@ -139,6 +146,8 @@ def parse_public_ticker_message(
     events = root.get("events", [])
     if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
         raise PublicCryptoFeedError("ticker events must be an array")
+    if len(events) > _MAX_EVENTS_PER_FRAME:
+        raise PublicCryptoFeedError("ticker event count exceeds limit")
 
     for event_value in events:
         event = _as_mapping(event_value)
@@ -148,6 +157,8 @@ def parse_public_ticker_message(
             (str, bytes),
         ):
             raise PublicCryptoFeedError("ticker list must be an array")
+        if len(ticker_values) > _MAX_TICKERS_PER_EVENT:
+            raise PublicCryptoFeedError("ticker count exceeds limit")
         for ticker_value in ticker_values:
             ticker = _as_mapping(ticker_value)
             product_id = str(ticker.get("product_id", ""))
@@ -274,7 +285,7 @@ class CoinbasePublicMarketDataAdapter:
                     ping_interval=20,
                     ping_timeout=20,
                     close_timeout=5,
-                    max_size=2**20,
+                    max_size=_MAX_PUBLIC_FRAME_BYTES,
                 ) as websocket:
                     self._connected = True
                     self._connection_generation += 1
