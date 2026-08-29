@@ -61,12 +61,17 @@ The public adapter exposes operational telemetry without account connectivity:
 - connection attempts and reconnect count;
 - connection generation;
 - frames received and normalized ticks emitted;
-- parser error count;
+- parser error count and consecutive parser degradation;
+- message-timeout count;
 - current connection start time;
 - last message and last tick receive times;
 - last transport/parser error type.
 
 A successful reconnect increments the connection generation. When the monitor observes a new generation it resets the data-quality sequence state and clears accepted snapshots, rolling analytics history and per-symbol generation state before accepting data from the new connection. This prevents cached observations or sequence numbers from an old socket being treated as current.
+
+The public WebSocket receive loop is timeout-bounded. A socket that remains open but stops delivering messages is closed by the client path and reconnected with bounded exponential backoff. Backoff is reset only after valid ticker data is observed, rather than merely after a TCP/WebSocket connection succeeds.
+
+Malformed public frames use a small consecutive-error budget. Isolated parser failures are counted without immediately tearing down a healthy socket, but repeated failures cross the budget and force a reconnect. Heartbeat/control frames do not clear parser degradation; only valid ticker data does.
 
 Readiness requires BTC, ETH and SOL to have fresh observations from the current connection generation. The source heartbeat/message age is checked independently, so a connected socket without recent messages remains not ready.
 
