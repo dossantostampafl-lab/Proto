@@ -1,6 +1,6 @@
 from fastapi.routing import APIRoute
-from apps.api.app.main import app
 
+from apps.api.app.main import app
 
 FORBIDDEN_ROUTE_TERMS = {
     "broker",
