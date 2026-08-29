@@ -118,3 +118,14 @@ def test_quality_monitor_rejects_timezone_naive_timestamp_without_crashing() -> 
 
     assert report.valid is False
     assert DataQualityIssue.NAIVE_TIMESTAMP in report.issues
+
+
+def test_quality_monitor_rejects_non_finite_market_values() -> None:
+    monitor = DataQualityMonitor(stale_after_seconds=5)
+    now = datetime(2026, 8, 29, 0, 0, tzinfo=UTC)
+
+    for field, value in (("bid", float("nan")), ("volume", float("inf"))):
+        report = monitor.evaluate(_tick(**{field: value}), now=now)
+
+        assert report.valid is False
+        assert DataQualityIssue.NON_FINITE_VALUE in report.issues
