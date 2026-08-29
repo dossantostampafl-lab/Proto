@@ -4,7 +4,11 @@ from apps.api.app.live_app import app
 
 
 def test_standalone_live_app_exposes_only_safe_runtime_surfaces() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {
+        path
+        for route in app.routes
+        if isinstance((path := getattr(route, "path", None)), str)
+    }
 
     assert "/health" in paths
     assert "/events/ready" in paths
