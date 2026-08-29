@@ -21,8 +21,6 @@ from .public_feed_parser import (
 
 _COINBASE_PUBLIC_WS = "wss://advanced-trade-ws.coinbase.com"
 _COINBASE_PUBLIC_HOST = "advanced-trade-ws.coinbase.com"
-_MAX_PUBLIC_FRAME_BYTES = MAX_PUBLIC_FRAME_BYTES
-_SUPPORTED_PRODUCTS = SUPPORTED_PUBLIC_PRODUCTS
 
 
 class PublicFeedTimeoutError(PublicCryptoFeedError):
@@ -104,7 +102,7 @@ class CoinbasePublicMarketDataAdapter:
         resolved_products = tuple(dict.fromkeys(products))
         if not resolved_products:
             raise ValueError("at least one product is required")
-        unsupported = set(resolved_products).difference(_SUPPORTED_PRODUCTS)
+        unsupported = set(resolved_products).difference(SUPPORTED_PUBLIC_PRODUCTS)
         if unsupported:
             raise ValueError(f"unsupported public products: {sorted(unsupported)}")
         reconnect_values_valid = bool(
@@ -145,7 +143,7 @@ class CoinbasePublicMarketDataAdapter:
 
     @property
     def symbols(self) -> tuple[str, ...]:
-        return tuple(_SUPPORTED_PRODUCTS[product] for product in self.products)
+        return tuple(SUPPORTED_PUBLIC_PRODUCTS[product] for product in self.products)
 
     def health(self) -> PublicFeedHealth:
         return PublicFeedHealth(
@@ -190,7 +188,7 @@ class CoinbasePublicMarketDataAdapter:
                         ping_interval=20,
                         ping_timeout=20,
                         close_timeout=5,
-                        max_size=_MAX_PUBLIC_FRAME_BYTES,
+                        max_size=MAX_PUBLIC_FRAME_BYTES,
                     ) as websocket:
                         self._connected = True
                         self._connection_generation += 1
