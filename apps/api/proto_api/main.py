@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .models import (
@@ -24,6 +25,13 @@ app = FastAPI(
         "Research, simulation and paper-trading API. "
         "Real execution is not part of the MVP."
     ),
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 
