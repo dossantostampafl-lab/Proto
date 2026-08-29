@@ -131,6 +131,26 @@ class ReplaySession:
             self._paused = True
         return frame
 
+    def advance(self) -> list[ReplayFrame]:
+        """Advance one deterministic speed-sized batch without background execution."""
+        engine = self._require_engine()
+        if self._paused or engine.finished:
+            return []
+
+        batch_size = self._speed_batch_size()
+        frames: list[ReplayFrame] = []
+        for _ in range(batch_size):
+            frame = engine.next()
+            if frame is None:
+                break
+            frames.append(frame)
+
+        if frames:
+            self._last_frame = frames[-1]
+        if engine.finished:
+            self._paused = True
+        return frames
+
     def restart(self) -> dict[str, object]:
         engine = self._require_engine()
         engine.reset()
@@ -180,8 +200,12 @@ class ReplaySession:
             "last_timestamp": self._last_frame.timestamp if self._last_frame else None,
         }
 
+    def _speed_batch_size(self) -> int:
+        if self._speed == "MAX":
+            return 100
+        return int(self._speed.removesuffix("x"))
+
     def _require_engine(self) -> HistoricalReplay:
         if self._engine is None:
             raise RuntimeError("replay session has not been started")
         return self._engine
-
