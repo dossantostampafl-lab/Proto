@@ -90,3 +90,42 @@ def test_quality_monitor_detects_out_of_order_and_price_jump() -> None:
     assert DataQualityIssue.OUT_OF_ORDER_SEQUENCE in report.issues
     assert DataQualityIssue.OUT_OF_ORDER_TIMESTAMP in report.issues
     assert DataQualityIssue.PRICE_JUMP in report.issues
+
+
+def test_quality_monitor_rejects_future_timestamp_beyond_clock_skew() -> None:
+    now = datetime(2026, 8, 29, 0, 0, tzinfo=UTC)
+    monitor = DataQualityMonitor(
+        stale_after_seconds=5,
+        max_future_skew_seconds=1.0,
+    )
+
+    report = monitor.evaluate(
+        _tick(timestamp=now + timedelta(seconds=2)),
+        now=now,
+    )
+
+    assert report.valid is False
+    assert DataQualityIssue.FUTURE_TIMESTAMP in report.issues
+
+
+def test_quality_monitor_rejects_timezone_naive_timestamp_without_crashing() -> None:
+    monitor = DataQualityMonitor(stale_after_seconds=5)
+
+    report = monitor.evaluate(
+        _tick(timestamp=datetime(2026, 8, 29, 0, 0)),
+        now=datetime(2026, 8, 29, 0, 0, tzinfo=UTC),
+    )
+
+    assert report.valid is False
+    assert DataQualityIssue.NAIVE_TIMESTAMP in report.issues
+
+
+def test_quality_monitor_rejects_non_finite_market_values() -> None:
+    monitor = DataQualityMonitor(stale_after_seconds=5)
+    now = datetime(2026, 8, 29, 0, 0, tzinfo=UTC)
+
+    for field, value in (("bid", float("nan")), ("volume", float("inf"))):
+        report = monitor.evaluate(_tick(**{field: value}), now=now)
+
+        assert report.valid is False
+        assert DataQualityIssue.NON_FINITE_VALUE in report.issues

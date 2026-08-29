@@ -1,0 +1,37 @@
+name: Graphify
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  code-graph:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Graphify
+        run: python -m pip install --upgrade graphifyy
+      - name: Build local code-only knowledge graph
+        run: graphify . --code-only --no-viz
+      - name: Build Graphify community report
+        run: graphify cluster-only .
+      - name: Verify Graphify outputs
+        run: |
+          test -s graphify-out/graph.json
+          test -s graphify-out/GRAPH_REPORT.md
+      - name: Upload Graphify knowledge graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphify-code-knowledge-graph
+          path: |
+            graphify-out/graph.json
+            graphify-out/GRAPH_REPORT.md
+            graphify-out/.graphify_analysis.json
+          if-no-files-found: error
+          retention-days: 14

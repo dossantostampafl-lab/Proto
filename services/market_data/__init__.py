@@ -1,4 +1,4 @@
-"""Normalized market-data contracts and adapters for research/simulation."""
+"""Normalized market-data contracts and adapters for research and monitoring."""
 
 from .adapters import (
     CSVReplayAdapter,
@@ -15,9 +15,18 @@ from .core import (
     OrderBookMetrics,
     compute_orderbook_metrics,
 )
+from .live import (
+    CoinbasePublicMarketDataAdapter,
+    PublicFeedHealth,
+    PublicFeedTimeoutError,
+    PublicMarketDataAdapter,
+)
+from .live_status import evaluate_live_coverage, live_readiness_failures
+from .public_feed_parser import PublicCryptoFeedError, parse_public_ticker_message
 
 __all__ = [
     "CSVReplayAdapter",
+    "CoinbasePublicMarketDataAdapter",
     "DataQualityIssue",
     "DataQualityMonitor",
     "DataQualityReport",
@@ -26,6 +35,13 @@ __all__ = [
     "MarketTick",
     "MockPredictionMarketAdapter",
     "OrderBookMetrics",
+    "PublicCryptoFeedError",
+    "PublicFeedHealth",
+    "PublicFeedTimeoutError",
+    "PublicMarketDataAdapter",
     "SyntheticAdapter",
     "compute_orderbook_metrics",
+    "evaluate_live_coverage",
+    "live_readiness_failures",
+    "parse_public_ticker_message",
 ]

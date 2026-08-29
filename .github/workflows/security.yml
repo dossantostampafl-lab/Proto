@@ -1,0 +1,66 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  python-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade pip pip-audit
+      - run: pip install -e .
+      - run: pip-audit
+
+  rust-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Reject vulnerable rkyv if it enters the active graph
+        run: |
+          if cargo tree -e normal,build,dev | grep -qE 'rkyv v0\.7\.'; then
+            echo 'rkyv 0.7 is active; remove or upgrade it before merging.' >&2
+            exit 1
+          fi
+      - name: Cache pinned cargo-audit
+        id: cargo-audit-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
+      - name: Install pinned cargo-audit
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Verify cargo-audit version
+        run: cargo audit --version
+      - name: Audit Rust lockfile
+        run: |
+          # rust_decimal keeps rkyv 0.7 as an optional compatibility dependency in
+          # lockfile resolution. The previous step proves it is not in the active graph.
+          cargo audit --ignore RUSTSEC-2026-0235
+
+  web-audit:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high

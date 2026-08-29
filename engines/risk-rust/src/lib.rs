@@ -15,6 +15,7 @@ pub struct RiskLimits {
     pub max_position: Decimal,
     pub max_notional: Decimal,
     pub max_order_size: Decimal,
+    pub max_market_exposure: Decimal,
     pub max_asset_exposure: Decimal,
     pub max_total_exposure: Decimal,
     pub max_correlated_exposure: Decimal,
@@ -35,6 +36,7 @@ pub struct RiskRequest {
     pub current_position: Decimal,
     pub order_size: Decimal,
     pub order_notional: Decimal,
+    pub current_market_exposure: Decimal,
     pub current_asset_exposure: Decimal,
     pub current_total_exposure: Decimal,
     pub correlated_exposure: Decimal,
@@ -53,6 +55,7 @@ pub enum RejectionReason {
     PositionLimit,
     NotionalLimit,
     OrderSizeLimit,
+    MarketExposureLimit,
     AssetExposureLimit,
     TotalExposureLimit,
     CorrelatedExposureLimit,
@@ -83,6 +86,11 @@ impl RiskManager {
         let mut reasons = Vec::new();
         let projected_position = request.current_position + request.order_size;
         let risk_reducing = projected_position.abs() < request.current_position.abs();
+        let projected_market_exposure = if risk_reducing {
+            (request.current_market_exposure - request.order_notional.abs()).max(Decimal::ZERO)
+        } else {
+            request.current_market_exposure + request.order_notional.abs()
+        };
         let projected_asset_exposure = if risk_reducing {
             (request.current_asset_exposure - request.order_notional.abs()).max(Decimal::ZERO)
         } else {
@@ -105,6 +113,9 @@ impl RiskManager {
         }
         if request.order_size.abs() > self.limits.max_order_size {
             reasons.push(RejectionReason::OrderSizeLimit);
+        }
+        if projected_market_exposure > self.limits.max_market_exposure {
+            reasons.push(RejectionReason::MarketExposureLimit);
         }
         if projected_asset_exposure > self.limits.max_asset_exposure {
             reasons.push(RejectionReason::AssetExposureLimit);
@@ -167,6 +178,7 @@ mod tests {
                 max_position: Decimal::new(10, 0),
                 max_notional: Decimal::new(100_000, 0),
                 max_order_size: Decimal::new(2, 0),
+                max_market_exposure: Decimal::new(75_000, 0),
                 max_asset_exposure: Decimal::new(150_000, 0),
                 max_total_exposure: Decimal::new(300_000, 0),
                 max_correlated_exposure: Decimal::new(200_000, 0),
@@ -189,6 +201,7 @@ mod tests {
             current_position: Decimal::ZERO,
             order_size: Decimal::ONE,
             order_notional: Decimal::new(50_000, 0),
+            current_market_exposure: Decimal::ZERO,
             current_asset_exposure: Decimal::ZERO,
             current_total_exposure: Decimal::new(100_000, 0),
             correlated_exposure: Decimal::new(50_000, 0),
@@ -218,8 +231,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_aggregate_exposure_and_concentration_breaches() {
+    fn rejects_market_asset_and_total_exposure_breaches() {
         let mut candidate = request();
+        candidate.current_market_exposure = Decimal::new(60_000, 0);
         candidate.current_asset_exposure = Decimal::new(140_000, 0);
         candidate.current_total_exposure = Decimal::new(260_000, 0);
 
@@ -227,7 +241,8 @@ mod tests {
         assert!(matches!(
             decision,
             RiskDecision::Rejected(reasons)
-                if reasons.contains(&RejectionReason::AssetExposureLimit)
+                if reasons.contains(&RejectionReason::MarketExposureLimit)
+                    && reasons.contains(&RejectionReason::AssetExposureLimit)
                     && reasons.contains(&RejectionReason::TotalExposureLimit)
         ));
     }
@@ -237,6 +252,7 @@ mod tests {
         let mut candidate = request();
         candidate.current_position = Decimal::new(2, 0);
         candidate.order_size = Decimal::new(-1, 0);
+        candidate.current_market_exposure = Decimal::new(70_000, 0);
         candidate.current_asset_exposure = Decimal::new(80_000, 0);
         candidate.current_total_exposure = Decimal::new(120_000, 0);
         candidate.net_edge = Decimal::ZERO;
@@ -251,6 +267,7 @@ mod tests {
         let mut candidate = request();
         candidate.current_position = Decimal::new(2, 0);
         candidate.order_size = Decimal::new(-1, 0);
+        candidate.current_market_exposure = Decimal::new(70_000, 0);
         candidate.current_asset_exposure = Decimal::new(80_000, 0);
         candidate.current_total_exposure = Decimal::new(120_000, 0);
         candidate.latency_ms = 500;

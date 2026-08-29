@@ -4,18 +4,31 @@ services:
       context: .
       dockerfile: Dockerfile.api
     environment:
-      APP_ENV: development
-      SYSTEM_MODE: SIMULATION
+      APP_ENV: live-monitoring
+      SYSTEM_MODE: LIVE_MONITORING
+      LIVE_MONITORING_AUTOSTART: "true"
       DATABASE_URL: postgresql+asyncpg://prediction:prediction@postgres:5432/prediction_quant
+      REDIS_URL: redis://redis:6379/0
       PERSISTENCE_ENABLED: "true"
-      MINIMUM_NET_EDGE: "0.01"
-      MINIMUM_CONFIDENCE: "0.55"
-      MAX_NOTIONAL: "100000"
-      MAX_DAILY_DRAWDOWN: "5000"
+      HTTP_RATE_LIMIT_PER_MINUTE: "600"
     ports:
       - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/live/ready', timeout=2).read()
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   web:
@@ -45,5 +58,40 @@ services:
     volumes:
       - proto_pgdata:/var/lib/postgresql/data
 
+  redis:
+    image: redis:8-alpine
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_ADMIN_USER: proto
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-proto-local-dev}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    volumes:
+      - proto_grafana:/var/lib/grafana
+
 volumes:
   proto_pgdata:
+  proto_grafana:

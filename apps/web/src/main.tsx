@@ -84,6 +84,74 @@ type OrderBookFrame = {
   imbalance: number;
 };
 
+type LifecycleRow = {
+  market_id: string;
+  symbol: string;
+  source: string;
+  lifecycle_state: string;
+  resolution_state: string;
+  market_probability: number;
+  model_probability: number;
+  confidence: number;
+  uncertainty: number;
+  net_edge: number;
+  edge_decision: string;
+  liquidity_depth: number;
+  imbalance: number;
+  expiry_horizon_minutes: number;
+  synthetic_expires_at: string;
+  real_money_execution: boolean;
+};
+
+type LifecycleResponse = {
+  source: string;
+  count: number;
+  markets: LifecycleRow[];
+};
+
+type SyntheticGreeks = {
+  market_id: string;
+  symbol: string;
+  source: string;
+  market_probability_delta: number;
+  volatility_vega: number;
+  imbalance_kappa: number;
+  time_theta: number;
+  model_version: string;
+  feature_version: string;
+};
+
+type HawkesState = {
+  symbol: string;
+  source: string;
+  event_count: number;
+  baseline_intensity: number;
+  current_intensity: number;
+  excitation: number;
+  decay: number;
+  branching_ratio: number;
+  event_probability: number;
+};
+
+type ExpiryPoint = {
+  market_id: string;
+  symbol: string;
+  expiry_horizon_minutes: number;
+  model_probability: number;
+  net_edge: number;
+  absolute_net_edge: number;
+};
+
+type ExpiryMap = {
+  source: string;
+  axes: {
+    radius: string;
+    height: string;
+    intensity: string;
+  };
+  points: ExpiryPoint[];
+};
+
 type StreamEnvelope<T> = {
   type: string;
   data?: T;
@@ -100,6 +168,10 @@ function formatNumber(value: number, digits = 2) {
   }).format(value);
 }
 
+function formatPercent(value: number, digits = 2) {
+  return `${formatNumber(value * 100, digits)}%`;
+}
+
 function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -107,6 +179,10 @@ function App() {
   const [replay, setReplay] = useState<ReplayStatus | null>(null);
   const [marketData, setMarketData] = useState<MarketDataFrame | null>(null);
   const [orderBook, setOrderBook] = useState<OrderBookFrame | null>(null);
+  const [lifecycle, setLifecycle] = useState<LifecycleResponse | null>(null);
+  const [greeks, setGreeks] = useState<SyntheticGreeks | null>(null);
+  const [hawkes, setHawkes] = useState<HawkesState | null>(null);
+  const [expiryMap, setExpiryMap] = useState<ExpiryMap | null>(null);
   const [streamOnline, setStreamOnline] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
   const [seekCursor, setSeekCursor] = useState(0);
@@ -120,27 +196,39 @@ function App() {
 
     async function refresh() {
       try {
-        const [healthResponse, portfolioResponse, fillsResponse, replayResponse] = await Promise.all([
+        const responses = await Promise.all([
           fetch(`${API_BASE}/health`),
           fetch(`${API_BASE}/v1/portfolio`),
           fetch(`${API_BASE}/v1/fills?limit=8`),
           fetch(`${API_BASE}/replay/status`),
+          fetch(`${API_BASE}/market-lifecycle`),
+          fetch(`${API_BASE}/analytics/greeks/btc-threshold`),
+          fetch(`${API_BASE}/hawkes/BTC`),
+          fetch(`${API_BASE}/analytics/expiry-map`),
         ]);
 
-        if (
-          !healthResponse.ok ||
-          !portfolioResponse.ok ||
-          !fillsResponse.ok ||
-          !replayResponse.ok
-        ) {
+        if (responses.some((response) => !response.ok)) {
           throw new Error("API returned a non-success response");
         }
 
-        const [healthBody, portfolioBody, fillsBody, replayBody] = await Promise.all([
-          healthResponse.json() as Promise<Health>,
-          portfolioResponse.json() as Promise<Portfolio>,
-          fillsResponse.json() as Promise<FillJournal>,
-          replayResponse.json() as Promise<ReplayStatus>,
+        const [
+          healthBody,
+          portfolioBody,
+          fillsBody,
+          replayBody,
+          lifecycleBody,
+          greeksBody,
+          hawkesBody,
+          expiryBody,
+        ] = await Promise.all([
+          responses[0].json() as Promise<Health>,
+          responses[1].json() as Promise<Portfolio>,
+          responses[2].json() as Promise<FillJournal>,
+          responses[3].json() as Promise<ReplayStatus>,
+          responses[4].json() as Promise<LifecycleResponse>,
+          responses[5].json() as Promise<SyntheticGreeks>,
+          responses[6].json() as Promise<HawkesState>,
+          responses[7].json() as Promise<ExpiryMap>,
         ]);
 
         if (!cancelled) {
@@ -149,6 +237,10 @@ function App() {
           setJournal(fillsBody);
           setReplay(replayBody);
           setSeekCursor(replayBody.cursor);
+          setLifecycle(lifecycleBody);
+          setGreeks(greeksBody);
+          setHawkes(hawkesBody);
+          setExpiryMap(expiryBody);
           setError(null);
         }
       } catch (requestError) {
@@ -391,12 +483,12 @@ function App() {
             <span>{marketData?.symbol ?? "WAITING"}</span>
           </div>
           <div className="quoteGrid">
-            <span>Bid <b>{marketData ? formatNumber(marketData.bid) : "â€”"}</b></span>
-            <span>Ask <b>{marketData ? formatNumber(marketData.ask) : "â€”"}</b></span>
-            <span>Mid <b>{marketData ? formatNumber(marketData.mid) : "â€”"}</b></span>
-            <span>Spread <b>{marketData ? formatNumber(marketData.spread, 4) : "â€”"}</b></span>
-            <span>Market P <b>{marketData ? formatNumber(marketData.market_probability * 100, 2) + "%" : "â€”"}</b></span>
-            <span>Vol <b>{marketData ? formatNumber(marketData.volatility, 4) : "â€”"}</b></span>
+            <span>Bid <b>{marketData ? formatNumber(marketData.bid) : "—"}</b></span>
+            <span>Ask <b>{marketData ? formatNumber(marketData.ask) : "—"}</b></span>
+            <span>Mid <b>{marketData ? formatNumber(marketData.mid) : "—"}</b></span>
+            <span>Spread <b>{marketData ? formatNumber(marketData.spread, 4) : "—"}</b></span>
+            <span>Market P <b>{marketData ? formatPercent(marketData.market_probability) : "—"}</b></span>
+            <span>Vol <b>{marketData ? formatNumber(marketData.volatility, 4) : "—"}</b></span>
           </div>
         </article>
 
@@ -406,12 +498,108 @@ function App() {
             <span>{orderBook?.symbol ?? "WAITING"}</span>
           </div>
           <div className="quoteGrid">
-            <span>Bid size <b>{orderBook ? formatNumber(orderBook.bid_size, 4) : "â€”"}</b></span>
-            <span>Ask size <b>{orderBook ? formatNumber(orderBook.ask_size, 4) : "â€”"}</b></span>
-            <span>Best bid <b>{orderBook ? formatNumber(orderBook.best_bid) : "â€”"}</b></span>
-            <span>Best ask <b>{orderBook ? formatNumber(orderBook.best_ask) : "â€”"}</b></span>
-            <span>Imbalance <b>{orderBook ? formatNumber(orderBook.imbalance, 4) : "â€”"}</b></span>
-            <span>Spread <b>{orderBook ? formatNumber(orderBook.spread, 4) : "â€”"}</b></span>
+            <span>Bid size <b>{orderBook ? formatNumber(orderBook.bid_size, 4) : "—"}</b></span>
+            <span>Ask size <b>{orderBook ? formatNumber(orderBook.ask_size, 4) : "—"}</b></span>
+            <span>Best bid <b>{orderBook ? formatNumber(orderBook.best_bid) : "—"}</b></span>
+            <span>Best ask <b>{orderBook ? formatNumber(orderBook.best_ask) : "—"}</b></span>
+            <span>Imbalance <b>{orderBook ? formatNumber(orderBook.imbalance, 4) : "—"}</b></span>
+            <span>Spread <b>{orderBook ? formatNumber(orderBook.spread, 4) : "—"}</b></span>
+          </div>
+        </article>
+      </section>
+
+      <section className="dataGrid">
+        <article className="dataPanel">
+          <div className="panelTitle">
+            <p className="eyebrow">MARKET LIFECYCLE / RESOLUTION GRID</p>
+            <span>{lifecycle?.source ?? "WAITING"}</span>
+          </div>
+          <div className="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Market</th>
+                  <th>State</th>
+                  <th>Resolution</th>
+                  <th>Market P</th>
+                  <th>Model P</th>
+                  <th>Net edge</th>
+                  <th>Expiry</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(lifecycle?.markets ?? []).map((row) => (
+                  <tr key={row.market_id}>
+                    <td>{row.symbol}</td>
+                    <td>{row.lifecycle_state}</td>
+                    <td>{row.resolution_state}</td>
+                    <td>{formatPercent(row.market_probability)}</td>
+                    <td>{formatPercent(row.model_probability)}</td>
+                    <td>{formatPercent(row.net_edge)}</td>
+                    <td>{row.expiry_horizon_minutes}m</td>
+                  </tr>
+                ))}
+                {(lifecycle?.markets.length ?? 0) === 0 && (
+                  <tr><td colSpan={7} className="empty">Waiting for lifecycle analytics.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article className="dataPanel">
+          <div className="panelTitle">
+            <p className="eyebrow">SYNTHETIC GREEKS FIELD / BTC</p>
+            <span>{greeks?.source ?? "WAITING"}</span>
+          </div>
+          <div className="quoteGrid">
+            <span>Probability Δ <b>{greeks ? formatNumber(greeks.market_probability_delta, 6) : "—"}</b></span>
+            <span>Volatility ν <b>{greeks ? formatNumber(greeks.volatility_vega, 6) : "—"}</b></span>
+            <span>Imbalance κ <b>{greeks ? formatNumber(greeks.imbalance_kappa, 6) : "—"}</b></span>
+            <span>Time θ <b>{greeks ? formatNumber(greeks.time_theta, 6) : "—"}</b></span>
+            <span>Model <b>{greeks?.model_version ?? "—"}</b></span>
+            <span>Features <b>{greeks?.feature_version ?? "—"}</b></span>
+          </div>
+        </article>
+      </section>
+
+      <section className="dataGrid">
+        <article className="dataPanel">
+          <div className="panelTitle">
+            <p className="eyebrow">HAWKES CASCADE / BTC</p>
+            <span>{hawkes?.source ?? "WAITING"}</span>
+          </div>
+          <div className="quoteGrid">
+            <span>Baseline λ <b>{hawkes ? formatNumber(hawkes.baseline_intensity, 6) : "—"}</b></span>
+            <span>Current λ <b>{hawkes ? formatNumber(hawkes.current_intensity, 6) : "—"}</b></span>
+            <span>Excitation <b>{hawkes ? formatNumber(hawkes.excitation, 6) : "—"}</b></span>
+            <span>Decay <b>{hawkes ? formatNumber(hawkes.decay, 6) : "—"}</b></span>
+            <span>Branching <b>{hawkes ? formatNumber(hawkes.branching_ratio, 6) : "—"}</b></span>
+            <span>Event P <b>{hawkes ? formatPercent(hawkes.event_probability) : "—"}</b></span>
+          </div>
+        </article>
+
+        <article className="dataPanel">
+          <div className="panelTitle">
+            <p className="eyebrow">EXPIRY TORUS DATA</p>
+            <span>{expiryMap?.source ?? "WAITING"}</span>
+          </div>
+          <div className="fillList">
+            {(expiryMap?.points ?? []).map((point) => (
+              <div className="fillRow" key={point.market_id}>
+                <div>
+                  <strong>{point.symbol} / {point.expiry_horizon_minutes}m</strong>
+                  <small>{point.market_id}</small>
+                </div>
+                <div className="fillNumbers">
+                  <span>Model {formatPercent(point.model_probability)}</span>
+                  <b>Edge {formatPercent(point.net_edge)}</b>
+                </div>
+              </div>
+            ))}
+            {(expiryMap?.points.length ?? 0) === 0 && (
+              <p className="empty">Waiting for expiry analytics.</p>
+            )}
           </div>
         </article>
       </section>
@@ -499,4 +687,3 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </React.StrictMode>,
 );
-

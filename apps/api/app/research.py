@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 
 from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from .calibration import (
@@ -10,13 +12,26 @@ from .calibration import (
     brier_score,
     calibration_error,
     log_loss,
+    reliability_curve,
 )
+from .circuit_surface import router as circuit_router
+from .event_surface import router as event_router
+from .lifecycle import router as lifecycle_router
+from .live_routes import router as live_router
+from .metrics_state import metrics
 from .models import MarketSnapshot
-from .observability import RuntimeMetrics
 from .replay import HistoricalReplay, ReplayFrame
+from .safety_surface import router as safety_router
+from .surface import router as surface_router
+from .websockets import hub
 
-router = APIRouter(prefix="/research", tags=["research"])
-metrics = RuntimeMetrics()
+router = APIRouter(tags=["research"])
+router.include_router(surface_router)
+router.include_router(lifecycle_router)
+router.include_router(safety_router)
+router.include_router(circuit_router)
+router.include_router(event_router)
+router.include_router(live_router)
 
 
 class CalibrationPoint(BaseModel):
@@ -38,12 +53,13 @@ class ReplayRequest(BaseModel):
     frames: list[ReplayPoint] = Field(min_length=1)
 
 
-@router.post("/calibration")
-def calibration(request: CalibrationRequest) -> dict[str, float | int]:
+@router.post("/research/calibration")
+def calibration(request: CalibrationRequest) -> dict[str, object]:
     observations = [
         CalibrationObservation(probability=item.probability, outcome=item.outcome)
         for item in request.observations
     ]
+    curve = reliability_curve(observations, request.bins)
     metrics.increment("calibration_requests")
     return {
         "count": len(observations),
@@ -53,10 +69,11 @@ def calibration(request: CalibrationRequest) -> dict[str, float | int]:
             calibration_error(observations, request.bins),
             12,
         ),
+        "reliability_curve": [asdict(bucket) for bucket in curve],
     }
 
 
-@router.post("/replay")
+@router.post("/research/replay")
 def replay(request: ReplayRequest) -> dict[str, object]:
     engine = HistoricalReplay(
         [
@@ -86,12 +103,62 @@ def replay(request: ReplayRequest) -> dict[str, object]:
     }
 
 
-@router.get("/metrics")
+@router.get("/research/metrics")
 def runtime_metrics() -> dict[str, object]:
-    return metrics.snapshot()
+    return {**metrics.snapshot(), "websocket": hub.snapshot()}
 
 
-@router.post("/metrics/reset")
+@router.get("/metrics/prometheus", response_class=PlainTextResponse)
+def prometheus_metrics() -> str:
+    snapshot = metrics.snapshot()
+    websocket = hub.snapshot()
+    counters = snapshot["counters"]
+    lines = [
+        "# HELP proto_http_requests_total Total observed HTTP requests.",
+        "# TYPE proto_http_requests_total counter",
+        f"proto_http_requests_total {snapshot['http_request_count']}",
+        "# HELP proto_http_errors_total Total observed HTTP 5xx responses.",
+        "# TYPE proto_http_errors_total counter",
+        f"proto_http_errors_total {snapshot['http_error_count']}",
+        "# HELP proto_http_latency_ms Average HTTP request latency in milliseconds.",
+        "# TYPE proto_http_latency_ms gauge",
+        f"proto_http_latency_ms {snapshot['average_http_latency_ms']}",
+        "# HELP proto_simulation_latency_ms Average simulation latency in milliseconds.",
+        "# TYPE proto_simulation_latency_ms gauge",
+        f"proto_simulation_latency_ms {snapshot['average_simulation_latency_ms']}",
+        "# HELP proto_ws_connections Current WebSocket connections.",
+        "# TYPE proto_ws_connections gauge",
+        f"proto_ws_connections {websocket['total_connections']}",
+        "# HELP proto_ws_broadcasts_total WebSocket broadcast attempts.",
+        "# TYPE proto_ws_broadcasts_total counter",
+        f"proto_ws_broadcasts_total {websocket['broadcast_count']}",
+        "# HELP proto_ws_send_failures_total WebSocket send failures.",
+        "# TYPE proto_ws_send_failures_total counter",
+        f"proto_ws_send_failures_total {websocket['send_failures']}",
+        "# HELP proto_ws_origin_rejections_total WebSocket origin rejections.",
+        "# TYPE proto_ws_origin_rejections_total counter",
+        f"proto_ws_origin_rejections_total {websocket['origin_rejections']}",
+        "# HELP proto_ws_capacity_rejections_total WebSocket capacity rejections.",
+        "# TYPE proto_ws_capacity_rejections_total counter",
+        f"proto_ws_capacity_rejections_total {websocket['capacity_rejections']}",
+        "# HELP proto_ws_oversized_messages_total Oversized WebSocket frames.",
+        "# TYPE proto_ws_oversized_messages_total counter",
+        f"proto_ws_oversized_messages_total {websocket['oversized_messages']}",
+    ]
+    for channel, value in websocket["connections"].items():
+        lines.append(f'proto_ws_connections_by_channel{{channel="{channel}"}} {value}')
+    for name, value in sorted(counters.items()):
+        safe_name = "".join(character if character.isalnum() else "_" for character in name)
+        lines.extend(
+            [
+                f"# TYPE proto_{safe_name}_total counter",
+                f"proto_{safe_name}_total {value}",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+@router.post("/research/metrics/reset")
 def reset_runtime_metrics() -> dict[str, object]:
     metrics.reset()
     return metrics.snapshot()
