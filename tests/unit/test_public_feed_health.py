@@ -4,6 +4,7 @@ import pytest
 
 from services.market_data.live import (
     CoinbasePublicMarketDataAdapter,
+    PublicCryptoFeedError,
     PublicFeedTimeoutError,
     _receive_with_timeout,
 )
@@ -27,6 +28,7 @@ def test_public_feed_health_starts_disconnected_without_credentials() -> None:
     assert health.frames_received == 0
     assert health.ticks_emitted == 0
     assert health.parse_error_count == 0
+    assert health.consecutive_parse_errors == 0
     assert health.message_timeout_count == 0
     assert health.connected_since is None
     assert health.last_message_at is None
@@ -35,6 +37,7 @@ def test_public_feed_health_starts_disconnected_without_credentials() -> None:
     assert adapter.products == ("BTC-USD", "ETH-USD", "SOL-USD")
     assert adapter.endpoint == "wss://advanced-trade-ws.coinbase.com"
     assert adapter.message_timeout_seconds == 35.0
+    assert adapter.max_consecutive_parse_errors == 3
 
 
 def test_public_feed_rejects_unsupported_products() -> None:
@@ -54,6 +57,41 @@ def test_public_feed_rejects_invalid_reconnect_intervals() -> None:
 def test_public_feed_rejects_invalid_message_timeout(value: float) -> None:
     with pytest.raises(ValueError, match="message_timeout_seconds"):
         CoinbasePublicMarketDataAdapter(message_timeout_seconds=value)
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5])
+def test_public_feed_rejects_invalid_parse_error_budget(value: object) -> None:
+    with pytest.raises(ValueError, match="max_consecutive_parse_errors"):
+        CoinbasePublicMarketDataAdapter(max_consecutive_parse_errors=value)  # type: ignore[arg-type]
+
+
+def test_public_feed_tolerates_bounded_parse_errors_and_recovers() -> None:
+    adapter = CoinbasePublicMarketDataAdapter(max_consecutive_parse_errors=2)
+
+    assert adapter._parse_message("not-json") == []
+    degraded = adapter.health()
+    assert degraded.parse_error_count == 1
+    assert degraded.consecutive_parse_errors == 1
+    assert degraded.last_error == "PublicCryptoFeedError"
+
+    assert adapter._parse_message('{"channel":"heartbeats"}') == []
+    recovered = adapter.health()
+    assert recovered.parse_error_count == 1
+    assert recovered.consecutive_parse_errors == 0
+    assert recovered.last_error is None
+
+
+def test_public_feed_escalates_after_parse_error_budget_is_exhausted() -> None:
+    adapter = CoinbasePublicMarketDataAdapter(max_consecutive_parse_errors=2)
+
+    assert adapter._parse_message("not-json") == []
+    with pytest.raises(PublicCryptoFeedError, match="invalid public feed payload"):
+        adapter._parse_message("still-not-json")
+
+    health = adapter.health()
+    assert health.parse_error_count == 2
+    assert health.consecutive_parse_errors == 2
+    assert health.last_error == "PublicCryptoFeedError"
 
 
 @pytest.mark.asyncio
