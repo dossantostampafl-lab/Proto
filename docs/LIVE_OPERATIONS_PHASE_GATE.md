@@ -4,12 +4,14 @@ This gate applies only to the standalone public read-only BTC/ETH/SOL monitor.
 
 ## Supported staging runtime
 
-Use `docker-compose.live.yml` for the live-only stack. It contains only the standalone API, PostgreSQL, Redis, Prometheus and Grafana. It does not start the legacy research/simulation web application.
+Use `docker-compose.live.yml` for the live-only stack. It contains only the migration job, standalone API, PostgreSQL, Redis, Prometheus and Grafana. It does not start the legacy research/simulation web application.
 
 Required environment variables:
 
 - `PROTO_DB_PASSWORD`
 - `GRAFANA_ADMIN_PASSWORD`
+
+The one-shot `migrate` service runs `alembic upgrade head` against PostgreSQL before the API starts. Staging sets `LIVE_DATABASE_AUTO_CREATE=false`, so schema drift or a missing migration fails closed instead of being silently repaired by application startup.
 
 The API, Prometheus and Grafana ports bind to loopback by default. Put an authenticated TLS reverse proxy in front of them when remote access is required.
 
@@ -22,7 +24,8 @@ Every release candidate must preserve:
 - `real_money_execution=false`;
 - no account, order, deposit, withdrawal, custody or credential surface;
 - durable-before-fanout when persistence is required;
-- restart-safe persisted history that cannot satisfy current live readiness by itself.
+- restart-safe persisted history that cannot satisfy current live readiness by itself;
+- live database metadata isolated from legacy simulation persistence.
 
 ## Observability
 
@@ -53,7 +56,7 @@ The unit suite must prove that repeated transient durable-write failures:
 
 Before promoting a release candidate:
 
-1. Start the live-only stack with fresh volumes.
+1. Start the live-only stack with fresh volumes and confirm the migration service completes successfully before the API starts.
 2. Confirm `/health` returns the two capability invariants as false.
 3. Confirm `/live/ready` becomes ready only after fresh BTC, ETH and SOL observations and healthy required persistence.
 4. Confirm Prometheus target `proto-live-read-only` is up and all rule files load without error.
@@ -62,6 +65,7 @@ Before promoting a release candidate:
 7. Restart Redis and verify the application recovers after the event runtime reconnects/restarts.
 8. Restart PostgreSQL and verify durable-before-fanout fails closed while storage is unavailable and recovers when storage returns.
 9. Verify there are no `/probability`, `/edge`, `/simulation`, `/replay`, `/portfolio`, `/fills` or trading-oriented WebSocket routes in the standalone app.
+10. Verify the database contains the Alembic-managed live schema without legacy simulation tables.
 
 ## Backup and restore drill
 
