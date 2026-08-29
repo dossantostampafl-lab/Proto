@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from math import exp
+from math import exp, log
 
 from pydantic import BaseModel, Field
 
@@ -32,14 +32,19 @@ def _sigmoid(value: float) -> float:
     return 1.0 / (1.0 + exp(-max(min(value, 40.0), -40.0)))
 
 
-def estimate_probability(*, market_probability: float, volatility: float, imbalance: float) -> ProbabilityEstimate:
-    """Deterministic baseline used until fitted calibration artifacts are available.
+def estimate_probability(
+    *,
+    market_probability: float,
+    volatility: float,
+    imbalance: float,
+) -> ProbabilityEstimate:
+    """Return a conservative deterministic research baseline.
 
-    This is intentionally conservative: it anchors to the market probability and applies
-    bounded microstructure adjustments. It is not represented as a trained production model.
+    The estimator anchors to market probability and applies bounded
+    microstructure adjustments. It is not a trained production model.
     """
     p = min(max(market_probability, 1e-6), 1.0 - 1e-6)
-    market_logit = __import__("math").log(p / (1.0 - p))
+    market_logit = log(p / (1.0 - p))
     adjustment = 0.35 * max(min(imbalance, 1.0), -1.0) - 0.15 * max(volatility - 0.20, 0.0)
     probability = _sigmoid(market_logit + adjustment)
     uncertainty = min(0.50, 0.08 + max(volatility, 0.0) * 0.35)
