@@ -39,6 +39,16 @@ def test_orderbook_exposes_microstructure_metrics() -> None:
     assert body["best_bid"] <= body["microprice"] <= body["best_ask"]
 
 
+def test_data_quality_surface_reports_clean_synthetic_tick() -> None:
+    response = client.get("/data-quality/ETH")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["source"] == "SYNTHETIC_DEMO"
+    assert body["valid"] is True
+    assert body["issues"] == []
+
+
 def test_probability_and_edge_are_research_only() -> None:
     probability = client.get("/probability/btc-threshold")
     edge = client.get("/edge/btc-threshold")
@@ -49,6 +59,28 @@ def test_probability_and_edge_are_research_only() -> None:
     assert 0.0 <= probability.json()["probability"] <= 1.0
     assert edge.json()["decision"] in {"APPROVE_CANDIDATE", "REJECT"}
     assert edge.json()["source"] == "SYNTHETIC_DEMO"
+
+
+def test_expected_value_surface_decomposes_binary_contract_value() -> None:
+    response = client.get("/expected-value/btc-threshold")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["source"] == "SYNTHETIC_DEMO"
+    assert body["contract_price"] == 0.52
+    assert body["total_costs"] >= 0.0
+    assert body["risk_adjusted_ev"] <= body["ev_after_costs"] <= body["ev"]
+
+
+def test_synthetic_greeks_are_labeled_model_sensitivities() -> None:
+    response = client.get("/analytics/greeks/btc-threshold")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["source"] == "SYNTHETIC_MODEL_SENSITIVITY"
+    assert body["market_probability_delta"] > 0.0
+    assert body["time_theta"] == 0.0
+    assert "d(model_probability)" in body["definition"]["market_probability_delta"]
 
 
 def test_model_calibration_does_not_invent_metrics() -> None:
