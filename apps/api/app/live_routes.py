@@ -12,6 +12,7 @@ from .models import SystemMode
 from .settings import settings
 
 _NO_STORE_CACHE_CONTROL = "no-store, max-age=0"
+_READINESS_RETRY_AFTER_SECONDS = "1"
 
 
 def _mark_no_store(response: Response) -> None:
@@ -68,6 +69,7 @@ def live_ready(response: Response) -> dict[str, object]:
     ready = not failures
     if not ready:
         response.status_code = 503
+        response.headers["Retry-After"] = _READINESS_RETRY_AFTER_SECONDS
     return {
         "status": "ready" if ready else "not_ready",
         "readiness_failures": failures,
