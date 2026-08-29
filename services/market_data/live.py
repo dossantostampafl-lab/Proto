@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
@@ -12,21 +12,17 @@ from urllib.parse import urlsplit
 from websockets.asyncio.client import connect
 
 from .core import MarketTick
+from .public_feed_parser import (
+    MAX_PUBLIC_FRAME_BYTES,
+    SUPPORTED_PUBLIC_PRODUCTS,
+    PublicCryptoFeedError,
+    parse_public_ticker_message,
+)
 
 _COINBASE_PUBLIC_WS = "wss://advanced-trade-ws.coinbase.com"
 _COINBASE_PUBLIC_HOST = "advanced-trade-ws.coinbase.com"
-_MAX_PUBLIC_FRAME_BYTES = 256 * 1024
-_MAX_EVENTS_PER_FRAME = 32
-_MAX_TICKERS_PER_EVENT = 32
-_SUPPORTED_PRODUCTS: dict[str, str] = {
-    "BTC-USD": "BTC",
-    "ETH-USD": "ETH",
-    "SOL-USD": "SOL",
-}
-
-
-class PublicCryptoFeedError(RuntimeError):
-    """Raised when a public crypto market-data frame cannot be normalized safely."""
+_MAX_PUBLIC_FRAME_BYTES = MAX_PUBLIC_FRAME_BYTES
+_SUPPORTED_PRODUCTS = SUPPORTED_PUBLIC_PRODUCTS
 
 
 class PublicFeedTimeoutError(PublicCryptoFeedError):
@@ -61,41 +57,6 @@ class PublicMarketDataAdapter(Protocol):
     def stream(self) -> AsyncIterator[MarketTick]: ...
 
 
-def _as_mapping(value: object) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise PublicCryptoFeedError("expected object payload")
-    return value
-
-
-def _decode_payload(message: str | bytes | Mapping[str, Any]) -> Mapping[str, Any]:
-    try:
-        if isinstance(message, bytes):
-            if len(message) > _MAX_PUBLIC_FRAME_BYTES:
-                raise PublicCryptoFeedError("public feed payload exceeds size limit")
-            payload = json.loads(message.decode("utf-8"))
-        elif isinstance(message, str):
-            if len(message.encode("utf-8")) > _MAX_PUBLIC_FRAME_BYTES:
-                raise PublicCryptoFeedError("public feed payload exceeds size limit")
-            payload = json.loads(message)
-        else:
-            payload = dict(message)
-    except (UnicodeDecodeError, UnicodeEncodeError, json.JSONDecodeError, TypeError, ValueError) as error:
-        raise PublicCryptoFeedError("invalid public feed payload") from error
-    return _as_mapping(payload)
-
-
-def _parse_timestamp(value: object) -> datetime:
-    if not isinstance(value, str):
-        raise PublicCryptoFeedError("ticker timestamp is missing")
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise PublicCryptoFeedError("ticker timestamp is invalid") from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise PublicCryptoFeedError("ticker timestamp must be timezone-aware")
-    return parsed.astimezone(UTC)
-
-
 def _validate_public_endpoint(endpoint: str) -> str:
     if endpoint != endpoint.strip() or not endpoint:
         raise ValueError("public endpoint must be a canonical WSS URL")
@@ -125,63 +86,6 @@ async def _receive_with_timeout(websocket: Any, timeout_seconds: float) -> str |
     if not isinstance(message, (str, bytes)):
         raise PublicCryptoFeedError("public feed message must be text or bytes")
     return message
-
-
-def parse_public_ticker_message(
-    message: str | bytes | Mapping[str, Any],
-) -> list[MarketTick]:
-    root = _decode_payload(message)
-    if root.get("channel") != "ticker":
-        return []
-
-    timestamp = _parse_timestamp(root.get("timestamp"))
-    try:
-        sequence = int(root.get("sequence_num", 0))
-    except (TypeError, ValueError) as error:
-        raise PublicCryptoFeedError("ticker sequence is invalid") from error
-    if sequence < 0:
-        raise PublicCryptoFeedError("ticker sequence must be non-negative")
-
-    ticks: list[MarketTick] = []
-    events = root.get("events", [])
-    if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
-        raise PublicCryptoFeedError("ticker events must be an array")
-    if len(events) > _MAX_EVENTS_PER_FRAME:
-        raise PublicCryptoFeedError("ticker event count exceeds limit")
-
-    for event_value in events:
-        event = _as_mapping(event_value)
-        ticker_values = event.get("tickers", [])
-        if not isinstance(ticker_values, Sequence) or isinstance(
-            ticker_values,
-            (str, bytes),
-        ):
-            raise PublicCryptoFeedError("ticker list must be an array")
-        if len(ticker_values) > _MAX_TICKERS_PER_EVENT:
-            raise PublicCryptoFeedError("ticker count exceeds limit")
-        for ticker_value in ticker_values:
-            ticker = _as_mapping(ticker_value)
-            product_id = str(ticker.get("product_id", ""))
-            symbol = _SUPPORTED_PRODUCTS.get(product_id)
-            if symbol is None:
-                continue
-            try:
-                tick = MarketTick(
-                    timestamp=timestamp,
-                    venue="coinbase-public",
-                    symbol=symbol,
-                    bid=float(ticker["best_bid"]),
-                    ask=float(ticker["best_ask"]),
-                    last=float(ticker["price"]),
-                    volume=float(ticker.get("volume_24_h", 0.0)),
-                    bid_size=float(ticker.get("best_bid_quantity", 0.0)),
-                    ask_size=float(ticker.get("best_ask_quantity", 0.0)),
-                    sequence=sequence,
-                )
-            except (KeyError, TypeError, ValueError) as error:
-                raise PublicCryptoFeedError("invalid public ticker frame") from error
-            ticks.append(tick)
-    return ticks
 
 
 class CoinbasePublicMarketDataAdapter:
