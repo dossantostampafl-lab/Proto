@@ -337,15 +337,3 @@ def live_analytics_symbol(symbol: str) -> dict[str, object]:
     if analytics is None:
         raise HTTPException(status_code=404, detail="no live analytics available for symbol")
     return analytics
-
-
-@router.post("/start")
-async def live_start() -> dict[str, object]:
-    await live_monitor.start()
-    return live_monitor.status()
-
-
-@router.post("/stop")
-async def live_stop() -> dict[str, object]:
-    await live_monitor.stop()
-    return live_monitor.status()
