@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import ast
 from pathlib import Path
-
 
 LIVE_MONITOR = Path("apps/api/app/live_monitor.py")
 PUBLIC_FEED = Path("services/market_data/live.py")
