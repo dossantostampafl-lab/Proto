@@ -62,6 +62,47 @@ def test_live_coverage_reports_missing_and_stale_symbols() -> None:
     assert coverage["current_connection_symbols"] == ["BTC", "ETH"]
 
 
+def test_live_coverage_reports_source_age_and_server_receipt_age_separately() -> None:
+    now = datetime(2026, 8, 29, 21, 0, tzinfo=UTC)
+    source_at = now - timedelta(seconds=2)
+    received_at = now - timedelta(milliseconds=250)
+
+    coverage = evaluate_live_coverage(
+        expected_symbols=("BTC",),
+        latest={"BTC": _tick("BTC", source_at)},
+        symbol_connection_generation={"BTC": 4},
+        current_generation=4,
+        connected=True,
+        stale_after_seconds=10.0,
+        received_times={"BTC": received_at},
+        now=now,
+    )
+
+    health = coverage["symbol_health"]["BTC"]
+    assert health["latest_observed_at"] == source_at.isoformat()
+    assert health["age_seconds"] == 2.0
+    assert health["latest_received_at"] == received_at.isoformat()
+    assert health["receipt_age_seconds"] == 0.25
+    assert coverage["latest_received_at"] == received_at.isoformat()
+    assert coverage["last_receipt_age_seconds"] == 0.25
+
+
+def test_live_coverage_rejects_timezone_naive_receive_timestamp() -> None:
+    now = datetime(2026, 8, 29, 21, 0, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="received time for BTC must be timezone-aware"):
+        evaluate_live_coverage(
+            expected_symbols=("BTC",),
+            latest={"BTC": _tick("BTC", now)},
+            symbol_connection_generation={"BTC": 1},
+            current_generation=1,
+            connected=True,
+            stale_after_seconds=10.0,
+            received_times={"BTC": datetime(2026, 8, 29, 21, 0)},
+            now=now,
+        )
+
+
 def test_live_coverage_requires_current_connection_generation() -> None:
     now = datetime(2026, 8, 29, 21, 0, tzinfo=UTC)
     latest = {
