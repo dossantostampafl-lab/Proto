@@ -62,9 +62,11 @@ class PaperPortfolio:
             position.as_dict()
             for position in sorted(self._positions.values(), key=lambda item: item.asset.value)
         ]
+        total_realized_pnl = sum(item.realized_pnl for item in self._positions.values())
+        total_fees = sum(item.fees for item in self._positions.values())
         return {
             "mode": "SIMULATION",
             "positions": positions,
-            "total_realized_pnl": round(sum(item.realized_pnl for item in self._positions.values()), 10),
-            "total_fees": round(sum(item.fees for item in self._positions.values()), 10),
+            "total_realized_pnl": round(total_realized_pnl, 10),
+            "total_fees": round(total_fees, 10),
         }
