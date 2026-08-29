@@ -56,6 +56,9 @@ class PaperSimulator:
         fee = notional * self.config.fee_bps / 10_000
         fill = Fill(
             order_id=order.id,
+            market_id=order.market_id,
+            asset=order.asset,
+            side=order.side,
             filled_quantity=order.quantity,
             fill_price=round(fill_price, 10),
             fee=round(fee, 10),
