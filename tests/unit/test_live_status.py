@@ -1,7 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
 from services.market_data.core import MarketTick
-from services.market_data.live_status import evaluate_live_coverage
+from services.market_data.live_status import (
+    evaluate_live_coverage,
+    live_readiness_failures,
+)
 
 
 def _tick(symbol: str, observed_at: datetime) -> MarketTick:
@@ -89,3 +92,40 @@ def test_live_coverage_is_fully_healthy_for_fresh_current_generation() -> None:
     assert coverage["all_symbols_current_connection"] is True
     assert coverage["stale"] is False
     assert coverage["missing_symbols"] == []
+
+
+def test_readiness_failures_are_explicit_for_stopped_disconnected_monitor() -> None:
+    failures = live_readiness_failures(
+        running=False,
+        connected=False,
+        message_fresh=False,
+        coverage={
+            "receiving_data": False,
+            "complete": False,
+            "all_symbols_fresh": False,
+            "all_symbols_current_connection": False,
+        },
+    )
+
+    assert failures == [
+        "MONITOR_STOPPED",
+        "SOURCE_DISCONNECTED",
+        "NO_FRESH_DATA",
+        "INCOMPLETE_SYMBOL_COVERAGE",
+    ]
+
+
+def test_readiness_failures_are_empty_for_healthy_live_coverage() -> None:
+    failures = live_readiness_failures(
+        running=True,
+        connected=True,
+        message_fresh=True,
+        coverage={
+            "receiving_data": True,
+            "complete": True,
+            "all_symbols_fresh": True,
+            "all_symbols_current_connection": True,
+        },
+    )
+
+    assert failures == []
