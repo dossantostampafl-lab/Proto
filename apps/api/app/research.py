@@ -16,9 +16,9 @@ from .calibration import (
 )
 from .lifecycle import router as lifecycle_router
 from .live_monitor import router as live_router
+from .metrics_state import metrics
 from .models import MarketSnapshot
 from .replay import HistoricalReplay, ReplayFrame
-from .runtime_metrics import metrics
 from .safety_surface import router as safety_router
 from .surface import router as surface_router
 from .websockets import hub
