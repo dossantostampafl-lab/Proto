@@ -3,8 +3,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from . import __version__
-from .models import RunMode, SimulationRequest, SimulationResult
+from .models import EdgeEstimate, EdgeRequest, RunMode, SimulationRequest, SimulationResult
 from .portfolio import PaperPortfolio
+from .quant import estimate_binary_edge
 from .simulation import PaperSimulator
 
 app = FastAPI(
@@ -31,6 +32,11 @@ def simulate(request: SimulationRequest) -> SimulationResult:
     if result.accepted and result.fill is not None:
         portfolio.apply_fill(request.order, result.fill)
     return result
+
+
+@app.post("/v1/edge", response_model=EdgeEstimate)
+def edge(request: EdgeRequest) -> EdgeEstimate:
+    return estimate_binary_edge(request)
 
 
 @app.get("/v1/portfolio")
