@@ -77,6 +77,8 @@ services:
       - --storage.tsdb.path=/prometheus
     volumes:
       - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/live-alerts.yml:/etc/prometheus/live-alerts.yml:ro
+      - proto_prometheus:/prometheus
     ports:
       - "9090:9090"
     depends_on:
@@ -94,7 +96,10 @@ services:
       - prometheus
     volumes:
       - proto_grafana:/var/lib/grafana
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
 volumes:
   proto_pgdata:
+  proto_prometheus:
   proto_grafana:
