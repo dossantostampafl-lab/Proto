@@ -4,11 +4,13 @@ import json
 import pytest
 
 from services.market_data.live import (
-    _MAX_PUBLIC_FRAME_BYTES,
     CoinbasePublicMarketDataAdapter,
-    PublicCryptoFeedError,
     PublicFeedTimeoutError,
     _receive_with_timeout,
+)
+from services.market_data.public_feed_parser import (
+    MAX_PUBLIC_FRAME_BYTES,
+    PublicCryptoFeedError,
     parse_public_ticker_message,
 )
 
@@ -94,7 +96,7 @@ def test_public_feed_rejects_invalid_parse_error_budget(value: object) -> None:
 
 
 def test_public_feed_rejects_oversized_wire_payload_before_json_decode() -> None:
-    oversized = "x" * (_MAX_PUBLIC_FRAME_BYTES + 1)
+    oversized = "x" * (MAX_PUBLIC_FRAME_BYTES + 1)
 
     with pytest.raises(PublicCryptoFeedError, match="exceeds size limit"):
         parse_public_ticker_message(oversized)
@@ -109,6 +111,18 @@ def test_public_feed_rejects_excessive_ticker_event_cardinality() -> None:
     }
 
     with pytest.raises(PublicCryptoFeedError, match="event count exceeds limit"):
+        parse_public_ticker_message(payload)
+
+
+def test_public_feed_rejects_excessive_tickers_per_event() -> None:
+    payload = {
+        "channel": "ticker",
+        "timestamp": "2026-08-29T20:15:00Z",
+        "sequence_num": 42,
+        "events": [{"tickers": [{} for _ in range(33)]}],
+    }
+
+    with pytest.raises(PublicCryptoFeedError, match="ticker count exceeds limit"):
         parse_public_ticker_message(payload)
 
 
