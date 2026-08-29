@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from services.analytics.live_market import calculate_live_market_analytics
 from services.market_data import (
     CoinbasePublicMarketDataAdapter,
+    DataQualityIssue,
     DataQualityMonitor,
     MarketTick,
     PublicMarketDataAdapter,
@@ -228,6 +229,10 @@ class LiveCryptoMonitor:
             metrics.increment("live_market_frames_rejected")
             for issue in report.issues:
                 metrics.increment(f"live_data_quality_{issue.value.lower()}")
+                if issue is DataQualityIssue.DUPLICATE_SEQUENCE:
+                    self._record_sequence_rejection(tick.symbol, "duplicate")
+                elif issue is DataQualityIssue.OUT_OF_ORDER_SEQUENCE:
+                    self._record_sequence_rejection(tick.symbol, "regression")
             return False
 
         previous_sequence = self._last_sequence.get(tick.symbol)
