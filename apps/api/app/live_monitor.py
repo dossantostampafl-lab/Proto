@@ -92,6 +92,7 @@ class LiveCryptoMonitor:
             "source": "PUBLIC_READ_ONLY",
             "latest_observed_at": latest.isoformat() if latest is not None else None,
             "last_frame_age_seconds": round(age_seconds, 6) if age_seconds is not None else None,
+            "feed_health": asdict(self._adapter.health()),
             "financial_connectivity": False,
             "real_money_execution": False,
             "symbols": sorted(self._latest),
