@@ -78,9 +78,28 @@ def test_invalid_contract_inputs_are_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize("invalid", [math.nan, math.inf, -math.inf])
+def test_non_finite_contract_inputs_are_rejected(invalid: float) -> None:
+    with pytest.raises(ValueError):
+        threshold_probability(
+            BinaryContractInputs(
+                spot=invalid,
+                strike=100.0,
+                volatility=0.20,
+                time_to_expiry_years=1.0,
+            )
+        )
+
+
 def test_log_odds_conversion_is_numerically_stable() -> None:
     assert probability_from_log_odds(1000.0) == pytest.approx(1.0)
     assert probability_from_log_odds(-1000.0) == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("invalid", [math.nan, math.inf, -math.inf])
+def test_log_odds_conversion_rejects_non_finite_values(invalid: float) -> None:
+    with pytest.raises(ValueError):
+        probability_from_log_odds(invalid)
 
 
 def test_synthetic_greeks_endpoint_is_explicitly_research_only() -> None:
