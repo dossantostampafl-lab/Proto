@@ -15,3 +15,18 @@ def test_live_monitoring_http_surface_exposes_expected_read_only_routes() -> Non
     assert client.get("/live/source-health").status_code == 200
     assert client.get("/live/ready").status_code == 503
     assert client.get("/live/market-data").status_code == 200
+
+
+def test_live_monitoring_responses_are_never_cacheable() -> None:
+    paths = (
+        "/live/status",
+        "/live/source-health",
+        "/live/ready",
+        "/live/market-data",
+        "/live/market-data/DOGE",
+        "/live/analytics/DOGE",
+    )
+
+    for path in paths:
+        response = client.get(path)
+        assert response.headers["cache-control"] == "no-store, max-age=0"
