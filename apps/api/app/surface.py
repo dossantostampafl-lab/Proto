@@ -5,9 +5,15 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 
+from services.analytics.greeks import calculate_synthetic_greeks
 from services.hawkes.core import ExponentialHawkesEngine
-from services.market_data.core import MarketTick, compute_orderbook_metrics
+from services.market_data.core import (
+    DataQualityMonitor,
+    MarketTick,
+    compute_orderbook_metrics,
+)
 from services.quant.core import compute_edge, estimate_probability
+from services.quant.expected_value import calculate_expected_value
 
 from .settings import settings
 
@@ -94,6 +100,15 @@ def _tick(market: SyntheticMarket) -> MarketTick:
     )
 
 
+def _estimate(market: SyntheticMarket):
+    imbalance = compute_orderbook_metrics(_tick(market)).imbalance
+    return estimate_probability(
+        market_probability=market.market_probability,
+        volatility=market.volatility,
+        imbalance=imbalance,
+    )
+
+
 @router.get("/markets/{market_id}")
 def market_detail(market_id: str) -> dict[str, object]:
     market = _market(market_id)
@@ -140,6 +155,20 @@ def orderbook(symbol: str) -> dict[str, object]:
     }
 
 
+@router.get("/data-quality/{symbol}")
+def data_quality(symbol: str) -> dict[str, object]:
+    market = _market_for_symbol(symbol)
+    tick = _tick(market)
+    monitor = DataQualityMonitor()
+    report = monitor.evaluate(tick, now=tick.timestamp)
+    return {
+        "symbol": market.symbol,
+        "source": "SYNTHETIC_DEMO",
+        "valid": report.valid,
+        "issues": [issue.value for issue in report.issues],
+    }
+
+
 @router.get("/models")
 def models() -> list[dict[str, object]]:
     return [
@@ -180,12 +209,7 @@ def model_calibration() -> dict[str, object]:
 @router.get("/probability/{market_id}")
 def probability_for_market(market_id: str) -> dict[str, object]:
     market = _market(market_id)
-    imbalance = compute_orderbook_metrics(_tick(market)).imbalance
-    estimate = estimate_probability(
-        market_probability=market.market_probability,
-        volatility=market.volatility,
-        imbalance=imbalance,
-    )
+    estimate = _estimate(market)
     return {
         "market_id": market.market_id,
         "symbol": market.symbol,
@@ -198,12 +222,7 @@ def probability_for_market(market_id: str) -> dict[str, object]:
 def edge_for_market(market_id: str) -> dict[str, object]:
     market = _market(market_id)
     tick = _tick(market)
-    orderbook_metrics = compute_orderbook_metrics(tick)
-    estimate = estimate_probability(
-        market_probability=market.market_probability,
-        volatility=market.volatility,
-        imbalance=orderbook_metrics.imbalance,
-    )
+    estimate = _estimate(market)
     spread_cost = max(tick.spread, 0.0) / max(tick.bid + tick.ask, 1e-9)
     edge = compute_edge(
         model_probability=estimate.probability,
@@ -221,6 +240,54 @@ def edge_for_market(market_id: str) -> dict[str, object]:
         "symbol": market.symbol,
         "source": "SYNTHETIC_DEMO",
         **edge.model_dump(),
+    }
+
+
+@router.get("/expected-value/{market_id}")
+def expected_value_for_market(market_id: str) -> dict[str, object]:
+    market = _market(market_id)
+    estimate = _estimate(market)
+    contract_price = market.market_probability
+    result = calculate_expected_value(
+        win_probability=estimate.probability,
+        profit_if_win=1.0 - contract_price,
+        loss_if_lose=contract_price,
+        fees=0.001,
+        slippage=0.001,
+        spread_cost=0.001,
+        hedge_cost=0.001,
+        latency_cost=0.0005,
+        uncertainty_penalty=estimate.uncertainty * 0.02,
+    )
+    return {
+        "market_id": market.market_id,
+        "symbol": market.symbol,
+        "source": "SYNTHETIC_DEMO",
+        "contract_price": contract_price,
+        **result.model_dump(),
+    }
+
+
+@router.get("/analytics/greeks/{market_id}")
+def synthetic_greeks_for_market(market_id: str) -> dict[str, object]:
+    market = _market(market_id)
+    imbalance = compute_orderbook_metrics(_tick(market)).imbalance
+    greeks = calculate_synthetic_greeks(
+        market_probability=market.market_probability,
+        volatility=market.volatility,
+        imbalance=imbalance,
+    )
+    return {
+        "market_id": market.market_id,
+        "symbol": market.symbol,
+        "source": "SYNTHETIC_MODEL_SENSITIVITY",
+        "definition": {
+            "market_probability_delta": "d(model_probability)/d(market_probability)",
+            "volatility_vega": "d(model_probability)/d(volatility)",
+            "imbalance_kappa": "d(model_probability)/d(orderbook_imbalance)",
+            "time_theta": "0 because baseline-logit-v0 has no time input",
+        },
+        **greeks.__dict__,
     }
 
 
