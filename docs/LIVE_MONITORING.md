@@ -56,6 +56,17 @@ The monitor keeps only a bounded in-memory history per symbol for descriptive me
 
 These measurements are descriptive monitoring outputs. They are not an order or execution interface.
 
+## Source time and server receive time
+
+Accepted live observations keep the external source clock separate from the application receive clock:
+
+- `timestamp` / `latest_source_at` is the normalized UTC timestamp carried by the public market-data source;
+- `received_at` / `latest_received_at` is the UTC instant at which Proto accepted the canonical tick;
+- `source_to_server_delta_ms` is the signed difference between the two clocks in milliseconds;
+- `server_observed_at` marks when a source-health snapshot was assembled by Proto.
+
+This separation prevents network delay and clock skew from being hidden inside a single timestamp. The source timestamp remains part of the canonical data-quality/freshness checks, while the receive timestamp is operational telemetry. Both are cleared with accepted snapshots when the connection generation changes.
+
 ## Connection health and reconnect isolation
 
 The public adapter exposes operational telemetry without account connectivity:
@@ -69,9 +80,9 @@ The public adapter exposes operational telemetry without account connectivity:
 - last message and last tick receive times;
 - last transport/parser error type.
 
-A successful reconnect increments the connection generation. When the monitor observes a new generation it resets the data-quality sequence state and clears accepted snapshots, rolling analytics history and per-symbol generation state before accepting data from the new connection. This prevents cached observations or sequence numbers from an old socket being treated as current.
+A successful reconnect increments the connection generation. When the monitor observes a new generation it resets the data-quality sequence state and clears accepted snapshots, rolling analytics history, receive timestamps and per-symbol generation state before accepting data from the new connection. This prevents cached observations or sequence numbers from an old socket being treated as current.
 
-Accepted market-data snapshots and L1 WebSocket payloads carry both `connection_generation` and source `sequence`. Clients can therefore reject delayed frames that belong to an older socket generation instead of combining observations across reconnects.
+Accepted market-data snapshots and L1 WebSocket payloads carry `connection_generation`, source `sequence`, source `timestamp`, server `received_at` and the source-to-server timing delta. Clients can therefore reject delayed frames that belong to an older socket generation instead of combining observations across reconnects.
 
 The public WebSocket receive loop is timeout-bounded. A socket that remains open but stops delivering messages is closed by the client path and reconnected with bounded exponential backoff. Backoff is reset only after valid ticker data is observed, rather than merely after a TCP/WebSocket connection succeeds. Explicit async-generator shutdown also clears the connected-state telemetry in a `finally` path.
 
@@ -107,7 +118,7 @@ WebSocket channels `market-data` and `orderbook` carry only normalized public mo
 
 ## CI, Security and Graphify
 
-Every change remains behind the normal CI, Security and Graphify workflows. Graphify is used to inspect cross-module coupling and guide safe refactors. The public live monitor depends on the `PublicMarketDataAdapter` protocol rather than a concrete transport implementation, public parsing is isolated from the transport adapter, and live coverage/readiness evaluation is split into pure functions for deterministic testing.
+Every change remains behind the normal CI, Security and Graphify workflows. Graphify is used to inspect cross-module coupling and guide safe refactors. The public live monitor depends on the `PublicMarketDataAdapter` protocol rather than a concrete transport implementation, public parsing is isolated from the transport adapter, live HTTP presentation is isolated in `live_routes.py`, and live coverage/readiness evaluation is split into pure functions for deterministic testing.
 
 The Security workflow keeps Python, Web and Rust dependency audits independent. The Rust scanner is version-pinned for reproducible runs while the active dependency graph is checked before the single documented lockfile-only `rkyv` advisory exception is applied.
 
