@@ -43,7 +43,7 @@ A frame is rejected when the canonical data-quality checks fail. Checks include:
 - excessive one-frame price jumps;
 - symbols outside the configured BTC/ETH/SOL allowlist.
 
-Rejected frames do not enter the accepted snapshot, rolling analytics history or WebSocket output.
+Rejected frames do not enter the accepted snapshot, rolling analytics history or WebSocket output. Data-quality thresholds themselves reject non-finite configuration so `NaN` or infinity cannot silently disable a gate.
 
 The monitor keeps only a bounded in-memory history per symbol for descriptive measurements such as:
 
@@ -90,14 +90,14 @@ Readiness requires BTC, ETH and SOL to have fresh observations from the current 
 
 ## Operational endpoints
 
+The HTTP monitoring surface is intentionally read-only. Starting and stopping the monitor is an internal lifecycle concern controlled by `LIVE_MONITORING_AUTOSTART`, not a public HTTP operation.
+
 - `GET /live/status` - live monitor state, freshness, per-symbol connection generation and public-feed health;
 - `GET /live/source-health` - transport counters, reconnect generation, heartbeat/message age and current public-feed state;
 - `GET /live/ready` - fail-closed readiness check with explicit failure reasons;
 - `GET /live/market-data` - accepted public snapshots;
 - `GET /live/market-data/{symbol}` - one accepted public snapshot;
-- `GET /live/analytics/{symbol}` - bounded descriptive analytics;
-- `POST /live/start` - start the read-only monitor;
-- `POST /live/stop` - stop the read-only monitor.
+- `GET /live/analytics/{symbol}` - bounded descriptive analytics.
 
 WebSocket channels `market-data` and `orderbook` carry only normalized public monitoring payloads when this live monitor is the producer. Fanout to the two channels is concurrent, failed peers are pruned, send operations are timeout-bounded, origins are checked, message sizes are bounded and per-channel connection capacity is enforced with an async lock to prevent concurrent admission races.
 
