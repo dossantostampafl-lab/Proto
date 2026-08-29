@@ -28,6 +28,7 @@ def evaluate_live_coverage(
     if not symbols:
         raise ValueError("expected_symbols must not be empty")
 
+    receipt_tracking_enabled = received_times is not None
     receipt_map = received_times or {}
     for symbol, received_at in receipt_map.items():
         if received_at.tzinfo is None or received_at.utcoffset() is None:
@@ -37,6 +38,9 @@ def evaluate_live_coverage(
     missing_symbols: list[str] = []
     stale_symbols: list[str] = []
     fresh_symbols: list[str] = []
+    missing_receipt_symbols: list[str] = []
+    stale_receipt_symbols: list[str] = []
+    fresh_receipt_symbols: list[str] = []
     current_connection_symbols: list[str] = []
     observed_ticks: list[MarketTick] = []
     observed_receipts: list[datetime] = []
@@ -49,6 +53,7 @@ def evaluate_live_coverage(
             symbol_health[symbol] = {
                 "observed": False,
                 "fresh": False,
+                "receipt_fresh": False if receipt_tracking_enabled else None,
                 "current_connection": False,
                 "connection_generation": None,
                 "latest_observed_at": None,
@@ -61,12 +66,29 @@ def evaluate_live_coverage(
         observed_ticks.append(tick)
         age_seconds = max((current_time - tick.timestamp).total_seconds(), 0.0)
         receipt_age_seconds: float | None = None
-        if received_at is not None:
+        receipt_fresh: bool | None = None
+        if receipt_tracking_enabled:
+            if received_at is None:
+                missing_receipt_symbols.append(symbol)
+                receipt_fresh = False
+            else:
+                observed_receipts.append(received_at)
+                receipt_age_seconds = max(
+                    (current_time - received_at).total_seconds(),
+                    0.0,
+                )
+                receipt_fresh = receipt_age_seconds <= stale_after_seconds
+                if receipt_fresh:
+                    fresh_receipt_symbols.append(symbol)
+                else:
+                    stale_receipt_symbols.append(symbol)
+        elif received_at is not None:
             observed_receipts.append(received_at)
             receipt_age_seconds = max(
                 (current_time - received_at).total_seconds(),
                 0.0,
             )
+
         fresh = age_seconds <= stale_after_seconds
         observed_generation = symbol_connection_generation.get(symbol)
         current_connection = bool(
@@ -83,6 +105,7 @@ def evaluate_live_coverage(
         symbol_health[symbol] = {
             "observed": True,
             "fresh": fresh,
+            "receipt_fresh": receipt_fresh,
             "current_connection": current_connection,
             "connection_generation": observed_generation,
             "latest_observed_at": tick.timestamp.isoformat(),
@@ -109,6 +132,13 @@ def evaluate_live_coverage(
         )
 
     all_symbols_fresh = not missing_symbols and not stale_symbols
+    all_symbols_receipts_fresh: bool | None = None
+    if receipt_tracking_enabled:
+        all_symbols_receipts_fresh = bool(
+            not missing_symbols
+            and not missing_receipt_symbols
+            and not stale_receipt_symbols
+        )
     all_symbols_current_connection = bool(
         connected
         and current_generation > 0
@@ -119,6 +149,7 @@ def evaluate_live_coverage(
         "receiving_data": bool(fresh_symbols),
         "complete": not missing_symbols,
         "all_symbols_fresh": all_symbols_fresh,
+        "all_symbols_receipts_fresh": all_symbols_receipts_fresh,
         "all_symbols_current_connection": all_symbols_current_connection,
         "stale": bool(stale_symbols) or not observed_ticks,
         "latest_observed_at": (
@@ -138,6 +169,9 @@ def evaluate_live_coverage(
         "fresh_symbols": fresh_symbols,
         "missing_symbols": missing_symbols,
         "stale_symbols": stale_symbols,
+        "fresh_receipt_symbols": fresh_receipt_symbols,
+        "missing_receipt_symbols": missing_receipt_symbols,
+        "stale_receipt_symbols": stale_receipt_symbols,
         "current_connection_symbols": current_connection_symbols,
         "symbol_health": symbol_health,
     }
@@ -177,6 +211,12 @@ def live_readiness_failures(
         failures.append("INCOMPLETE_SYMBOL_COVERAGE")
     elif not bool(coverage.get("all_symbols_fresh")):
         failures.append("STALE_SYMBOL_COVERAGE")
+
+    if coverage.get("all_symbols_receipts_fresh") is False:
+        if coverage.get("missing_receipt_symbols"):
+            failures.append("MISSING_SYMBOL_RECEIPTS")
+        else:
+            failures.append("STALE_SYMBOL_RECEIPTS")
 
     if connected and not bool(coverage.get("all_symbols_current_connection")):
         failures.append("CURRENT_CONNECTION_INCOMPLETE")
