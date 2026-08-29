@@ -125,4 +125,3 @@ def test_openapi_live_surface_has_only_status_and_lifecycle_controls() -> None:
     assert set(live_paths["/live/status"]) == {"get"}
     assert set(live_paths["/live/start"]) == {"post"}
     assert set(live_paths["/live/stop"]) == {"post"}
-
