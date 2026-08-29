@@ -122,6 +122,7 @@ class LiveCryptoMonitor:
             current_generation=int(feed_health["connection_generation"]),
             connected=bool(feed_health["connected"]),
             stale_after_seconds=_STALE_AFTER_SECONDS,
+            received_times=self._received_at,
         )
         return {
             "mode": SystemMode.LIVE_MONITORING,
