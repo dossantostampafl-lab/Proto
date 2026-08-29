@@ -45,6 +45,7 @@ class LiveCryptoMonitor:
             lambda: deque(maxlen=_HISTORY_LIMIT)
         )
         self._symbol_connection_generation: dict[str, int] = {}
+        self._connection_generation = self._adapter.health().connection_generation
         self._last_error: str | None = None
 
     @property
@@ -219,11 +220,23 @@ class LiveCryptoMonitor:
             "real_money_execution": False,
         }
 
+    def _sync_connection_generation(self, generation: int) -> None:
+        if generation == self._connection_generation:
+            return
+        self._connection_generation = generation
+        self._quality.reset()
+        self._latest.clear()
+        self._history.clear()
+        self._symbol_connection_generation.clear()
+        metrics.increment("live_market_connection_generation_changes")
+
     async def ingest_tick(self, tick: MarketTick) -> bool:
         if tick.symbol not in self._adapter.symbols:
             metrics.increment("live_market_unexpected_symbol")
             return False
 
+        health = self._adapter.health()
+        self._sync_connection_generation(health.connection_generation)
         report = self._quality.evaluate(tick)
         if not report.valid:
             metrics.increment("live_market_frames_rejected")
@@ -233,36 +246,36 @@ class LiveCryptoMonitor:
 
         self._latest[tick.symbol] = tick
         self._history[tick.symbol].append(tick)
-        self._symbol_connection_generation[tick.symbol] = (
-            self._adapter.health().connection_generation
-        )
+        self._symbol_connection_generation[tick.symbol] = health.connection_generation
         metrics.increment("live_market_frames")
         book = compute_orderbook_metrics(tick)
-        await hub.broadcast(
-            "market-data",
-            {"type": "market-data", "data": self._market_payload(tick)},
-        )
-        await hub.broadcast(
-            "orderbook",
-            {
-                "type": "orderbook",
-                "data": {
-                    "timestamp": tick.timestamp.isoformat(),
-                    "source": "PUBLIC_READ_ONLY",
-                    "symbol": tick.symbol,
-                    "best_bid": book.best_bid,
-                    "best_ask": book.best_ask,
-                    "bid_size": tick.bid_size,
-                    "ask_size": tick.ask_size,
-                    "mid_price": book.mid_price,
-                    "spread": book.spread,
-                    "microprice": book.microprice,
-                    "imbalance": book.imbalance,
-                    "depth": book.depth,
-                    "financial_connectivity": False,
-                    "real_money_execution": False,
+        await asyncio.gather(
+            hub.broadcast(
+                "market-data",
+                {"type": "market-data", "data": self._market_payload(tick)},
+            ),
+            hub.broadcast(
+                "orderbook",
+                {
+                    "type": "orderbook",
+                    "data": {
+                        "timestamp": tick.timestamp.isoformat(),
+                        "source": "PUBLIC_READ_ONLY",
+                        "symbol": tick.symbol,
+                        "best_bid": book.best_bid,
+                        "best_ask": book.best_ask,
+                        "bid_size": tick.bid_size,
+                        "ask_size": tick.ask_size,
+                        "mid_price": book.mid_price,
+                        "spread": book.spread,
+                        "microprice": book.microprice,
+                        "imbalance": book.imbalance,
+                        "depth": book.depth,
+                        "financial_connectivity": False,
+                        "real_money_execution": False,
+                    },
                 },
-            },
+            ),
         )
         return True
 
