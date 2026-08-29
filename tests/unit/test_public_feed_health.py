@@ -9,6 +9,12 @@ def test_public_feed_health_starts_disconnected_without_credentials() -> None:
     assert health.connected is False
     assert health.connection_attempts == 0
     assert health.reconnect_count == 0
+    assert health.frames_received == 0
+    assert health.ticks_emitted == 0
+    assert health.parse_error_count == 0
+    assert health.connected_since is None
+    assert health.last_message_at is None
+    assert health.last_tick_at is None
     assert health.last_error is None
     assert adapter.products == ("BTC-USD", "ETH-USD", "SOL-USD")
 
