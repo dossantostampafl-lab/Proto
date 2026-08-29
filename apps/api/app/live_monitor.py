@@ -17,6 +17,7 @@ from services.market_data import (
     PublicMarketDataAdapter,
     compute_orderbook_metrics,
     evaluate_live_coverage,
+    live_readiness_failures,
 )
 
 from .event_state import event_runtime
@@ -293,18 +294,18 @@ def live_ready(response: Response) -> dict[str, object]:
     feed_health = status["feed_health"]
     connected = isinstance(feed_health, dict) and bool(feed_health.get("connected"))
     message_fresh = isinstance(feed_health, dict) and bool(feed_health.get("message_fresh"))
-    ready = bool(
-        status["running"]
-        and connected
-        and message_fresh
-        and status["receiving_data"]
-        and status["all_symbols_fresh"]
-        and status["all_symbols_current_connection"]
+    failures = live_readiness_failures(
+        running=bool(status["running"]),
+        connected=connected,
+        message_fresh=message_fresh,
+        coverage=status,
     )
+    ready = not failures
     if not ready:
         response.status_code = 503
     return {
         "status": "ready" if ready else "not_ready",
+        "readiness_failures": failures,
         **status,
     }
 
