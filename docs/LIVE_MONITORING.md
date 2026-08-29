@@ -25,7 +25,7 @@ The current adapter consumes the public Coinbase market-data WebSocket for:
 
 Transport and parsing are isolated. `services/market_data/live.py` owns WSS connection health and reconnect behavior, while `services/market_data/public_feed_parser.py` owns public-frame validation and normalization. Frames are normalized into the canonical `MarketTick` contract before they are accepted by the live monitor.
 
-The parser rejects malformed JSON, invalid or negative sequences, timezone-naive timestamps and unsupported products, and normalizes offset-aware timestamps to UTC. Wire payloads are capped at 256 KiB, ticker frames at 32 events and each event at 32 ticker entries. The WebSocket transport uses the same 256 KiB maximum message size so oversized frames are bounded before application parsing.
+The parser rejects malformed JSON, missing/invalid/negative sequences, timezone-naive timestamps and unsupported products, and normalizes offset-aware timestamps to UTC. Wire payloads are capped at 256 KiB, ticker frames at 32 events and each event at 32 ticker entries. The WebSocket transport uses the same 256 KiB maximum message size so oversized frames are bounded before application parsing.
 
 ## Data-quality gate
 
@@ -71,6 +71,8 @@ The public adapter exposes operational telemetry without account connectivity:
 
 A successful reconnect increments the connection generation. When the monitor observes a new generation it resets the data-quality sequence state and clears accepted snapshots, rolling analytics history and per-symbol generation state before accepting data from the new connection. This prevents cached observations or sequence numbers from an old socket being treated as current.
 
+Accepted market-data snapshots and L1 WebSocket payloads carry both `connection_generation` and source `sequence`. Clients can therefore reject delayed frames that belong to an older socket generation instead of combining observations across reconnects.
+
 The public WebSocket receive loop is timeout-bounded. A socket that remains open but stops delivering messages is closed by the client path and reconnected with bounded exponential backoff. Backoff is reset only after valid ticker data is observed, rather than merely after a TCP/WebSocket connection succeeds. Explicit async-generator shutdown also clears the connected-state telemetry in a `finally` path.
 
 Malformed public frames use a small consecutive-error budget. Isolated parser failures are counted without immediately tearing down a healthy socket, but repeated failures cross the budget and force a reconnect. Heartbeat/control frames do not clear parser degradation; only valid ticker data does.
@@ -98,6 +100,8 @@ The HTTP monitoring surface is intentionally read-only. Starting and stopping th
 - `GET /live/market-data` - accepted public snapshots;
 - `GET /live/market-data/{symbol}` - one accepted public snapshot;
 - `GET /live/analytics/{symbol}` - bounded descriptive analytics.
+
+All `/live` monitoring responses, including missing-symbol responses, use `Cache-Control: no-store, max-age=0`. This prevents browsers, reverse proxies and intermediate caches from serving stale monitoring state as though it were current.
 
 WebSocket channels `market-data` and `orderbook` carry only normalized public monitoring payloads when this live monitor is the producer. Fanout to the two channels is concurrent, failed peers are pruned, send operations are timeout-bounded, origins are checked, message sizes are bounded and per-channel connection capacity is enforced with an async lock to prevent concurrent admission races.
 
