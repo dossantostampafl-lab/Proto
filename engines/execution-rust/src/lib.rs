@@ -1,5 +1,5 @@
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -161,8 +161,7 @@ pub fn estimate_fill(input: &FillModelInput) -> Result<FillEstimate, FillModelEr
         fill_probability: Decimal::from_f64_retain(probability).unwrap_or(Decimal::ZERO),
         expected_fill_quantity: Decimal::from_f64_retain(expected_quantity)
             .unwrap_or(Decimal::ZERO),
-        expected_slippage_bps: Decimal::from_f64_retain(slippage_bps)
-            .unwrap_or(Decimal::ZERO),
+        expected_slippage_bps: Decimal::from_f64_retain(slippage_bps).unwrap_or(Decimal::ZERO),
     })
 }
 
