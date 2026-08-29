@@ -2,7 +2,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: Dockerfile.live
     environment:
       APP_ENV: live-monitoring
       SYSTEM_MODE: LIVE_MONITORING
@@ -12,6 +12,7 @@ services:
       LIVE_HISTORY_PRUNE_EVERY_WRITES: "1000"
       DATABASE_URL: postgresql+asyncpg://prediction:prediction@postgres:5432/prediction_quant
       REDIS_URL: redis://redis:6379/0
+      EVENT_BUS_BACKEND: redis
       PERSISTENCE_ENABLED: "true"
       HTTP_RATE_LIMIT_PER_MINUTE: "600"
     ports:
