@@ -12,7 +12,11 @@ class SimulationConfig:
 
 
 class RiskEngine:
-    def validate(self, request: SimulationRequest, estimated_slippage_bps: float) -> tuple[bool, str]:
+    def validate(
+        self,
+        request: SimulationRequest,
+        estimated_slippage_bps: float,
+    ) -> tuple[bool, str]:
         notional = request.order.quantity * request.order.limit_price
         if request.order.market_id != request.snapshot.market_id:
             return False, "market mismatch"
