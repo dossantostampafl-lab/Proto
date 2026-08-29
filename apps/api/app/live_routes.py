@@ -8,6 +8,7 @@ from fastapi.responses import PlainTextResponse
 
 from services.market_data import LiveTickJournalError, live_readiness_failures
 
+from .live_durability import live_durability
 from .live_metrics import render_live_prometheus
 from .live_monitor import live_monitor
 from .models import SystemMode
@@ -23,6 +24,7 @@ def _mark_no_store(response: Response) -> None:
 
 @asynccontextmanager
 async def live_router_lifespan(_: APIRouter) -> AsyncIterator[None]:
+    await live_durability.start(monitor=live_monitor, settings=settings)
     should_autostart = (
         settings.system_mode == SystemMode.LIVE_MONITORING.value
         and settings.live_monitoring_autostart
@@ -34,6 +36,7 @@ async def live_router_lifespan(_: APIRouter) -> AsyncIterator[None]:
     finally:
         if live_monitor.running:
             await live_monitor.stop()
+        await live_durability.stop(monitor=live_monitor)
 
 
 router = APIRouter(
