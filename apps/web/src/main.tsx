@@ -47,7 +47,13 @@ type FillJournal = {
   fills: FillEntry[];
 };
 
+type StreamEnvelope<T> = {
+  type: string;
+  data?: T;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 function formatNumber(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", {
@@ -60,10 +66,14 @@ function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [journal, setJournal] = useState<FillJournal | null>(null);
+  const [streamOnline, setStreamOnline] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let refreshTimer: number | undefined;
+    let reconnectTimer: number | undefined;
+    const sockets = new Set<WebSocket>();
 
     async function refresh() {
       try {
@@ -97,12 +107,55 @@ function App() {
       }
     }
 
+    function openSocket(channel: string, onMessage: (message: StreamEnvelope<unknown>) => void) {
+      const socket = new WebSocket(`${WS_BASE}/ws/${channel}`);
+      sockets.add(socket);
+      socket.onopen = () => {
+        if (!cancelled) setStreamOnline(true);
+      };
+      socket.onmessage = (event) => {
+        try {
+          onMessage(JSON.parse(event.data as string) as StreamEnvelope<unknown>);
+        } catch {
+          // Ignore malformed transport frames; periodic REST reconciliation remains authoritative.
+        }
+      };
+      socket.onerror = () => {
+        if (!cancelled) setStreamOnline(false);
+      };
+      socket.onclose = () => {
+        sockets.delete(socket);
+        if (!cancelled) setStreamOnline(false);
+      };
+    }
+
+    function connectStreams() {
+      openSocket("portfolio", (message) => {
+        if (message.type === "portfolio" && message.data) {
+          setPortfolio(message.data as Portfolio);
+        }
+      });
+      openSocket("fills", (message) => {
+        if (message.type === "fill") void refresh();
+      });
+      openSocket("analytics", (message) => {
+        if (message.type === "runtime") void refresh();
+      });
+    }
+
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 5_000);
+    connectStreams();
+    refreshTimer = window.setInterval(() => void refresh(), 30_000);
+    reconnectTimer = window.setInterval(() => {
+      if (!cancelled && sockets.size === 0) connectStreams();
+    }, 5_000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+      if (reconnectTimer !== undefined) window.clearInterval(reconnectTimer);
+      for (const socket of sockets) socket.close();
+      sockets.clear();
     };
   }, []);
 
@@ -118,9 +171,9 @@ function App() {
       note: health ? `Version ${health.version}` : API_BASE,
     },
     {
-      label: "Persistence",
-      value: health?.persistence_enabled ? "POSTGRESQL" : "MEMORY",
-      note: "Simulated fills only",
+      label: "Stream",
+      value: streamOnline ? "LIVE" : "RECONCILING",
+      note: streamOnline ? "WebSocket updates" : "REST fallback active",
     },
     {
       label: "Fill journal",
