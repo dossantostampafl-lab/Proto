@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+
 from services.quant.core import (
     EdgeBreakdown,
     ProbabilityEstimate,
