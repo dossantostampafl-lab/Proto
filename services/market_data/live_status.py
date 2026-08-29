@@ -15,6 +15,7 @@ def evaluate_live_coverage(
     current_generation: int,
     connected: bool,
     stale_after_seconds: float,
+    received_times: Mapping[str, datetime] | None = None,
     now: datetime | None = None,
 ) -> dict[str, object]:
     if not isfinite(stale_after_seconds) or stale_after_seconds <= 0:
@@ -27,15 +28,22 @@ def evaluate_live_coverage(
     if not symbols:
         raise ValueError("expected_symbols must not be empty")
 
+    receipt_map = received_times or {}
+    for symbol, received_at in receipt_map.items():
+        if received_at.tzinfo is None or received_at.utcoffset() is None:
+            raise ValueError(f"received time for {symbol} must be timezone-aware")
+
     symbol_health: dict[str, dict[str, object]] = {}
     missing_symbols: list[str] = []
     stale_symbols: list[str] = []
     fresh_symbols: list[str] = []
     current_connection_symbols: list[str] = []
     observed_ticks: list[MarketTick] = []
+    observed_receipts: list[datetime] = []
 
     for symbol in symbols:
         tick = latest.get(symbol)
+        received_at = receipt_map.get(symbol)
         if tick is None:
             missing_symbols.append(symbol)
             symbol_health[symbol] = {
@@ -45,11 +53,20 @@ def evaluate_live_coverage(
                 "connection_generation": None,
                 "latest_observed_at": None,
                 "age_seconds": None,
+                "latest_received_at": None,
+                "receipt_age_seconds": None,
             }
             continue
 
         observed_ticks.append(tick)
         age_seconds = max((current_time - tick.timestamp).total_seconds(), 0.0)
+        receipt_age_seconds: float | None = None
+        if received_at is not None:
+            observed_receipts.append(received_at)
+            receipt_age_seconds = max(
+                (current_time - received_at).total_seconds(),
+                0.0,
+            )
         fresh = age_seconds <= stale_after_seconds
         observed_generation = symbol_connection_generation.get(symbol)
         current_connection = bool(
@@ -70,13 +87,24 @@ def evaluate_live_coverage(
             "connection_generation": observed_generation,
             "latest_observed_at": tick.timestamp.isoformat(),
             "age_seconds": round(age_seconds, 6),
+            "latest_received_at": received_at.isoformat() if received_at is not None else None,
+            "receipt_age_seconds": (
+                round(receipt_age_seconds, 6) if receipt_age_seconds is not None else None
+            ),
         }
 
     latest_tick = max(observed_ticks, key=lambda item: item.timestamp, default=None)
+    latest_received_at = max(observed_receipts, default=None)
     latest_age_seconds: float | None = None
+    latest_receipt_age_seconds: float | None = None
     if latest_tick is not None:
         latest_age_seconds = max(
             (current_time - latest_tick.timestamp).total_seconds(),
+            0.0,
+        )
+    if latest_received_at is not None:
+        latest_receipt_age_seconds = max(
+            (current_time - latest_received_at).total_seconds(),
             0.0,
         )
 
@@ -98,6 +126,14 @@ def evaluate_live_coverage(
         ),
         "last_frame_age_seconds": (
             round(latest_age_seconds, 6) if latest_age_seconds is not None else None
+        ),
+        "latest_received_at": (
+            latest_received_at.isoformat() if latest_received_at is not None else None
+        ),
+        "last_receipt_age_seconds": (
+            round(latest_receipt_age_seconds, 6)
+            if latest_receipt_age_seconds is not None
+            else None
         ),
         "fresh_symbols": fresh_symbols,
         "missing_symbols": missing_symbols,
