@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 from .models import Asset, Fill, Side, SimulationOrder
+
+
+class FillJournalSink(Protocol):
+    def append(self, order: SimulationOrder, fill: Fill) -> None: ...
 
 
 @dataclass
@@ -35,10 +40,15 @@ class Position:
 
 
 class PaperPortfolio:
-    def __init__(self, max_journal_entries: int = 1_000) -> None:
+    def __init__(
+        self,
+        max_journal_entries: int = 1_000,
+        journal_sink: FillJournalSink | None = None,
+    ) -> None:
         self._positions: dict[Asset, Position] = {}
         self._journal: list[dict[str, object]] = []
         self._max_journal_entries = max_journal_entries
+        self._journal_sink = journal_sink
 
     def reset(self) -> None:
         self._positions.clear()
@@ -89,6 +99,9 @@ class PaperPortfolio:
         if len(self._journal) > self._max_journal_entries:
             overflow = len(self._journal) - self._max_journal_entries
             del self._journal[:overflow]
+
+        if self._journal_sink is not None:
+            self._journal_sink.append(order, fill)
 
     def journal(self, limit: int = 100) -> list[dict[str, object]]:
         safe_limit = min(max(limit, 1), self._max_journal_entries)
