@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import isfinite
 
 
 def _metric_bool(value: object) -> int:
@@ -19,6 +20,8 @@ def _append_optional_gauge(
     labels: str = "",
 ) -> None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return
+    if isinstance(value, float) and not isfinite(value):
         return
     lines.append(f"{metric}{labels} {value}")
 
