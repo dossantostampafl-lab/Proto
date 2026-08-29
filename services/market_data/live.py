@@ -126,6 +126,10 @@ class CoinbasePublicMarketDataAdapter:
         self._reconnect_count = 0
         self._last_error: str | None = None
 
+    @property
+    def symbols(self) -> tuple[str, ...]:
+        return tuple(_SUPPORTED_PRODUCTS[product] for product in self.products)
+
     def health(self) -> PublicFeedHealth:
         return PublicFeedHealth(
             connected=self._connected,
