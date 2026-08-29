@@ -14,7 +14,6 @@ from services.market_data.core import DataQualityIssue, DataQualityMonitor, Mark
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_ROOTS = (ROOT / "apps", ROOT / "services", ROOT / "engines")
-LIVE_FILE_PATTERN = re.compile(r"(?:^|[_-])live(?:[_-]|\.)", re.IGNORECASE)
 FORBIDDEN_CALL_PATTERN = re.compile(
     r"\.(?:create|place|submit|cancel)_?order\s*\(|"
     r"\.(?:withdraw|deposit|transfer|set_?leverage)\s*\(",
@@ -126,19 +125,16 @@ def test_quality_monitor_handles_50k_ticks_with_constant_key_cardinality() -> No
     assert len(monitor._last_by_key) == 1
 
 
-def test_live_production_modules_contain_no_private_execution_capability() -> None:
-    live_files = [
+def test_production_modules_contain_no_private_execution_capability() -> None:
+    production_files = [
         path
         for root in PRODUCTION_ROOTS
         for path in root.rglob("*")
         if path.suffix in {".py", ".rs", ".ts", ".tsx"}
-        and LIVE_FILE_PATTERN.search(path.name)
     ]
-    if not live_files:
-        pytest.skip("live backend is integrated on a separate branch")
 
     findings: list[str] = []
-    for path in live_files:
+    for path in production_files:
         source = path.read_text(encoding="utf-8")
         if FORBIDDEN_CALL_PATTERN.search(source):
             findings.append(f"{path.relative_to(ROOT)} invokes an order/funds capability")
