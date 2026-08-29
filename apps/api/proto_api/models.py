@@ -99,3 +99,12 @@ class EdgeEstimate(BaseModel):
     edge: float
     edge_bps: float
     side: str
+
+
+class MarkPrice(BaseModel):
+    asset: Asset
+    price: float = Field(gt=0)
+
+
+class PortfolioMarkRequest(BaseModel):
+    marks: list[MarkPrice] = Field(min_length=1)
