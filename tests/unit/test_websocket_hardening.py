@@ -87,7 +87,11 @@ async def test_concurrent_connects_cannot_exceed_channel_capacity() -> None:
     assert sorted(results) == [False, True]
     assert hub.connection_count("market-data") == 1
     assert sum(socket.accepted for socket in (first, second)) == 1
-    assert sum(socket.closed == (1013, "channel capacity reached") for socket in (first, second)) == 1
+    capacity_rejections = sum(
+        socket.closed == (1013, "channel capacity reached")
+        for socket in (first, second)
+    )
+    assert capacity_rejections == 1
 
 
 @pytest.mark.asyncio
