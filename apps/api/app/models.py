@@ -73,6 +73,9 @@ class SimulationOrder(BaseModel):
 
 class Fill(BaseModel):
     order_id: UUID
+    market_id: str = Field(min_length=1, max_length=120)
+    asset: Asset
+    side: Side
     filled_quantity: float = Field(gt=0)
     fill_price: float = Field(gt=0)
     fee: float = Field(ge=0)
