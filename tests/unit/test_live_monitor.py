@@ -64,6 +64,34 @@ async def test_live_monitor_accepts_fresh_public_market_data() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_monitor_builds_descriptive_analytics_from_bounded_history() -> None:
+    monitor = LiveCryptoMonitor()
+    started_at = datetime.now(UTC)
+    first = _tick(observed_at=started_at, sequence=1)
+    second = first.model_copy(
+        update={
+            "timestamp": started_at + timedelta(milliseconds=100),
+            "bid": 60_010.0,
+            "ask": 60_011.0,
+            "last": 60_010.5,
+            "sequence": 2,
+        }
+    )
+
+    assert await monitor.ingest_tick(first) is True
+    assert await monitor.ingest_tick(second) is True
+    analytics = monitor.analytics("BTC")
+
+    assert analytics is not None
+    assert analytics["source"] == "PUBLIC_READ_ONLY_DESCRIPTIVE"
+    assert analytics["sample_count"] == 2
+    assert analytics["simple_return"] > 0.0
+    assert analytics["realized_volatility"] > 0.0
+    assert analytics["financial_connectivity"] is False
+    assert analytics["real_money_execution"] is False
+
+
+@pytest.mark.asyncio
 async def test_live_monitor_rejects_stale_public_market_data() -> None:
     monitor = LiveCryptoMonitor()
     stale_tick = _tick(observed_at=datetime.now(UTC) - timedelta(minutes=1))
@@ -79,3 +107,10 @@ def test_live_unknown_symbol_has_no_fabricated_snapshot() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "no live snapshot available for symbol"
+
+
+def test_live_unknown_symbol_has_no_fabricated_analytics() -> None:
+    response = client.get("/live/analytics/DOGE")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "no live analytics available for symbol"
