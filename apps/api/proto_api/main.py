@@ -11,8 +11,10 @@ from .models import (
     SimulationRequest,
     SimulationResult,
 )
+from .persistence import SqlFillJournal, build_engine, init_database
 from .portfolio import PaperPortfolio
 from .quant import estimate_binary_edge
+from .settings import settings
 from .simulation import PaperSimulator
 
 app = FastAPI(
@@ -24,13 +26,27 @@ app = FastAPI(
     ),
 )
 
+
+def _build_persistent_journal() -> SqlFillJournal | None:
+    if not settings.persistence_enabled:
+        return None
+    engine = build_engine(settings.database_url)
+    init_database(engine)
+    return SqlFillJournal(engine)
+
+
 simulator = PaperSimulator()
-portfolio = PaperPortfolio()
+portfolio = PaperPortfolio(journal_sink=_build_persistent_journal())
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "mode": RunMode.SIMULATION, "version": __version__}
+def health() -> dict[str, str | bool]:
+    return {
+        "status": "ok",
+        "mode": RunMode.SIMULATION,
+        "version": __version__,
+        "persistence_enabled": settings.persistence_enabled,
+    }
 
 
 @app.post("/v1/simulate", response_model=SimulationResult)
