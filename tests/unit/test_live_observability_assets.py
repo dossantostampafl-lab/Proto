@@ -73,3 +73,7 @@ def test_live_only_staging_compose_has_no_legacy_web_and_binds_admin_ports_local
     assert "cap_drop:" in compose
     assert "PROTO_DB_PASSWORD:?set PROTO_DB_PASSWORD" in compose
     assert "GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD" in compose
+    assert "\n  migrate:\n" in compose
+    assert 'command: ["alembic", "upgrade", "head"]' in compose
+    assert 'LIVE_DATABASE_AUTO_CREATE: "false"' in compose
+    assert "condition: service_completed_successfully" in compose
