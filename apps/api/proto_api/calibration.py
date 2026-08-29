@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import log
 
-
 _EPS = 1e-12
 
 
