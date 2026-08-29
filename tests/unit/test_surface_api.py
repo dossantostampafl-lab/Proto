@@ -106,6 +106,16 @@ def test_hawkes_surface_is_explicitly_baseline_only() -> None:
     assert 0.0 <= body["event_probability"] <= 1.0
 
 
+def test_prometheus_metrics_endpoint_is_scrapeable_text() -> None:
+    client.get("/health")
+    response = client.get("/metrics/prometheus")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "proto_http_requests_total" in response.text
+    assert "proto_http_latency_ms" in response.text
+
+
 def test_unknown_market_and_symbol_return_404() -> None:
     assert client.get("/markets/unknown").status_code == 404
     assert client.get("/market-data/DOGE").status_code == 404
