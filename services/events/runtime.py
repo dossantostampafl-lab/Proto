@@ -21,7 +21,12 @@ class EventRuntimeSnapshot:
 class EventRuntime:
     """Lifecycle wrapper for the event bus used by monitoring and audit surfaces."""
 
-    def __init__(self, *, backend: str = "memory", redis_url: str = "redis://localhost:6379/0") -> None:
+    def __init__(
+        self,
+        *,
+        backend: str = "memory",
+        redis_url: str = "redis://localhost:6379/0",
+    ) -> None:
         normalized = backend.strip().lower()
         if normalized not in {"memory", "redis"}:
             raise ValueError("event bus backend must be 'memory' or 'redis'")
