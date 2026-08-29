@@ -1,43 +1,89 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from threading import Lock
+from time import perf_counter
 
 
 @dataclass
 class RuntimeMetrics:
-    request_count: int = 0
-    error_count: int = 0
-    total_latency_ms: float = 0.0
-    by_path: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    by_status: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    counters: Counter[str] = field(default_factory=Counter)
+    latency_ms_total: float = 0.0
+    latency_samples: int = 0
+    http_request_count: int = 0
+    http_error_count: int = 0
+    http_latency_ms_total: float = 0.0
+    http_by_path: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    http_by_status: dict[int, int] = field(default_factory=lambda: defaultdict(int))
     _lock: Lock = field(default_factory=Lock, repr=False)
 
-    def record(self, *, path: str, status_code: int, latency_ms: float) -> None:
+    def increment(self, name: str, amount: int = 1) -> None:
         with self._lock:
-            self.request_count += 1
+            self.counters[name] += amount
+
+    def observe_latency_ms(self, value: float) -> None:
+        with self._lock:
+            self.latency_ms_total += max(value, 0.0)
+            self.latency_samples += 1
+
+    def record_http(self, *, path: str, status_code: int, latency_ms: float) -> None:
+        with self._lock:
+            self.http_request_count += 1
             if status_code >= 500:
-                self.error_count += 1
-            self.total_latency_ms += latency_ms
-            self.by_path[path] += 1
-            self.by_status[status_code] += 1
+                self.http_error_count += 1
+            self.http_latency_ms_total += max(latency_ms, 0.0)
+            self.http_by_path[path] += 1
+            self.http_by_status[status_code] += 1
 
     def snapshot(self) -> dict[str, object]:
         with self._lock:
-            average_latency_ms = (
-                self.total_latency_ms / self.request_count if self.request_count else 0.0
+            average_simulation_latency_ms = (
+                self.latency_ms_total / self.latency_samples if self.latency_samples else 0.0
+            )
+            average_http_latency_ms = (
+                self.http_latency_ms_total / self.http_request_count
+                if self.http_request_count
+                else 0.0
             )
             return {
-                "request_count": self.request_count,
-                "error_count": self.error_count,
-                "average_latency_ms": round(average_latency_ms, 6),
-                "by_path": dict(sorted(self.by_path.items())),
-                "by_status": {
-                    str(status): count for status, count in sorted(self.by_status.items())
+                "counters": dict(sorted(self.counters.items())),
+                "average_simulation_latency_ms": round(average_simulation_latency_ms, 6),
+                "latency_samples": self.latency_samples,
+                "http_request_count": self.http_request_count,
+                "http_error_count": self.http_error_count,
+                "average_http_latency_ms": round(average_http_latency_ms, 6),
+                "http_by_path": dict(sorted(self.http_by_path.items())),
+                "http_by_status": {
+                    str(status): count for status, count in sorted(self.http_by_status.items())
                 },
             }
+
+    def reset(self) -> None:
+        with self._lock:
+            self.counters.clear()
+            self.latency_ms_total = 0.0
+            self.latency_samples = 0
+            self.http_request_count = 0
+            self.http_error_count = 0
+            self.http_latency_ms_total = 0.0
+            self.http_by_path.clear()
+            self.http_by_status.clear()
+
+
+class LatencyTimer:
+    def __init__(self, metrics: RuntimeMetrics) -> None:
+        self._metrics = metrics
+        self._started_at = 0.0
+
+    def __enter__(self) -> LatencyTimer:
+        self._started_at = perf_counter()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        elapsed_ms = (perf_counter() - self._started_at) * 1_000.0
+        self._metrics.observe_latency_ms(elapsed_ms)
 
 
 def access_log(

@@ -16,6 +16,9 @@ async def test_async_fill_journal_persists_and_deduplicates_order() -> None:
     )
     fill = Fill(
         order_id=order.id,
+        market_id=order.market_id,
+        asset=order.asset,
+        side=order.side,
         filled_quantity=0.01,
         fill_price=60_020,
         fee=0.12,

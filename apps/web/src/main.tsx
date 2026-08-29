@@ -47,7 +47,51 @@ type FillJournal = {
   fills: FillEntry[];
 };
 
+type ReplayStatus = {
+  mode: string;
+  active: boolean;
+  paused: boolean;
+  speed: string;
+  cursor: number;
+  total_frames: number;
+  finished: boolean;
+  last_timestamp: string | null;
+};
+
+type ReplaySpeed = "1x" | "5x" | "10x" | "50x" | "100x" | "MAX";
+
+type MarketDataFrame = {
+  timestamp: string;
+  market_id: string;
+  symbol: string;
+  bid: number;
+  ask: number;
+  mid: number;
+  spread: number;
+  market_probability: number;
+  volatility: number;
+};
+
+type OrderBookFrame = {
+  timestamp: string;
+  symbol: string;
+  best_bid: number;
+  best_ask: number;
+  bid_size: number;
+  ask_size: number;
+  mid_price: number;
+  spread: number;
+  imbalance: number;
+};
+
+type StreamEnvelope<T> = {
+  type: string;
+  data?: T;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const WS_BASE = API_BASE.replace(/^http/, "ws");
+const REPLAY_SPEEDS: ReplaySpeed[] = ["1x", "5x", "10x", "50x", "100x", "MAX"];
 
 function formatNumber(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", {
@@ -60,33 +104,51 @@ function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [journal, setJournal] = useState<FillJournal | null>(null);
+  const [replay, setReplay] = useState<ReplayStatus | null>(null);
+  const [marketData, setMarketData] = useState<MarketDataFrame | null>(null);
+  const [orderBook, setOrderBook] = useState<OrderBookFrame | null>(null);
+  const [streamOnline, setStreamOnline] = useState(false);
+  const [controlBusy, setControlBusy] = useState(false);
+  const [seekCursor, setSeekCursor] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let refreshTimer: number | undefined;
+    let reconnectTimer: number | undefined;
+    const sockets = new Set<WebSocket>();
 
     async function refresh() {
       try {
-        const [healthResponse, portfolioResponse, fillsResponse] = await Promise.all([
+        const [healthResponse, portfolioResponse, fillsResponse, replayResponse] = await Promise.all([
           fetch(`${API_BASE}/health`),
           fetch(`${API_BASE}/v1/portfolio`),
           fetch(`${API_BASE}/v1/fills?limit=8`),
+          fetch(`${API_BASE}/replay/status`),
         ]);
 
-        if (!healthResponse.ok || !portfolioResponse.ok || !fillsResponse.ok) {
+        if (
+          !healthResponse.ok ||
+          !portfolioResponse.ok ||
+          !fillsResponse.ok ||
+          !replayResponse.ok
+        ) {
           throw new Error("API returned a non-success response");
         }
 
-        const [healthBody, portfolioBody, fillsBody] = await Promise.all([
+        const [healthBody, portfolioBody, fillsBody, replayBody] = await Promise.all([
           healthResponse.json() as Promise<Health>,
           portfolioResponse.json() as Promise<Portfolio>,
           fillsResponse.json() as Promise<FillJournal>,
+          replayResponse.json() as Promise<ReplayStatus>,
         ]);
 
         if (!cancelled) {
           setHealth(healthBody);
           setPortfolio(portfolioBody);
           setJournal(fillsBody);
+          setReplay(replayBody);
+          setSeekCursor(replayBody.cursor);
           setError(null);
         }
       } catch (requestError) {
@@ -97,14 +159,104 @@ function App() {
       }
     }
 
+    function openSocket(channel: string, onMessage: (message: StreamEnvelope<unknown>) => void) {
+      const socket = new WebSocket(`${WS_BASE}/ws/${channel}`);
+      sockets.add(socket);
+      socket.onopen = () => {
+        if (!cancelled) setStreamOnline(true);
+      };
+      socket.onmessage = (event) => {
+        try {
+          onMessage(JSON.parse(event.data as string) as StreamEnvelope<unknown>);
+        } catch {
+          // Periodic REST reconciliation remains authoritative after malformed transport frames.
+        }
+      };
+      socket.onerror = () => {
+        if (!cancelled) setStreamOnline(false);
+      };
+      socket.onclose = () => {
+        sockets.delete(socket);
+        if (!cancelled) setStreamOnline(false);
+      };
+    }
+
+    function connectStreams() {
+      openSocket("portfolio", (message) => {
+        if (message.type === "portfolio" && message.data) {
+          setPortfolio(message.data as Portfolio);
+        }
+      });
+      openSocket("fills", (message) => {
+        if (message.type === "fill") void refresh();
+      });
+      openSocket("market-data", (message) => {
+        if (message.type === "market-data" && message.data) {
+          setMarketData(message.data as MarketDataFrame);
+        }
+      });
+      openSocket("orderbook", (message) => {
+        if (message.type === "orderbook" && message.data) {
+          setOrderBook(message.data as OrderBookFrame);
+        }
+      });
+      openSocket("analytics", (message) => {
+        if (message.type === "runtime") void refresh();
+        if (message.type === "replay" && message.data) {
+          const status = {
+            mode: "HISTORICAL_REPLAY",
+            ...(message.data as Omit<ReplayStatus, "mode">),
+          };
+          setReplay(status);
+          setSeekCursor(status.cursor);
+        }
+      });
+    }
+
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 5_000);
+    connectStreams();
+    refreshTimer = window.setInterval(() => void refresh(), 30_000);
+    reconnectTimer = window.setInterval(() => {
+      if (!cancelled && sockets.size === 0) connectStreams();
+    }, 5_000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+      if (reconnectTimer !== undefined) window.clearInterval(reconnectTimer);
+      for (const socket of sockets) socket.close();
+      sockets.clear();
     };
   }, []);
+
+  async function replayControl(
+    action: "pause" | "resume" | "step" | "restart" | "reset" | "seek" | "speed",
+    payload?: object,
+  ) {
+    setControlBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/replay/${action}`, {
+        method: "POST",
+        headers: payload ? { "Content-Type": "application/json" } : undefined,
+        body: payload ? JSON.stringify(payload) : undefined,
+      });
+      const body = (await response.json()) as ReplayStatus & { detail?: string };
+      if (!response.ok) {
+        throw new Error(body.detail ?? `Replay ${action} failed`);
+      }
+      setReplay(body);
+      setSeekCursor(body.cursor);
+      if (action === "step") {
+        const stepBody = body as ReplayStatus & { frame?: MarketDataFrame | null };
+        if (stepBody.frame) setMarketData(stepBody.frame);
+      }
+      setError(null);
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Replay control failed");
+    } finally {
+      setControlBusy(false);
+    }
+  }
 
   const metrics = [
     {
@@ -118,14 +270,16 @@ function App() {
       note: health ? `Version ${health.version}` : API_BASE,
     },
     {
-      label: "Persistence",
-      value: health?.persistence_enabled ? "POSTGRESQL" : "MEMORY",
-      note: "Simulated fills only",
+      label: "Stream",
+      value: streamOnline ? "STREAMING" : "RECONCILING",
+      note: streamOnline ? "WebSocket updates" : "REST fallback active",
     },
     {
-      label: "Fill journal",
-      value: String(journal?.count ?? 0),
-      note: "Recent simulated fills",
+      label: "Replay",
+      value: replay?.active ? (replay.paused ? "PAUSED" : "RUNNING") : "IDLE",
+      note: replay?.active
+        ? `${replay.cursor}/${replay.total_frames} @ ${replay.speed}`
+        : "No replay session loaded",
     },
   ];
 
@@ -153,6 +307,113 @@ function App() {
             <small>{metric.note}</small>
           </article>
         ))}
+      </section>
+
+      <section className="panel replayPanel">
+        <div>
+          <p className="eyebrow">HISTORICAL REPLAY</p>
+          <h2>Deterministic session control</h2>
+          <p className="panelNote">
+            Controls become active after a replay dataset is loaded through the backend.
+          </p>
+        </div>
+        <div className="replayControls" aria-label="Replay controls">
+          <label className="replayField">
+            <span>Speed</span>
+            <select
+              aria-label="Replay speed"
+              disabled={!replay?.active || controlBusy}
+              value={(replay?.speed ?? "1x") as ReplaySpeed}
+              onChange={(event) =>
+                void replayControl("speed", { speed: event.target.value as ReplaySpeed })
+              }
+            >
+              {REPLAY_SPEEDS.map((speed) => <option key={speed}>{speed}</option>)}
+            </select>
+          </label>
+          <label className="replayField">
+            <span>Cursor</span>
+            <input
+              aria-label="Replay cursor"
+              disabled={!replay?.active || controlBusy}
+              max={replay?.total_frames ?? 0}
+              min={0}
+              type="number"
+              value={seekCursor}
+              onChange={(event) => setSeekCursor(Number(event.target.value))}
+            />
+          </label>
+          <button
+            disabled={
+              !replay?.active || controlBusy || seekCursor < 0 || seekCursor > replay.total_frames
+            }
+            onClick={() => void replayControl("seek", { cursor: seekCursor })}
+          >
+            Seek
+          </button>
+          <button
+            disabled={!replay?.active || replay.paused || controlBusy}
+            onClick={() => void replayControl("pause")}
+          >
+            Pause
+          </button>
+          <button
+            disabled={!replay?.active || !replay.paused || replay.finished || controlBusy}
+            onClick={() => void replayControl("resume")}
+          >
+            Resume
+          </button>
+          <button
+            disabled={!replay?.active || replay.finished || controlBusy}
+            onClick={() => void replayControl("step")}
+          >
+            Step
+          </button>
+          <button
+            disabled={!replay?.active || controlBusy}
+            onClick={() => void replayControl("restart")}
+          >
+            Restart
+          </button>
+          <button
+            disabled={!replay?.active || controlBusy}
+            onClick={() => void replayControl("reset")}
+          >
+            Reset
+          </button>
+        </div>
+      </section>
+
+      <section className="dataGrid marketGrid">
+        <article className="dataPanel">
+          <div className="panelTitle">
+            <p className="eyebrow">MODEL FEED / MARKET DATA</p>
+            <span>{marketData?.symbol ?? "WAITING"}</span>
+          </div>
+          <div className="quoteGrid">
+            <span>Bid <b>{marketData ? formatNumber(marketData.bid) : "â€”"}</b></span>
+            <span>Ask <b>{marketData ? formatNumber(marketData.ask) : "â€”"}</b></span>
+            <span>Mid <b>{marketData ? formatNumber(marketData.mid) : "â€”"}</b></span>
+            <span>Spread <b>{marketData ? formatNumber(marketData.spread, 4) : "â€”"}</b></span>
+            <span>Market P <b>{marketData ? formatNumber(marketData.market_probability * 100, 2) + "%" : "â€”"}</b></span>
+            <span>Vol <b>{marketData ? formatNumber(marketData.volatility, 4) : "â€”"}</b></span>
+          </div>
+        </article>
+
+        <article className="dataPanel">
+          <div className="panelTitle">
+            <p className="eyebrow">ORDER BOOK L1</p>
+            <span>{orderBook?.symbol ?? "WAITING"}</span>
+          </div>
+          <div className="quoteGrid">
+            <span>Bid size <b>{orderBook ? formatNumber(orderBook.bid_size, 4) : "â€”"}</b></span>
+            <span>Ask size <b>{orderBook ? formatNumber(orderBook.ask_size, 4) : "â€”"}</b></span>
+            <span>Best bid <b>{orderBook ? formatNumber(orderBook.best_bid) : "â€”"}</b></span>
+            <span>Best ask <b>{orderBook ? formatNumber(orderBook.best_ask) : "â€”"}</b></span>
+            <span>Imbalance <b>{orderBook ? formatNumber(orderBook.imbalance, 4) : "â€”"}</b></span>
+            <span>Spread <b>{orderBook ? formatNumber(orderBook.spread, 4) : "â€”"}</b></span>
+          </div>
+        </article>
       </section>
 
       <section className="panel">
@@ -238,3 +499,4 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </React.StrictMode>,
 );
+
