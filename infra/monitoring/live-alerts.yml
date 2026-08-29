@@ -1,0 +1,102 @@
+groups:
+  - name: proto-live-read-only
+    interval: 15s
+    rules:
+      - alert: ProtoLiveScrapeDown
+        expr: up{job="proto-live-read-only"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Proto live metrics endpoint is unreachable
+          description: Prometheus has not been able to scrape the standalone read-only live monitor for at least one minute.
+
+      - alert: ProtoLiveMonitorNotRunning
+        expr: proto_live_running == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: Proto live monitor task is not running
+          description: The standalone public BTC/ETH/SOL monitor is not running.
+
+      - alert: ProtoLiveFeedDisconnected
+        expr: proto_live_connected == 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: Public market-data feed disconnected
+          description: The public read-only market-data WebSocket has remained disconnected for at least 30 seconds.
+
+      - alert: ProtoLiveSourceMessageStale
+        expr: proto_live_message_fresh == 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: Public source messages are stale
+          description: The source connection is not delivering fresh public messages.
+
+      - alert: ProtoLiveSymbolSourceStale
+        expr: proto_live_symbol_fresh == 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: Live source timestamp is stale for {{ $labels.symbol }}
+          description: The latest public source timestamp for this symbol exceeded the configured freshness budget.
+
+      - alert: ProtoLiveSymbolReceiptStale
+        expr: proto_live_symbol_receipt_fresh == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: Proto has stopped receiving {{ $labels.symbol }}
+          description: The server-side receipt timestamp for this symbol exceeded the configured freshness budget.
+
+      - alert: ProtoLivePersistenceUnavailable
+        expr: (proto_live_persistence_required == 1) and (proto_live_persistence_healthy == 0)
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: Required live persistence is unavailable
+          description: Durable-before-fanout is enabled but the live journal is unhealthy.
+
+      - alert: ProtoLivePersistenceReadsDegraded
+        expr: (proto_live_persistence_required == 1) and (proto_live_persistence_read_healthy == 0)
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Persisted live history reads are degraded
+          description: Durable live history exists but read access is unhealthy.
+
+      - alert: ProtoLiveParserDegraded
+        expr: proto_live_consecutive_parse_errors > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: Public feed parser is repeatedly rejecting frames
+          description: Consecutive parser errors have persisted for at least 30 seconds.
+
+      - alert: ProtoLiveFinancialConnectivityInvariantBroken
+        expr: proto_live_financial_connectivity != 0
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: Financial-connectivity safety invariant changed
+          description: The standalone monitor must always expose financial_connectivity=0.
+
+      - alert: ProtoLiveRealMoneyExecutionInvariantBroken
+        expr: proto_live_real_money_execution != 0
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: Real-money execution safety invariant changed
+          description: The standalone monitor must always expose real_money_execution=0.
