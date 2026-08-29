@@ -18,7 +18,12 @@ from services.quant.core import (
 )
 
 from . import __version__
-from .live import LiveDataController, LiveDataStartRequest, LiveFeedState
+from .live import (
+    LiveDataController,
+    LiveDataStartRequest,
+    LiveFeedState,
+    validate_live_data_configuration,
+)
 from .models import (
     KillSwitchState,
     MarketSnapshot,
@@ -52,6 +57,7 @@ persistent_journal = (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    validate_live_data_configuration()
     if persistence_engine is not None:
         await init_database(persistence_engine)
     yield
@@ -280,6 +286,11 @@ def get_portfolio() -> dict[str, object]:
 
 @app.post("/v1/portfolio/mark")
 async def mark_portfolio(request: PortfolioMarkRequest) -> dict[str, object]:
+    if runtime.mode == SystemMode.LIVE_DATA_READ_ONLY:
+        raise HTTPException(
+            status_code=409,
+            detail="portfolio mutation is unavailable in LIVE_DATA_READ_ONLY",
+        )
     marks = {mark.asset: mark.price for mark in request.marks}
     snapshot = portfolio.snapshot(marks)
     await hub.broadcast("portfolio", {"type": "portfolio", "data": snapshot})
@@ -293,7 +304,7 @@ async def get_fills(limit: int = Query(default=100, ge=1, le=1_000)) -> dict[str
         if persistent_journal is not None
         else portfolio.journal(limit)
     )
-    return {"mode": SystemMode.SIMULATION, "count": len(entries), "fills": entries}
+    return {"mode": runtime.mode, "count": len(entries), "fills": entries}
 
 
 def _positions_from_fills(entries: list[dict[str, object]]) -> dict[str, float]:
@@ -558,6 +569,8 @@ def live_status() -> dict[str, object]:
 
 @app.post("/live/start")
 async def live_start(request: LiveDataStartRequest) -> dict[str, object]:
+    if runtime.kill_switch != KillSwitchState.ARMED:
+        raise HTTPException(status_code=409, detail="kill switch is not armed")
     replay_session.reset()
     status = await live_controller.start(request)
     runtime.mode = SystemMode.LIVE_DATA_READ_ONLY

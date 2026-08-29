@@ -62,19 +62,26 @@ type ReplaySpeed = "1x" | "5x" | "10x" | "50x" | "100x" | "MAX";
 
 type MarketDataFrame = {
   timestamp: string;
-  market_id: string;
+  market_id?: string;
   symbol: string;
   bid: number;
   ask: number;
   mid: number;
   spread: number;
-  market_probability: number;
-  volatility: number;
+  market_probability?: number;
+  volatility?: number;
   source?: string;
   sequence?: number;
 };
 
-type LiveState = "IDLE" | "CONNECTING" | "STREAMING" | "RECONNECTING" | "ERROR" | "STOPPED";
+type LiveState =
+  | "IDLE"
+  | "CONNECTING"
+  | "STREAMING"
+  | "BACKOFF"
+  | "RECONNECTING"
+  | "ERROR"
+  | "STOPPED";
 
 type LiveStatus = {
   mode: "LIVE_DATA_READ_ONLY";
@@ -267,7 +274,7 @@ function App() {
           const frame = message.data as MarketDataFrame;
           setMarketData(frame);
           setLive((current) => {
-            if (current.state !== "STREAMING" && current.state !== "RECONNECTING") return current;
+            if (!["STREAMING", "RECONNECTING", "BACKOFF"].includes(current.state)) return current;
             const eventTime = new Date(frame.timestamp).valueOf();
             return {
               ...current,
@@ -400,7 +407,7 @@ function App() {
           <h1>Research. Simulate. Measure edge.</h1>
           <p className="subtitle">
             Quantitative workspace for crypto and binary prediction-market research. The terminal
-            is intentionally restricted to simulation and paper-trading workflows.
+            consumes public live prices in read-only mode and keeps simulation and replay isolated.
           </p>
         </div>
         <span className={error ? "status statusError" : "status"}>
@@ -463,7 +470,7 @@ function App() {
             disabled={liveBusy || live.state === "STREAMING" || live.state === "CONNECTING"}
             onClick={() => void liveControl("start")}
           >
-            {live.state === "RECONNECTING" ? "Reconnect" : "Connect"}
+            {["RECONNECTING", "BACKOFF"].includes(live.state) ? "Reconnect" : "Connect"}
           </button>
           <button
             disabled={liveBusy || ["IDLE", "STOPPED"].includes(live.state)}
@@ -474,9 +481,9 @@ function App() {
         </div>
       </section>
 
-      {(liveError || live.last_error || live.state === "RECONNECTING") && (
+      {(liveError || live.last_error || ["RECONNECTING", "BACKOFF"].includes(live.state)) && (
         <div className="liveMessage" role="status">
-          <strong>{live.state === "RECONNECTING" ? "Reconnecting to public feed" : "Live feed notice"}</strong>
+          <strong>{["RECONNECTING", "BACKOFF"].includes(live.state) ? "Reconnecting to public feed" : "Live feed notice"}</strong>
           <span>{liveError ?? live.last_error ?? "Connection interrupted; automatic retry in progress."}</span>
         </div>
       )}
@@ -563,12 +570,12 @@ function App() {
             <span>{marketData?.symbol ?? "WAITING"}</span>
           </div>
           <div className="quoteGrid">
-            <span>Bid <b>{marketData ? formatNumber(marketData.bid) : "â€”"}</b></span>
-            <span>Ask <b>{marketData ? formatNumber(marketData.ask) : "â€”"}</b></span>
-            <span>Mid <b>{marketData ? formatNumber(marketData.mid) : "â€”"}</b></span>
-            <span>Spread <b>{marketData ? formatNumber(marketData.spread, 4) : "â€”"}</b></span>
-            <span>Market P <b>{marketData ? formatNumber(marketData.market_probability * 100, 2) + "%" : "â€”"}</b></span>
-            <span>Vol <b>{marketData ? formatNumber(marketData.volatility, 4) : "â€”"}</b></span>
+            <span>Bid <b>{marketData ? formatNumber(marketData.bid) : "—"}</b></span>
+            <span>Ask <b>{marketData ? formatNumber(marketData.ask) : "—"}</b></span>
+            <span>Mid <b>{marketData ? formatNumber(marketData.mid) : "—"}</b></span>
+            <span>Spread <b>{marketData ? formatNumber(marketData.spread, 4) : "—"}</b></span>
+            <span>Market P <b>{marketData?.market_probability !== undefined ? formatNumber(marketData.market_probability * 100, 2) + "%" : "—"}</b></span>
+            <span>Vol <b>{marketData?.volatility !== undefined ? formatNumber(marketData.volatility, 4) : "—"}</b></span>
           </div>
         </article>
 
@@ -578,12 +585,12 @@ function App() {
             <span>{orderBook?.symbol ?? "WAITING"}</span>
           </div>
           <div className="quoteGrid">
-            <span>Bid size <b>{orderBook ? formatNumber(orderBook.bid_size, 4) : "â€”"}</b></span>
-            <span>Ask size <b>{orderBook ? formatNumber(orderBook.ask_size, 4) : "â€”"}</b></span>
-            <span>Best bid <b>{orderBook ? formatNumber(orderBook.best_bid) : "â€”"}</b></span>
-            <span>Best ask <b>{orderBook ? formatNumber(orderBook.best_ask) : "â€”"}</b></span>
-            <span>Imbalance <b>{orderBook ? formatNumber(orderBook.imbalance, 4) : "â€”"}</b></span>
-            <span>Spread <b>{orderBook ? formatNumber(orderBook.spread, 4) : "â€”"}</b></span>
+            <span>Bid size <b>{orderBook ? formatNumber(orderBook.bid_size, 4) : "—"}</b></span>
+            <span>Ask size <b>{orderBook ? formatNumber(orderBook.ask_size, 4) : "—"}</b></span>
+            <span>Best bid <b>{orderBook ? formatNumber(orderBook.best_bid) : "—"}</b></span>
+            <span>Best ask <b>{orderBook ? formatNumber(orderBook.best_ask) : "—"}</b></span>
+            <span>Imbalance <b>{orderBook ? formatNumber(orderBook.imbalance, 4) : "—"}</b></span>
+            <span>Spread <b>{orderBook ? formatNumber(orderBook.spread, 4) : "—"}</b></span>
           </div>
         </article>
       </section>

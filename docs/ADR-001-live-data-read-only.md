@@ -103,8 +103,8 @@ intentional safety trade-off.
 ## Action Items
 
 1. [x] Add reusable endpoint, method, and credential policy with unit tests.
-2. [ ] Add the runtime enum and enforce mode-specific API route availability.
-3. [ ] Implement one public feed adapter with bounded reconnect/backoff and no authentication.
-4. [ ] Publish feed freshness, reconnect, dropped-frame, and sequence-gap metrics.
-5. [ ] Add integration and attack tests proving execution endpoints remain unreachable in live
+2. [x] Add the runtime enum and enforce mode-specific API route availability.
+3. [x] Implement one public feed adapter with bounded reconnect/backoff and no authentication.
+4. [x] Publish feed freshness, reconnect, dropped-frame, and sequence-gap metrics.
+5. [x] Add integration and attack tests proving execution endpoints remain unreachable in live
    mode.

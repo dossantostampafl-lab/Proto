@@ -1,29 +1,48 @@
 # Proto operations runbook
 
-Use this runbook for local research, simulation, paper trading, and historical replay only.
+Use this runbook for public live market-data observation, local research, simulation, paper
+trading, and historical replay. Live data remains strictly read-only.
 
 ## Startup gates
 
-1. Confirm the configured mode is `SIMULATION`, `PAPER_TRADING`, or `HISTORICAL_REPLAY`.
+1. Confirm the configured mode is `LIVE_DATA_READ_ONLY`.
 2. Start the API and check `GET /health` returns `status: ok`.
-3. Check `GET /ready`. A `503` means configured persistence is unavailable.
+3. Check `GET /ready`. A `503` means persistence is unavailable or a requested live feed is
+   disconnected/stale.
 4. Check `GET /metrics` reports `real_money_execution: false`.
 5. Check `GET /v1/reconciliation` reports `consistent: true` before and after a run.
 
-Do not continue if any configuration references broker/exchange credentials, deposits,
-withdrawals, custody, leverage, or live order routing. Those capabilities are outside Proto.
+Startup fails closed if the environment contains private exchange, broker, wallet, trading, or
+order-routing credentials. Do not add deposits, withdrawals, custody, leverage, authenticated
+account channels, or live order routing.
+
+## Start and stop live data
+
+```bash
+curl -X POST http://localhost:8000/live/start \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"binance","symbol":"BTCUSDT"}'
+curl http://localhost:8000/live/status
+curl -X POST http://localhost:8000/live/stop
+```
+
+Only `binance` and the symbols `BTCUSDT`, `ETHUSDT`, and `SOLUSDT` are accepted. The outbound
+connection is fixed to the unauthenticated public TLS feed; callers cannot supply a URL.
 
 ## Observability
 
 - `X-Request-ID` is accepted or generated and returned for HTTP correlation.
-- `/metrics` exposes HTTP counts, error counts, latency, and simulation/replay counters.
-- `/ready` probes the database only when persistence is enabled.
+- `/metrics` exposes HTTP counts, errors, latency, live ticks/rejections/reconnects/gaps, and
+  simulation/replay counters.
+- `/live/status` exposes source, symbol, feed state, last tick, latency, staleness, rejected
+  frames, sequence gaps, reconnects, and the read-only flag.
+- `/ready` probes the database and degrades when an active live feed is stale or disconnected.
 - `/v1/reconciliation` compares the in-memory journal, authoritative fill store, and positions.
 - WebSocket clients are bounded per channel; failed or slow peers are pruned independently.
 
 ## Incident actions
 
-1. Call `POST /killswitch/trigger` to stop simulation/replay processing.
+1. Call `POST /killswitch/trigger` to stop live ingestion, simulation, or replay processing.
 2. Capture `/health`, `/ready`, `/metrics`, and `/v1/reconciliation` responses.
 3. Preserve the fill journal and request IDs; do not rewrite historical records.
 4. Diagnose and retest locally.
@@ -44,4 +63,8 @@ withdrawals, custody, leverage, or live order routing. Those capabilities are ou
 For replay, use `POST /replay/reset`, reload the historical dataset, and verify reconciliation.
 For simulation, use `POST /simulation/reset`. This clears volatile simulated state; persisted
 research records remain governed by the configured journal.
+
+For live data, call `POST /live/stop`, inspect `last_error`, network/DNS/TLS reachability and
+provider status, then call `POST /live/start` again. Never work around failure by adding private
+credentials or a caller-provided endpoint.
 

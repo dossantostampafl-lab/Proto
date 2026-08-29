@@ -1,6 +1,6 @@
-# Five-minute simulation demo
+# Five-minute live data read-only demo
 
-This demo uses synthetic historical frames and never sends a live order.
+This demo receives public book tickers and never authenticates or sends an order.
 
 ## 1. Verify the boundary
 
@@ -10,51 +10,50 @@ curl http://localhost:8000/ready
 curl http://localhost:8000/risk
 ```
 
-Confirm the mode is simulation-only and `real_money_execution` is `false`.
+Confirm the mode is `LIVE_DATA_READ_ONLY`, `live_data_read_only` is `true`, and
+`real_money_execution` is `false`.
 
-## 2. Load historical replay
+## 2. Start the public feed
 
 ```bash
-curl -X POST http://localhost:8000/replay/start \
+curl -X POST http://localhost:8000/live/start \
   -H 'Content-Type: application/json' \
-  -d '{"speed":"5x","frames":[
-    {"timestamp":"2026-01-01T00:00:00Z","snapshot":{"symbol":"BTC","market_id":"btc-demo","bid":60000,"ask":60010}},
-    {"timestamp":"2026-01-01T00:00:01Z","snapshot":{"symbol":"BTC","market_id":"btc-demo","bid":60005,"ask":60015}},
-    {"timestamp":"2026-01-01T00:00:02Z","snapshot":{"symbol":"BTC","market_id":"btc-demo","bid":60020,"ask":60030}}
-  ]}'
+  -d '{"source":"binance","symbol":"BTCUSDT"}'
+curl http://localhost:8000/live/status
 ```
 
-The dashboard will show the replay state and streamed market/order-book frames.
+The dashboard shows the read-only badge, connection state, bid/ask frames, latency, staleness,
+rejections and reconnects. Repeat with `ETHUSDT` or `SOLUSDT` if desired.
 
-## 3. Exercise complete controls
-
-```bash
-curl -X POST http://localhost:8000/replay/pause
-curl -X POST http://localhost:8000/replay/seek -H 'Content-Type: application/json' -d '{"cursor":1}'
-curl -X POST http://localhost:8000/replay/speed -H 'Content-Type: application/json' -d '{"speed":"100x"}'
-curl -X POST http://localhost:8000/replay/step
-curl -X POST http://localhost:8000/replay/resume
-curl -X POST http://localhost:8000/replay/restart
-```
-
-The same actions are available in the dashboard.
-
-## 4. Verify integrity and observability
+## 3. Verify readiness and observability
 
 ```bash
+curl http://localhost:8000/ready
 curl http://localhost:8000/metrics
-curl http://localhost:8000/v1/reconciliation
 ```
 
-Reconciliation must report `consistent: true`.
+After the first tick, readiness must be healthy and `live_data.state` must be `STREAMING`.
+
+## 4. Demonstrate the security boundary
+
+```bash
+curl -X POST http://localhost:8000/live/start \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"http://169.254.169.254/latest/meta-data","symbol":"BTCUSDT"}'
+curl -X POST http://localhost:8000/v1/portfolio/mark \
+  -H 'Content-Type: application/json' \
+  -d '{"marks":[{"asset":"BTC","price":60000}]}'
+```
+
+The untrusted source is rejected, and portfolio mutation returns `409` while live mode is active.
 
 ## 5. Demonstrate the stop boundary
 
 ```bash
 curl -X POST http://localhost:8000/killswitch/trigger
 curl http://localhost:8000/risk
-curl -X POST http://localhost:8000/replay/reset
+curl http://localhost:8000/live/status
 ```
 
-The runtime stops processing and remains inside the simulation/replay boundary.
+The live feed stops and the runtime remains incapable of real-money execution.
 

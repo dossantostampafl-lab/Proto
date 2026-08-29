@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -16,6 +17,10 @@ from services.market_data.live import (
     SUPPORTED_LIVE_SYMBOLS,
     AsyncMarketDataAdapter,
     BinancePublicWebSocketAdapter,
+)
+from services.security.live_data_policy import (
+    LiveDataPolicy,
+    validate_no_private_credentials,
 )
 
 from .models import SystemMode
@@ -53,15 +58,27 @@ class LiveDataStartRequest(BaseModel):
 
 
 AdapterFactory = Callable[[str, str], AsyncMarketDataAdapter]
+LIVE_DATA_POLICY = LiveDataPolicy(
+    allowed_hosts=frozenset({"stream.binance.com"}),
+    allowed_ports=frozenset({9443}),
+)
+
+
+def validate_live_data_configuration(
+    environment: Mapping[str, str] | None = None,
+) -> None:
+    validate_no_private_credentials(environment if environment is not None else os.environ)
 
 
 def default_adapter_factory(source: str, symbol: str) -> AsyncMarketDataAdapter:
     if source != "binance":
         raise ValueError("unsupported live source")
-    return BinancePublicWebSocketAdapter(
+    adapter = BinancePublicWebSocketAdapter(
         symbol=symbol,
         connect_timeout_seconds=settings.live_data_connect_timeout_seconds,
     )
+    LIVE_DATA_POLICY.validate_endpoint(adapter.uri)
+    return adapter
 
 
 class LiveDataController:
@@ -97,6 +114,7 @@ class LiveDataController:
         self.received = 0
         self.rejected = 0
         self.reconnect_attempts = 0
+        self.sequence_gaps = 0
         self.last_error: str | None = None
         self.latency_ms: float | None = None
 
@@ -114,6 +132,7 @@ class LiveDataController:
             self.received = 0
             self.rejected = 0
             self.reconnect_attempts = 0
+            self.sequence_gaps = 0
             self.last_error = None
             self.latency_ms = None
             self._desired_running = True
@@ -175,6 +194,10 @@ class LiveDataController:
             metrics.increment("live_data_rejected")
             return
 
+        if self.last_sequence is not None and tick.sequence > self.last_sequence + 1:
+            self.sequence_gaps += 1
+            metrics.increment("live_data_sequence_gaps")
+
         self.last_tick_at = received_at
         self.last_sequence = tick.sequence
         self.latency_ms = max((received_at - tick.timestamp).total_seconds() * 1_000, 0.0)
@@ -193,6 +216,8 @@ class LiveDataController:
             "source": self.source,
             "venue": tick.venue,
             "symbol": tick.symbol,
+            "bid_size": tick.bid_size,
+            "ask_size": tick.ask_size,
             **book.model_dump(mode="json"),
             "sequence": tick.sequence,
             "read_only": True,
@@ -222,6 +247,7 @@ class LiveDataController:
             "received": self.received,
             "rejected": self.rejected,
             "reconnect_attempts": self.reconnect_attempts,
+            "sequence_gaps": self.sequence_gaps,
             "last_error": self.last_error,
             "stale": stale,
             "latency_ms": self.latency_ms,

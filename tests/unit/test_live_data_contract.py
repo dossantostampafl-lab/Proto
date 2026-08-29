@@ -125,3 +125,55 @@ def test_openapi_live_surface_has_only_status_and_lifecycle_controls() -> None:
     assert set(live_paths["/live/status"]) == {"get"}
     assert set(live_paths["/live/start"]) == {"post"}
     assert set(live_paths["/live/stop"]) == {"post"}
+
+
+def test_live_mode_cannot_create_simulated_fills_or_mutate_portfolio() -> None:
+    from apps.api.app import main
+
+    with _client() as client:
+        main.runtime.mode = SystemMode.LIVE_DATA_READ_ONLY
+        main.runtime.running = True
+        simulated = client.post(
+            "/v1/simulate",
+            json={
+                "order": {
+                    "market_id": "read-only-proof",
+                    "asset": "BTC",
+                    "side": "BUY",
+                    "quantity": 0.01,
+                    "limit_price": 61_000,
+                },
+                "snapshot": {
+                    "symbol": "BTC",
+                    "market_id": "read-only-proof",
+                    "bid": 60_000,
+                    "ask": 60_010,
+                },
+            },
+        )
+        marked = client.post(
+            "/v1/portfolio/mark",
+            json={"marks": [{"asset": "BTC", "price": 60_005}]},
+        )
+        main.runtime.running = False
+
+    assert simulated.status_code == 200
+    assert simulated.json()["accepted"] is False
+    assert simulated.json()["fill"] is None
+    assert marked.status_code == 409
+
+
+def test_kill_switch_prevents_live_feed_restart() -> None:
+    from apps.api.app import main
+
+    with _client() as client:
+        triggered = client.post("/killswitch/trigger")
+        restarted = client.post(
+            "/live/start",
+            json={"source": "binance", "symbol": "BTCUSDT"},
+        )
+        client.post("/killswitch/reset")
+        main.runtime.running = False
+
+    assert triggered.status_code == 200
+    assert restarted.status_code == 409

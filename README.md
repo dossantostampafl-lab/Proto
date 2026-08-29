@@ -1,9 +1,11 @@
-# Proto â€” Prediction Market Quant Engine
+# Proto — Prediction Market Quant Engine
 
-Research terminal for deterministic market simulation, paper trading, and historical replay.
+Research terminal for public live market data, deterministic simulation, paper trading, and
+historical replay.
 
-> Safety boundary: Proto never routes live orders and does not accept broker/exchange
-> credentials, deposits, withdrawals, custody, leverage, or real-money execution.
+> Safety boundary: live access is public market data only. Proto never routes live orders and
+> rejects broker/exchange credentials, deposits, withdrawals, custody, leverage, or real-money
+> execution.
 
 ## Quick start
 
@@ -19,7 +21,7 @@ In another terminal:
 
 ```bash
 cd apps/web
-npm install
+npm ci
 npm run dev
 ```
 
@@ -28,6 +30,8 @@ Open `http://localhost:5173`. The API is available at `http://localhost:8000`.
 ## What is included
 
 - probability, calibration, Hawkes, feature, sizing, hedge, and P&L research primitives;
+- unauthenticated public Binance book tickers for BTCUSDT, ETHUSDT, and SOLUSDT;
+- live feed normalization, validation, staleness, reconnect/backoff, and sequence-gap telemetry;
 - deterministic Rust risk and simulated execution engines;
 - simulated fills, portfolio accounting, optional PostgreSQL journal, and reconciliation;
 - replay start, pause, resume, step, seek, speed, restart, and reset controls;
@@ -39,17 +43,30 @@ Open `http://localhost:5173`. The API is available at `http://localhost:8000`.
 
 Only these modes are valid:
 
+- `LIVE_DATA_READ_ONLY` (default operational mode)
 - `SIMULATION`
 - `PAPER_TRADING`
 - `HISTORICAL_REPLAY`
 
-The API reports `real_money_execution: false` in risk and metrics responses. The kill switch
-halts simulation and replay processing.
+The API reports `real_money_execution: false` in risk and metrics responses. Live mode permits
+only allowlisted public TLS endpoints and rejects private trading credentials at startup. The
+kill switch stops live ingestion, simulation, and replay processing.
+
+Start the public feed with:
+
+```bash
+curl -X POST http://localhost:8000/live/start \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"binance","symbol":"BTCUSDT"}'
+curl http://localhost:8000/live/status
+```
 
 ## Operations and demo
 
 - [Operations runbook](docs/OPERATIONS.md)
 - [Five-minute demo](docs/DEMO.md)
+- [Live-data architecture decision](docs/ADR-001-live-data-read-only.md)
+- [Live-data quality and attack gates](docs/LIVE_DATA_QUALITY.md)
 
 ## Validation
 

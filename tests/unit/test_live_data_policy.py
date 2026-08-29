@@ -58,3 +58,8 @@ def test_private_trading_credentials_fail_closed_without_matching_ci_secrets() -
         validate_no_private_credentials(
             {"EXCHANGE_API_SECRET": "must-not-be-configured", "BROKER_API_KEY": ""}
         )
+
+
+def test_provider_specific_private_credentials_fail_closed() -> None:
+    with pytest.raises(LiveDataPolicyViolation, match="BINANCE_API_KEY"):
+        validate_no_private_credentials({"BINANCE_API_KEY": "must-not-be-configured"})
