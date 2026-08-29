@@ -58,6 +58,8 @@ type ReplayStatus = {
   last_timestamp: string | null;
 };
 
+type ReplaySpeed = "1x" | "5x" | "10x" | "50x" | "100x" | "MAX";
+
 type MarketDataFrame = {
   timestamp: string;
   market_id: string;
@@ -89,6 +91,7 @@ type StreamEnvelope<T> = {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
+const REPLAY_SPEEDS: ReplaySpeed[] = ["1x", "5x", "10x", "50x", "100x", "MAX"];
 
 function formatNumber(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", {
@@ -106,6 +109,7 @@ function App() {
   const [orderBook, setOrderBook] = useState<OrderBookFrame | null>(null);
   const [streamOnline, setStreamOnline] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
+  const [seekCursor, setSeekCursor] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -144,6 +148,7 @@ function App() {
           setPortfolio(portfolioBody);
           setJournal(fillsBody);
           setReplay(replayBody);
+          setSeekCursor(replayBody.cursor);
           setError(null);
         }
       } catch (requestError) {
@@ -198,7 +203,12 @@ function App() {
       openSocket("analytics", (message) => {
         if (message.type === "runtime") void refresh();
         if (message.type === "replay" && message.data) {
-          setReplay({ mode: "HISTORICAL_REPLAY", ...(message.data as Omit<ReplayStatus, "mode">) });
+          const status = {
+            mode: "HISTORICAL_REPLAY",
+            ...(message.data as Omit<ReplayStatus, "mode">),
+          };
+          setReplay(status);
+          setSeekCursor(status.cursor);
         }
       });
     }
@@ -219,15 +229,23 @@ function App() {
     };
   }, []);
 
-  async function replayControl(action: "pause" | "resume" | "step" | "restart") {
+  async function replayControl(
+    action: "pause" | "resume" | "step" | "restart" | "reset" | "seek" | "speed",
+    payload?: object,
+  ) {
     setControlBusy(true);
     try {
-      const response = await fetch(`${API_BASE}/replay/${action}`, { method: "POST" });
+      const response = await fetch(`${API_BASE}/replay/${action}`, {
+        method: "POST",
+        headers: payload ? { "Content-Type": "application/json" } : undefined,
+        body: payload ? JSON.stringify(payload) : undefined,
+      });
       const body = (await response.json()) as ReplayStatus & { detail?: string };
       if (!response.ok) {
         throw new Error(body.detail ?? `Replay ${action} failed`);
       }
       setReplay(body);
+      setSeekCursor(body.cursor);
       if (action === "step") {
         const stepBody = body as ReplayStatus & { frame?: MarketDataFrame | null };
         if (stepBody.frame) setMarketData(stepBody.frame);
@@ -253,7 +271,7 @@ function App() {
     },
     {
       label: "Stream",
-      value: streamOnline ? "LIVE" : "RECONCILING",
+      value: streamOnline ? "STREAMING" : "RECONCILING",
       note: streamOnline ? "WebSocket updates" : "REST fallback active",
     },
     {
@@ -300,6 +318,39 @@ function App() {
           </p>
         </div>
         <div className="replayControls" aria-label="Replay controls">
+          <label className="replayField">
+            <span>Speed</span>
+            <select
+              aria-label="Replay speed"
+              disabled={!replay?.active || controlBusy}
+              value={(replay?.speed ?? "1x") as ReplaySpeed}
+              onChange={(event) =>
+                void replayControl("speed", { speed: event.target.value as ReplaySpeed })
+              }
+            >
+              {REPLAY_SPEEDS.map((speed) => <option key={speed}>{speed}</option>)}
+            </select>
+          </label>
+          <label className="replayField">
+            <span>Cursor</span>
+            <input
+              aria-label="Replay cursor"
+              disabled={!replay?.active || controlBusy}
+              max={replay?.total_frames ?? 0}
+              min={0}
+              type="number"
+              value={seekCursor}
+              onChange={(event) => setSeekCursor(Number(event.target.value))}
+            />
+          </label>
+          <button
+            disabled={
+              !replay?.active || controlBusy || seekCursor < 0 || seekCursor > replay.total_frames
+            }
+            onClick={() => void replayControl("seek", { cursor: seekCursor })}
+          >
+            Seek
+          </button>
           <button
             disabled={!replay?.active || replay.paused || controlBusy}
             onClick={() => void replayControl("pause")}
@@ -324,6 +375,12 @@ function App() {
           >
             Restart
           </button>
+          <button
+            disabled={!replay?.active || controlBusy}
+            onClick={() => void replayControl("reset")}
+          >
+            Reset
+          </button>
         </div>
       </section>
 
@@ -334,12 +391,12 @@ function App() {
             <span>{marketData?.symbol ?? "WAITING"}</span>
           </div>
           <div className="quoteGrid">
-            <span>Bid <b>{marketData ? formatNumber(marketData.bid) : "—"}</b></span>
-            <span>Ask <b>{marketData ? formatNumber(marketData.ask) : "—"}</b></span>
-            <span>Mid <b>{marketData ? formatNumber(marketData.mid) : "—"}</b></span>
-            <span>Spread <b>{marketData ? formatNumber(marketData.spread, 4) : "—"}</b></span>
-            <span>Market P <b>{marketData ? formatNumber(marketData.market_probability * 100, 2) + "%" : "—"}</b></span>
-            <span>Vol <b>{marketData ? formatNumber(marketData.volatility, 4) : "—"}</b></span>
+            <span>Bid <b>{marketData ? formatNumber(marketData.bid) : "â€”"}</b></span>
+            <span>Ask <b>{marketData ? formatNumber(marketData.ask) : "â€”"}</b></span>
+            <span>Mid <b>{marketData ? formatNumber(marketData.mid) : "â€”"}</b></span>
+            <span>Spread <b>{marketData ? formatNumber(marketData.spread, 4) : "â€”"}</b></span>
+            <span>Market P <b>{marketData ? formatNumber(marketData.market_probability * 100, 2) + "%" : "â€”"}</b></span>
+            <span>Vol <b>{marketData ? formatNumber(marketData.volatility, 4) : "â€”"}</b></span>
           </div>
         </article>
 
@@ -349,12 +406,12 @@ function App() {
             <span>{orderBook?.symbol ?? "WAITING"}</span>
           </div>
           <div className="quoteGrid">
-            <span>Bid size <b>{orderBook ? formatNumber(orderBook.bid_size, 4) : "—"}</b></span>
-            <span>Ask size <b>{orderBook ? formatNumber(orderBook.ask_size, 4) : "—"}</b></span>
-            <span>Best bid <b>{orderBook ? formatNumber(orderBook.best_bid) : "—"}</b></span>
-            <span>Best ask <b>{orderBook ? formatNumber(orderBook.best_ask) : "—"}</b></span>
-            <span>Imbalance <b>{orderBook ? formatNumber(orderBook.imbalance, 4) : "—"}</b></span>
-            <span>Spread <b>{orderBook ? formatNumber(orderBook.spread, 4) : "—"}</b></span>
+            <span>Bid size <b>{orderBook ? formatNumber(orderBook.bid_size, 4) : "â€”"}</b></span>
+            <span>Ask size <b>{orderBook ? formatNumber(orderBook.ask_size, 4) : "â€”"}</b></span>
+            <span>Best bid <b>{orderBook ? formatNumber(orderBook.best_bid) : "â€”"}</b></span>
+            <span>Best ask <b>{orderBook ? formatNumber(orderBook.best_ask) : "â€”"}</b></span>
+            <span>Imbalance <b>{orderBook ? formatNumber(orderBook.imbalance, 4) : "â€”"}</b></span>
+            <span>Spread <b>{orderBook ? formatNumber(orderBook.spread, 4) : "â€”"}</b></span>
           </div>
         </article>
       </section>
@@ -442,3 +499,4 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </React.StrictMode>,
 );
+

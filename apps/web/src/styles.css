@@ -17,7 +17,7 @@ body {
     linear-gradient(90deg, rgba(120,150,190,.025) 1px, transparent 1px);
   background-size: 24px 24px;
 }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button:focus-visible { outline: 2px solid #71a7ff; outline-offset: 2px; }
 
 .shell { width: min(1540px, calc(100% - 28px)); margin: 0 auto; padding: 20px 0 48px; }
@@ -68,6 +68,18 @@ td { color: #dbe4ef; }
 .fillNumbers b { display: block; margin-top: 2px; font-size: 11px; }
 .replayPanel { align-items: flex-end; }
 .replayControls { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.replayField { display: grid; gap: 3px; color: #7e8a9c; font-size: 9px; text-transform: uppercase; }
+.replayField input, .replayField select {
+  width: 78px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid rgba(120,150,190,.24);
+  border-radius: 4px;
+  background: #0b1320;
+  color: #cddbf0;
+  font-family: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
 .replayControls button {
   min-width: 76px;
   padding: 8px 10px;
@@ -105,3 +117,4 @@ td { color: #dbe4ef; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+

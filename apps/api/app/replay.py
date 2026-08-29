@@ -23,8 +23,16 @@ class ReplayFrameInput(BaseModel):
 
 
 class ReplayStartRequest(BaseModel):
-    frames: list[ReplayFrameInput] = Field(min_length=1)
+    frames: list[ReplayFrameInput] = Field(min_length=1, max_length=100_000)
     speed: ReplaySpeed = "1x"
+
+
+class ReplaySeekRequest(BaseModel):
+    cursor: int = Field(ge=0)
+
+
+class ReplaySpeedRequest(BaseModel):
+    speed: ReplaySpeed
 
 
 class HistoricalReplay:
@@ -46,6 +54,16 @@ class HistoricalReplay:
 
     def reset(self) -> None:
         self._cursor = 0
+
+    def seek(self, cursor: int) -> None:
+        if cursor > len(self._frames):
+            raise ValueError("replay cursor exceeds total frames")
+        self._cursor = cursor
+
+    def previous(self) -> ReplayFrame | None:
+        if self._cursor == 0:
+            return None
+        return self._frames[self._cursor - 1]
 
     def next(self) -> ReplayFrame | None:
         if self.finished:
@@ -120,6 +138,21 @@ class ReplaySession:
         self._last_frame = None
         return self.status()
 
+    def seek(self, cursor: int) -> dict[str, object]:
+        engine = self._require_engine()
+        try:
+            engine.seek(cursor)
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
+        self._last_frame = engine.previous()
+        self._paused = True
+        return self.status()
+
+    def set_speed(self, speed: ReplaySpeed) -> dict[str, object]:
+        self._require_engine()
+        self._speed = speed
+        return self.status()
+
     def reset(self) -> None:
         self._engine = None
         self._speed = "1x"
@@ -151,3 +184,4 @@ class ReplaySession:
         if self._engine is None:
             raise RuntimeError("replay session has not been started")
         return self._engine
+

@@ -29,7 +29,12 @@ from .models import (
 from .observability import LatencyTimer, access_log
 from .persistence import AsyncSqlFillJournal, build_engine, database_ready, init_database
 from .portfolio import PaperPortfolio
-from .replay import ReplaySession, ReplayStartRequest
+from .replay import (
+    ReplaySeekRequest,
+    ReplaySession,
+    ReplaySpeedRequest,
+    ReplayStartRequest,
+)
 from .research import metrics
 from .research import router as research_router
 from .settings import settings
@@ -422,6 +427,39 @@ async def replay_restart() -> dict[str, object]:
     return {"mode": runtime.mode, **status}
 
 
+@app.post("/replay/seek")
+async def replay_seek(request: ReplaySeekRequest) -> dict[str, object]:
+    try:
+        status = replay_session.seek(request.cursor)
+    except RuntimeError as error:
+        raise _replay_failure(error) from error
+    runtime.running = False
+    await hub.broadcast("analytics", {"type": "replay", "data": status})
+    return {"mode": runtime.mode, **status}
+
+
+@app.post("/replay/speed")
+async def replay_speed(request: ReplaySpeedRequest) -> dict[str, object]:
+    try:
+        status = replay_session.set_speed(request.speed)
+    except RuntimeError as error:
+        raise _replay_failure(error) from error
+    runtime.replay_speed = _replay_speed_value(request.speed)
+    await hub.broadcast("analytics", {"type": "replay", "data": status})
+    return {"mode": runtime.mode, **status}
+
+
+@app.post("/replay/reset")
+async def replay_reset() -> dict[str, object]:
+    replay_session.reset()
+    runtime.mode = SystemMode.HISTORICAL_REPLAY
+    runtime.running = False
+    runtime.replay_speed = 1
+    status = replay_session.status()
+    await hub.broadcast("analytics", {"type": "replay", "data": status})
+    return {"mode": runtime.mode, **status}
+
+
 @app.post("/killswitch/trigger", response_model=RuntimeState)
 async def killswitch_trigger() -> RuntimeState:
     runtime.kill_switch = KillSwitchState.TRIGGERED
@@ -476,4 +514,5 @@ async def ws_fills(websocket: WebSocket) -> None:
 @app.websocket("/ws/analytics")
 async def ws_analytics(websocket: WebSocket) -> None:
     await hub.serve("analytics", websocket)
+
 

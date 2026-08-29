@@ -87,3 +87,30 @@ def test_finished_replay_cannot_resume_without_restart() -> None:
 
     with pytest.raises(RuntimeError, match="already finished"):
         session.resume()
+
+
+def test_replay_seek_is_bounded_deterministic_and_pauses() -> None:
+    session = ReplaySession()
+    session.start(_request())
+
+    status = session.seek(2)
+
+    assert status["cursor"] == 2
+    assert status["paused"] is True
+    assert status["last_timestamp"] is not None
+    assert session.step() is not None
+    assert session.status()["finished"] is True
+
+    with pytest.raises(RuntimeError, match="exceeds total frames"):
+        session.seek(4)
+
+
+def test_replay_speed_can_change_without_moving_cursor() -> None:
+    session = ReplaySession()
+    session.start(_request())
+
+    status = session.set_speed("100x")
+
+    assert status["speed"] == "100x"
+    assert status["cursor"] == 0
+
