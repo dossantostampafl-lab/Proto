@@ -1,5 +1,4 @@
 from fastapi.routing import APIRoute
-
 from apps.api.app.main import app
 
 
