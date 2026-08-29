@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from websockets.asyncio.client import connect
 
@@ -36,6 +36,17 @@ class PublicFeedHealth:
     last_message_at: datetime | None
     last_tick_at: datetime | None
     last_error: str | None
+
+
+class PublicMarketDataAdapter(Protocol):
+    """Minimal read-only adapter contract used by the live monitor."""
+
+    @property
+    def symbols(self) -> tuple[str, ...]: ...
+
+    def health(self) -> PublicFeedHealth: ...
+
+    def stream(self) -> AsyncIterator[MarketTick]: ...
 
 
 def _as_mapping(value: object) -> Mapping[str, Any]:
