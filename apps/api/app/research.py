@@ -15,9 +15,10 @@ from .calibration import (
     reliability_curve,
 )
 from .lifecycle import router as lifecycle_router
+from .live_monitor import router as live_router
 from .models import MarketSnapshot
-from .observability import RuntimeMetrics
 from .replay import HistoricalReplay, ReplayFrame
+from .runtime_metrics import metrics
 from .safety_surface import router as safety_router
 from .surface import router as surface_router
 from .websockets import hub
@@ -26,7 +27,7 @@ router = APIRouter(tags=["research"])
 router.include_router(surface_router)
 router.include_router(lifecycle_router)
 router.include_router(safety_router)
-metrics = RuntimeMetrics()
+router.include_router(live_router)
 
 
 class CalibrationPoint(BaseModel):
