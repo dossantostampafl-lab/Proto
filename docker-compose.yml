@@ -7,6 +7,7 @@ services:
       APP_ENV: development
       SYSTEM_MODE: SIMULATION
       DATABASE_URL: postgresql+asyncpg://prediction:prediction@postgres:5432/prediction_quant
+      REDIS_URL: redis://redis:6379/0
       PERSISTENCE_ENABLED: "true"
       MINIMUM_NET_EDGE: "0.01"
       MINIMUM_CONFIDENCE: "0.55"
@@ -16,6 +17,8 @@ services:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   web:
@@ -45,5 +48,40 @@ services:
     volumes:
       - proto_pgdata:/var/lib/postgresql/data
 
+  redis:
+    image: redis:8-alpine
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_ADMIN_USER: proto
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-proto-local-dev}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    volumes:
+      - proto_grafana:/var/lib/grafana
+
 volumes:
   proto_pgdata:
+  proto_grafana:
