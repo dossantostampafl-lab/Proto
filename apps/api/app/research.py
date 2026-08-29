@@ -5,6 +5,8 @@ from datetime import datetime
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from services.quant.synthetic_greeks import BinaryContractInputs, synthetic_greeks
+
 from .calibration import (
     CalibrationObservation,
     brier_score,
@@ -38,6 +40,13 @@ class ReplayRequest(BaseModel):
     frames: list[ReplayPoint] = Field(min_length=1)
 
 
+class SyntheticGreeksRequest(BaseModel):
+    spot: float = Field(gt=0.0)
+    strike: float = Field(gt=0.0)
+    volatility: float = Field(gt=0.0, le=10.0)
+    time_to_expiry_years: float = Field(gt=0.0, le=100.0)
+
+
 @router.post("/calibration")
 def calibration(request: CalibrationRequest) -> dict[str, float | int]:
     observations = [
@@ -53,6 +62,27 @@ def calibration(request: CalibrationRequest) -> dict[str, float | int]:
             calibration_error(observations, request.bins),
             12,
         ),
+    }
+
+
+@router.post("/synthetic-greeks")
+def synthetic_greeks_endpoint(request: SyntheticGreeksRequest) -> dict[str, float | str]:
+    result = synthetic_greeks(
+        BinaryContractInputs(
+            spot=request.spot,
+            strike=request.strike,
+            volatility=request.volatility,
+            time_to_expiry_years=request.time_to_expiry_years,
+        )
+    )
+    metrics.increment("synthetic_greeks_requests")
+    return {
+        "mode": "RESEARCH_ONLY",
+        "fair_probability": round(result.fair_probability, 12),
+        "delta": round(result.delta, 12),
+        "gamma": round(result.gamma, 12),
+        "vega": round(result.vega, 12),
+        "theta_per_year": round(result.theta_per_year, 12),
     }
 
 
