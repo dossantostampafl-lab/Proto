@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import asdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Response
 
+from services.analytics.live_market import calculate_live_market_analytics
 from services.market_data import (
     CoinbasePublicMarketDataAdapter,
     DataQualityMonitor,
@@ -20,6 +23,8 @@ from .models import SystemMode
 from .settings import settings
 from .websockets import hub
 
+_HISTORY_LIMIT = 512
+
 
 class LiveCryptoMonitor:
     def __init__(self) -> None:
@@ -27,6 +32,9 @@ class LiveCryptoMonitor:
         self._quality = DataQualityMonitor(stale_after_seconds=10.0)
         self._task: asyncio.Task[None] | None = None
         self._latest: dict[str, MarketTick] = {}
+        self._history: dict[str, deque[MarketTick]] = defaultdict(
+            lambda: deque(maxlen=_HISTORY_LIMIT)
+        )
         self._last_error: str | None = None
 
     @property
@@ -87,6 +95,7 @@ class LiveCryptoMonitor:
             "financial_connectivity": False,
             "real_money_execution": False,
             "symbols": sorted(self._latest),
+            "history_limit_per_symbol": _HISTORY_LIMIT,
             "last_error": self._last_error,
         }
 
@@ -97,6 +106,18 @@ class LiveCryptoMonitor:
         tick = self._latest.get(symbol.upper())
         return self._market_payload(tick) if tick is not None else None
 
+    def analytics(self, symbol: str) -> dict[str, object] | None:
+        history = self._history.get(symbol.upper())
+        if not history:
+            return None
+        result = calculate_live_market_analytics(list(history))
+        return {
+            **asdict(result),
+            "source": "PUBLIC_READ_ONLY_DESCRIPTIVE",
+            "financial_connectivity": False,
+            "real_money_execution": False,
+        }
+
     async def ingest_tick(self, tick: MarketTick) -> bool:
         report = self._quality.evaluate(tick)
         if not report.valid:
@@ -106,6 +127,7 @@ class LiveCryptoMonitor:
             return False
 
         self._latest[tick.symbol] = tick
+        self._history[tick.symbol].append(tick)
         metrics.increment("live_market_frames")
         book = compute_orderbook_metrics(tick)
         await hub.broadcast(
@@ -235,6 +257,14 @@ def live_market_data_symbol(symbol: str) -> dict[str, object]:
     if snapshot is None:
         raise HTTPException(status_code=404, detail="no live snapshot available for symbol")
     return snapshot
+
+
+@router.get("/analytics/{symbol}")
+def live_analytics_symbol(symbol: str) -> dict[str, object]:
+    analytics = live_monitor.analytics(symbol)
+    if analytics is None:
+        raise HTTPException(status_code=404, detail="no live analytics available for symbol")
+    return analytics
 
 
 @router.post("/start")
