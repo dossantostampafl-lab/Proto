@@ -8,8 +8,8 @@ from services.market_data.adapters import (
     SyntheticAdapter,
 )
 from services.market_data.core import MarketTick
-from services.market_data.live import (
-    CoinbasePublicMarketDataAdapter,
+from services.market_data.live import CoinbasePublicMarketDataAdapter
+from services.market_data.public_feed_parser import (
     PublicCryptoFeedError,
     parse_public_ticker_message,
 )
