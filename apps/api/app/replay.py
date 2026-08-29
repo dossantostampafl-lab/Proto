@@ -2,14 +2,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from .models import MarketSnapshot
+
+ReplaySpeed = Literal["1x", "5x", "10x", "50x", "100x", "MAX"]
 
 
 @dataclass(frozen=True)
 class ReplayFrame:
     timestamp: datetime
     snapshot: MarketSnapshot
+
+
+class ReplayFrameInput(BaseModel):
+    timestamp: datetime
+    snapshot: MarketSnapshot
+
+
+class ReplayStartRequest(BaseModel):
+    frames: list[ReplayFrameInput] = Field(min_length=1)
+    speed: ReplaySpeed = "1x"
 
 
 class HistoricalReplay:
@@ -43,3 +58,96 @@ class HistoricalReplay:
         remaining = self._frames[self._cursor :]
         self._cursor = len(self._frames)
         return remaining
+
+
+class ReplaySession:
+    """Stateful deterministic replay controller for the simulation runtime."""
+
+    def __init__(self) -> None:
+        self._engine: HistoricalReplay | None = None
+        self._speed: ReplaySpeed = "1x"
+        self._paused = True
+        self._last_frame: ReplayFrame | None = None
+
+    @property
+    def active(self) -> bool:
+        return self._engine is not None
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    @property
+    def speed(self) -> ReplaySpeed:
+        return self._speed
+
+    def start(self, request: ReplayStartRequest) -> dict[str, object]:
+        frames = [
+            ReplayFrame(timestamp=item.timestamp, snapshot=item.snapshot)
+            for item in request.frames
+        ]
+        self._engine = HistoricalReplay(frames)
+        self._speed = request.speed
+        self._paused = False
+        self._last_frame = None
+        return self.status()
+
+    def pause(self) -> dict[str, object]:
+        self._require_engine()
+        self._paused = True
+        return self.status()
+
+    def resume(self) -> dict[str, object]:
+        engine = self._require_engine()
+        if engine.finished:
+            raise RuntimeError("replay is already finished")
+        self._paused = False
+        return self.status()
+
+    def step(self) -> ReplayFrame | None:
+        engine = self._require_engine()
+        frame = engine.next()
+        if frame is not None:
+            self._last_frame = frame
+        if engine.finished:
+            self._paused = True
+        return frame
+
+    def restart(self) -> dict[str, object]:
+        engine = self._require_engine()
+        engine.reset()
+        self._paused = False
+        self._last_frame = None
+        return self.status()
+
+    def reset(self) -> None:
+        self._engine = None
+        self._speed = "1x"
+        self._paused = True
+        self._last_frame = None
+
+    def status(self) -> dict[str, object]:
+        if self._engine is None:
+            return {
+                "active": False,
+                "paused": True,
+                "speed": self._speed,
+                "cursor": 0,
+                "total_frames": 0,
+                "finished": False,
+                "last_timestamp": None,
+            }
+        return {
+            "active": True,
+            "paused": self._paused,
+            "speed": self._speed,
+            "cursor": self._engine.cursor,
+            "total_frames": self._engine.total_frames,
+            "finished": self._engine.finished,
+            "last_timestamp": self._last_frame.timestamp if self._last_frame else None,
+        }
+
+    def _require_engine(self) -> HistoricalReplay:
+        if self._engine is None:
+            raise RuntimeError("replay session has not been started")
+        return self._engine
