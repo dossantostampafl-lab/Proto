@@ -73,10 +73,10 @@ def test_historical_adapter_orders_timestamp_then_sequence() -> None:
     assert [tick.sequence for tick in ticks] == [1, 2]
 
 
-def test_public_ticker_parser_normalizes_supported_crypto() -> None:
-    payload = {
+def _public_payload(*, timestamp: str = "2026-08-29T20:15:00Z") -> dict[str, object]:
+    return {
         "channel": "ticker",
-        "timestamp": "2026-08-29T20:15:00Z",
+        "timestamp": timestamp,
         "sequence_num": 42,
         "events": [
             {
@@ -95,16 +95,27 @@ def test_public_ticker_parser_normalizes_supported_crypto() -> None:
         ],
     }
 
-    ticks = parse_public_ticker_message(payload)
+
+def test_public_ticker_parser_normalizes_supported_crypto() -> None:
+    ticks = parse_public_ticker_message(_public_payload())
 
     assert len(ticks) == 1
     tick = ticks[0]
     assert tick.venue == "coinbase-public"
     assert tick.symbol == "BTC"
     assert tick.sequence == 42
+    assert tick.timestamp.tzinfo == UTC
     assert tick.mid == pytest.approx(61000.25)
     assert tick.bid_size == pytest.approx(1.2)
     assert tick.ask_size == pytest.approx(0.8)
+
+
+def test_public_ticker_parser_normalizes_offset_timestamp_to_utc() -> None:
+    ticks = parse_public_ticker_message(
+        _public_payload(timestamp="2026-08-29T17:15:00-03:00")
+    )
+
+    assert ticks[0].timestamp == datetime(2026, 8, 29, 20, 15, tzinfo=UTC)
 
 
 def test_public_ticker_parser_ignores_non_ticker_channels() -> None:
@@ -121,6 +132,24 @@ def test_public_ticker_parser_rejects_malformed_frames() -> None:
                 "events": "not-an-array",
             }
         )
+
+
+def test_public_ticker_parser_rejects_invalid_json_as_feed_error() -> None:
+    with pytest.raises(PublicCryptoFeedError, match="invalid public feed payload"):
+        parse_public_ticker_message("{not-json")
+
+
+def test_public_ticker_parser_rejects_timezone_naive_timestamp() -> None:
+    with pytest.raises(PublicCryptoFeedError, match="timezone-aware"):
+        parse_public_ticker_message(_public_payload(timestamp="2026-08-29T20:15:00"))
+
+
+def test_public_ticker_parser_rejects_invalid_sequence() -> None:
+    payload = _public_payload()
+    payload["sequence_num"] = "not-a-number"
+
+    with pytest.raises(PublicCryptoFeedError, match="ticker sequence is invalid"):
+        parse_public_ticker_message(payload)
 
 
 def test_public_adapter_accepts_only_read_only_crypto_products() -> None:
