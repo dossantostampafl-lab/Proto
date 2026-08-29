@@ -1,3 +1,5 @@
+import math
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -46,9 +48,22 @@ def test_synthetic_delta_is_positive_near_threshold() -> None:
     assert 0.0 < greeks.fair_probability < 1.0
     assert greeks.delta > 0.0
     assert all(
-        value == pytest.approx(value)
+        math.isfinite(value)
         for value in (greeks.gamma, greeks.vega, greeks.theta_per_year)
     )
+
+
+def test_tiny_positive_spot_keeps_finite_difference_domain_valid() -> None:
+    greeks = synthetic_greeks(
+        BinaryContractInputs(
+            spot=1e-12,
+            strike=1e-12,
+            volatility=0.50,
+            time_to_expiry_years=0.10,
+        )
+    )
+    assert 0.0 <= greeks.fair_probability <= 1.0
+    assert math.isfinite(greeks.delta)
 
 
 def test_invalid_contract_inputs_are_rejected() -> None:
