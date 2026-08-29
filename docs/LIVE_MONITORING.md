@@ -23,7 +23,9 @@ The current adapter consumes the public Coinbase market-data WebSocket for:
 - `ETH-USD` -> `ETH`;
 - `SOL-USD` -> `SOL`.
 
-Frames are normalized into the canonical `MarketTick` contract before they are accepted by the live monitor. The parser rejects malformed JSON, invalid or negative sequences, timezone-naive timestamps and unsupported products, and normalizes offset-aware timestamps to UTC.
+Transport and parsing are isolated. `services/market_data/live.py` owns WSS connection health and reconnect behavior, while `services/market_data/public_feed_parser.py` owns public-frame validation and normalization. Frames are normalized into the canonical `MarketTick` contract before they are accepted by the live monitor.
+
+The parser rejects malformed JSON, invalid or negative sequences, timezone-naive timestamps and unsupported products, and normalizes offset-aware timestamps to UTC. Wire payloads are capped at 256 KiB, ticker frames at 32 events and each event at 32 ticker entries. The WebSocket transport uses the same 256 KiB maximum message size so oversized frames are bounded before application parsing.
 
 ## Data-quality gate
 
@@ -69,7 +71,7 @@ The public adapter exposes operational telemetry without account connectivity:
 
 A successful reconnect increments the connection generation. When the monitor observes a new generation it resets the data-quality sequence state and clears accepted snapshots, rolling analytics history and per-symbol generation state before accepting data from the new connection. This prevents cached observations or sequence numbers from an old socket being treated as current.
 
-The public WebSocket receive loop is timeout-bounded. A socket that remains open but stops delivering messages is closed by the client path and reconnected with bounded exponential backoff. Backoff is reset only after valid ticker data is observed, rather than merely after a TCP/WebSocket connection succeeds.
+The public WebSocket receive loop is timeout-bounded. A socket that remains open but stops delivering messages is closed by the client path and reconnected with bounded exponential backoff. Backoff is reset only after valid ticker data is observed, rather than merely after a TCP/WebSocket connection succeeds. Explicit async-generator shutdown also clears the connected-state telemetry in a `finally` path.
 
 Malformed public frames use a small consecutive-error budget. Isolated parser failures are counted without immediately tearing down a healthy socket, but repeated failures cross the budget and force a reconnect. Heartbeat/control frames do not clear parser degradation; only valid ticker data does.
 
@@ -80,6 +82,7 @@ Readiness requires BTC, ETH and SOL to have fresh observations from the current 
 - `MONITOR_STOPPED`;
 - `SOURCE_DISCONNECTED`;
 - `SOURCE_MESSAGES_STALE`;
+- `SOURCE_PARSE_DEGRADED`;
 - `NO_FRESH_DATA`;
 - `INCOMPLETE_SYMBOL_COVERAGE`;
 - `STALE_SYMBOL_COVERAGE`;
@@ -100,7 +103,7 @@ WebSocket channels `market-data` and `orderbook` carry only normalized public mo
 
 ## CI, Security and Graphify
 
-Every change remains behind the normal CI, Security and Graphify workflows. Graphify is used to inspect cross-module coupling and guide safe refactors. The public live monitor depends on the `PublicMarketDataAdapter` protocol rather than a concrete transport implementation, and live coverage/readiness evaluation is split into pure functions for deterministic testing.
+Every change remains behind the normal CI, Security and Graphify workflows. Graphify is used to inspect cross-module coupling and guide safe refactors. The public live monitor depends on the `PublicMarketDataAdapter` protocol rather than a concrete transport implementation, public parsing is isolated from the transport adapter, and live coverage/readiness evaluation is split into pure functions for deterministic testing.
 
 The Security workflow keeps Python, Web and Rust dependency audits independent. The Rust scanner is version-pinned for reproducible runs while the active dependency graph is checked before the single documented lockfile-only `rkyv` advisory exception is applied.
 
