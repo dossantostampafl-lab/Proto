@@ -277,60 +277,62 @@ class CoinbasePublicMarketDataAdapter:
 
     async def stream(self) -> AsyncIterator[MarketTick]:
         delay = self.reconnect_min_seconds
-        while True:
-            self._connection_attempts += 1
-            try:
-                async with connect(
-                    self.endpoint,
-                    ping_interval=20,
-                    ping_timeout=20,
-                    close_timeout=5,
-                    max_size=_MAX_PUBLIC_FRAME_BYTES,
-                ) as websocket:
-                    self._connected = True
-                    self._connection_generation += 1
-                    self._connected_since = datetime.now(UTC)
-                    self._last_error = None
-                    self._consecutive_parse_errors = 0
-                    await websocket.send(
-                        json.dumps(
-                            {
-                                "type": "subscribe",
-                                "product_ids": list(self.products),
-                                "channel": "ticker",
-                            }
-                        )
-                    )
-                    await websocket.send(
-                        json.dumps({"type": "subscribe", "channel": "heartbeats"})
-                    )
-                    while True:
-                        try:
-                            message = await _receive_with_timeout(
-                                websocket,
-                                self.message_timeout_seconds,
+        try:
+            while True:
+                self._connection_attempts += 1
+                try:
+                    async with connect(
+                        self.endpoint,
+                        ping_interval=20,
+                        ping_timeout=20,
+                        close_timeout=5,
+                        max_size=_MAX_PUBLIC_FRAME_BYTES,
+                    ) as websocket:
+                        self._connected = True
+                        self._connection_generation += 1
+                        self._connected_since = datetime.now(UTC)
+                        self._last_error = None
+                        self._consecutive_parse_errors = 0
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "subscribe",
+                                    "product_ids": list(self.products),
+                                    "channel": "ticker",
+                                }
                             )
-                        except PublicFeedTimeoutError:
-                            self._message_timeout_count += 1
-                            raise
-                        observed_at = datetime.now(UTC)
-                        self._frames_received += 1
-                        self._last_message_at = observed_at
-                        ticks = self._parse_message(message)
-                        if ticks:
-                            delay = self.reconnect_min_seconds
-                        for tick in ticks:
-                            self._ticks_emitted += 1
-                            self._last_tick_at = observed_at
-                            yield tick
-            except asyncio.CancelledError:
-                self._connected = False
-                self._connected_since = None
-                raise
-            except Exception as error:
-                self._connected = False
-                self._connected_since = None
-                self._last_error = type(error).__name__
-                self._reconnect_count += 1
-                await asyncio.sleep(delay)
-                delay = min(delay * 2.0, self.reconnect_max_seconds)
+                        )
+                        await websocket.send(
+                            json.dumps({"type": "subscribe", "channel": "heartbeats"})
+                        )
+                        while True:
+                            try:
+                                message = await _receive_with_timeout(
+                                    websocket,
+                                    self.message_timeout_seconds,
+                                )
+                            except PublicFeedTimeoutError:
+                                self._message_timeout_count += 1
+                                raise
+                            observed_at = datetime.now(UTC)
+                            self._frames_received += 1
+                            self._last_message_at = observed_at
+                            ticks = self._parse_message(message)
+                            if ticks:
+                                delay = self.reconnect_min_seconds
+                            for tick in ticks:
+                                self._ticks_emitted += 1
+                                self._last_tick_at = observed_at
+                                yield tick
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    self._connected = False
+                    self._connected_since = None
+                    self._last_error = type(error).__name__
+                    self._reconnect_count += 1
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2.0, self.reconnect_max_seconds)
+        finally:
+            self._connected = False
+            self._connected_since = None
