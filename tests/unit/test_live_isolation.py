@@ -2,22 +2,30 @@ import ast
 from pathlib import Path
 
 LIVE_SCOPE = (
+    Path("apps/api/app/live_app.py"),
     Path("apps/api/app/live_durability.py"),
     Path("apps/api/app/live_metrics.py"),
     Path("apps/api/app/live_monitor.py"),
     Path("apps/api/app/live_persistence.py"),
     Path("apps/api/app/live_routes.py"),
+    Path("apps/api/app/live_websockets.py"),
     Path("services/market_data/live.py"),
     Path("services/market_data/live_status.py"),
     Path("services/market_data/live_storage.py"),
     Path("services/market_data/public_feed_parser.py"),
 )
 PUBLIC_FEED = Path("services/market_data/live.py")
+DOCKERFILE = Path("Dockerfile.api")
 
 _FORBIDDEN_LIVE_IMPORT_PREFIXES = (
+    "apps.api.app.main",
+    "apps.api.app.lifecycle",
     "apps.api.app.portfolio",
+    "apps.api.app.replay",
+    "apps.api.app.research",
     "apps.api.app.risk_state",
     "apps.api.app.simulation",
+    "apps.api.app.surface",
     "services.execution",
     "services.hedge",
     "services.quant",
@@ -129,3 +137,10 @@ def test_public_feed_is_pinned_to_canonical_tls_websocket() -> None:
 
     assert '"wss://advanced-trade-ws.coinbase.com"' in source
     assert '"ws://advanced-trade-ws.coinbase.com"' not in source
+
+
+def test_default_container_runs_only_standalone_live_app() -> None:
+    source = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "apps.api.app.live_app:app" in source
+    assert "apps.api.app.main:app" not in source
