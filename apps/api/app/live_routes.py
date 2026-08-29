@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
 
-from services.market_data import live_readiness_failures
+from services.market_data import LiveTickJournalError, live_readiness_failures
 
+from .live_durability import live_durability
 from .live_metrics import render_live_prometheus
 from .live_monitor import live_monitor
 from .models import SystemMode
@@ -23,6 +25,7 @@ def _mark_no_store(response: Response) -> None:
 
 @asynccontextmanager
 async def live_router_lifespan(_: APIRouter) -> AsyncIterator[None]:
+    await live_durability.start(monitor=live_monitor, settings=settings)
     should_autostart = (
         settings.system_mode == SystemMode.LIVE_MONITORING.value
         and settings.live_monitoring_autostart
@@ -34,6 +37,7 @@ async def live_router_lifespan(_: APIRouter) -> AsyncIterator[None]:
     finally:
         if live_monitor.running:
             await live_monitor.stop()
+        await live_durability.stop(monitor=live_monitor)
 
 
 router = APIRouter(
@@ -68,6 +72,13 @@ def live_ready(response: Response) -> dict[str, object]:
         message_fresh=message_fresh,
         coverage=status,
     )
+    persistence = status.get("persistence")
+    if (
+        isinstance(persistence, dict)
+        and bool(persistence.get("required"))
+        and not bool(persistence.get("healthy"))
+    ):
+        failures.append("PERSISTENCE_UNAVAILABLE")
     ready = not failures
     if not ready:
         response.status_code = 503
@@ -104,6 +115,51 @@ def live_market_data_symbol(symbol: str, response: Response) -> dict[str, object
             headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
         )
     return snapshot
+
+
+@router.get("/history/{symbol}")
+async def live_persisted_history(
+    symbol: str,
+    response: Response,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=settings.live_history_query_max),
+    ] = 100,
+) -> dict[str, object]:
+    _mark_no_store(response)
+    normalized_symbol = symbol.strip().upper()
+    if normalized_symbol not in live_monitor.expected_symbols:
+        raise HTTPException(
+            status_code=404,
+            detail="symbol is outside the configured live allowlist",
+            headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
+        )
+    try:
+        rows = await live_monitor.persisted_history(normalized_symbol, limit=limit)
+    except LiveTickJournalError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="persisted live history is temporarily unavailable",
+            headers={
+                "Cache-Control": _NO_STORE_CACHE_CONTROL,
+                "Retry-After": _READINESS_RETRY_AFTER_SECONDS,
+            },
+        ) from error
+    if rows is None:
+        raise HTTPException(
+            status_code=503,
+            detail="live persistence is disabled",
+            headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
+        )
+    return {
+        "mode": SystemMode.LIVE_MONITORING,
+        "source": "PUBLIC_READ_ONLY_PERSISTED",
+        "symbol": normalized_symbol,
+        "count": len(rows),
+        "history": rows,
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
 
 
 @router.get("/analytics/{symbol}")

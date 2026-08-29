@@ -29,6 +29,12 @@ def _append_optional_gauge(
 def render_live_prometheus(status: Mapping[str, object]) -> str:
     feed_health = status.get("feed_health")
     health: Mapping[str, object] = feed_health if isinstance(feed_health, Mapping) else {}
+    persistence_raw = status.get("persistence")
+    persistence: Mapping[str, object] = (
+        persistence_raw if isinstance(persistence_raw, Mapping) else {}
+    )
+    journal_raw = persistence.get("journal")
+    journal: Mapping[str, object] = journal_raw if isinstance(journal_raw, Mapping) else {}
     lines = [
         "# HELP proto_live_running Whether the read-only live monitor task is running.",
         "# TYPE proto_live_running gauge",
@@ -61,6 +67,18 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
             "Rejected duplicate or regressing sequences in the current connection generation."
         ),
         "# TYPE proto_live_sequence_rejections_current_connection gauge",
+        "# HELP proto_live_persistence_required Whether durable storage is required before fanout.",
+        "# TYPE proto_live_persistence_required gauge",
+        f"proto_live_persistence_required {_metric_bool(persistence.get('required'))}",
+        "# HELP proto_live_persistence_configured Whether a durable live journal is configured.",
+        "# TYPE proto_live_persistence_configured gauge",
+        f"proto_live_persistence_configured {_metric_bool(persistence.get('configured'))}",
+        "# HELP proto_live_persistence_healthy Whether durable writes are currently healthy.",
+        "# TYPE proto_live_persistence_healthy gauge",
+        f"proto_live_persistence_healthy {_metric_bool(persistence.get('healthy'))}",
+        "# HELP proto_live_persistence_read_healthy Whether persisted history reads are healthy.",
+        "# TYPE proto_live_persistence_read_healthy gauge",
+        f"proto_live_persistence_read_healthy {_metric_bool(persistence.get('read_healthy'))}",
         (
             "# HELP proto_live_financial_connectivity "
             "Financial account connectivity capability; invariant zero."
@@ -91,6 +109,32 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
     ):
         source = status if key == "last_receipt_age_seconds" else health
         _append_optional_gauge(lines, metric=metric, value=source.get(key))
+
+    for metric, key in (
+        ("proto_live_persisted_current_connection", "persisted_current_connection"),
+        (
+            "proto_live_persistence_idempotent_hits_current_connection",
+            "idempotent_hits_current_connection",
+        ),
+        (
+            "proto_live_persistence_write_failures_current_connection",
+            "write_failures_current_connection",
+        ),
+        ("proto_live_persistence_read_failures", "read_failures"),
+    ):
+        _append_optional_gauge(lines, metric=metric, value=persistence.get(key))
+
+    for metric, key in (
+        ("proto_live_journal_writes_attempted", "writes_attempted"),
+        ("proto_live_journal_writes_inserted", "writes_inserted"),
+        ("proto_live_journal_idempotent_hits", "idempotent_hits"),
+        ("proto_live_journal_write_failures", "write_failures"),
+        ("proto_live_journal_read_failures", "read_failures"),
+        ("proto_live_journal_maintenance_failures", "maintenance_failures"),
+        ("proto_live_journal_pruned_rows", "pruned_rows"),
+        ("proto_live_journal_retention_seconds", "retention_seconds"),
+    ):
+        _append_optional_gauge(lines, metric=metric, value=journal.get(key))
 
     symbol_health = status.get("symbol_health")
     expected_symbols = status.get("expected_symbols")

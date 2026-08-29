@@ -22,6 +22,7 @@ from .live import (
     PublicMarketDataAdapter,
 )
 from .live_status import evaluate_live_coverage, live_readiness_failures
+from .live_storage import LiveTickJournal, LiveTickJournalError, PersistedLiveTick
 from .public_feed_parser import PublicCryptoFeedError, parse_public_ticker_message
 
 __all__ = [
@@ -31,10 +32,13 @@ __all__ = [
     "DataQualityMonitor",
     "DataQualityReport",
     "HistoricalReplayAdapter",
+    "LiveTickJournal",
+    "LiveTickJournalError",
     "MarketDataAdapter",
     "MarketTick",
     "MockPredictionMarketAdapter",
     "OrderBookMetrics",
+    "PersistedLiveTick",
     "PublicCryptoFeedError",
     "PublicFeedHealth",
     "PublicFeedTimeoutError",
