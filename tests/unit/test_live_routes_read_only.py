@@ -30,3 +30,12 @@ def test_live_monitoring_responses_are_never_cacheable() -> None:
     for path in paths:
         response = client.get(path)
         assert response.headers["cache-control"] == "no-store, max-age=0"
+
+
+def test_live_readiness_failure_exposes_retry_after_without_mutating_controls() -> None:
+    response = client.get("/live/ready")
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.json()["status"] == "not_ready"
