@@ -9,7 +9,10 @@ from .simulation import PaperSimulator
 app = FastAPI(
     title="Proto Prediction Market Quant Engine",
     version=__version__,
-    description="Research, simulation and paper-trading API. Real execution is not part of the MVP.",
+    description=(
+        "Research, simulation and paper-trading API. "
+        "Real execution is not part of the MVP."
+    ),
 )
 
 simulator = PaperSimulator()
