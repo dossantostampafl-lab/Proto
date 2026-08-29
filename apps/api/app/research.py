@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -11,6 +12,7 @@ from .calibration import (
     brier_score,
     calibration_error,
     log_loss,
+    reliability_curve,
 )
 from .lifecycle import router as lifecycle_router
 from .models import MarketSnapshot
@@ -46,11 +48,12 @@ class ReplayRequest(BaseModel):
 
 
 @router.post("/research/calibration")
-def calibration(request: CalibrationRequest) -> dict[str, float | int]:
+def calibration(request: CalibrationRequest) -> dict[str, object]:
     observations = [
         CalibrationObservation(probability=item.probability, outcome=item.outcome)
         for item in request.observations
     ]
+    curve = reliability_curve(observations, request.bins)
     metrics.increment("calibration_requests")
     return {
         "count": len(observations),
@@ -60,6 +63,7 @@ def calibration(request: CalibrationRequest) -> dict[str, float | int]:
             calibration_error(observations, request.bins),
             12,
         ),
+        "reliability_curve": [asdict(bucket) for bucket in curve],
     }
 
 
