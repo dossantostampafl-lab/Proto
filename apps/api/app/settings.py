@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .safety_policy import validate_sandbox_mode
+from .safety_policy import SafetyPolicyError, validate_sandbox_mode
 
 
 class Settings(BaseSettings):
@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     @field_validator("system_mode")
     @classmethod
     def enforce_sandbox_mode(cls, value: str) -> str:
-        validate_sandbox_mode(value)
+        try:
+            validate_sandbox_mode(value)
+        except SafetyPolicyError as error:
+            raise ValueError(str(error)) from error
         return value.strip().upper()
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
