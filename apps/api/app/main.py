@@ -223,9 +223,15 @@ async def simulate(request: SimulationRequest) -> SimulationResult:
         portfolio.apply_fill(request.order, result.fill)
         if persistent_journal is not None:
             await persistent_journal.append(request.order, result.fill)
+        fill_event = {
+            **result.fill.model_dump(mode="json"),
+            "market_id": request.order.market_id,
+            "asset": request.order.asset.value,
+            "side": request.order.side.value,
+        }
         await hub.broadcast(
             "fills",
-            {"type": "fill", "data": result.fill.model_dump(mode="json")},
+            {"type": "fill", "data": fill_event},
         )
         await hub.broadcast(
             "portfolio",
@@ -470,3 +476,4 @@ async def ws_fills(websocket: WebSocket) -> None:
 @app.websocket("/ws/analytics")
 async def ws_analytics(websocket: WebSocket) -> None:
     await hub.serve("analytics", websocket)
+
