@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -6,8 +7,37 @@ from fastapi.testclient import TestClient
 from apps.api.app.live_monitor import LiveCryptoMonitor
 from apps.api.app.main import app
 from services.market_data.core import MarketTick
+from services.market_data.live import PublicFeedHealth
 
 client = TestClient(app)
+
+
+class StubPublicAdapter:
+    symbols = ("BTC", "ETH", "SOL")
+
+    def __init__(self) -> None:
+        self.generation = 1
+        self.connected = True
+
+    def health(self) -> PublicFeedHealth:
+        observed_at = datetime.now(UTC)
+        return PublicFeedHealth(
+            connected=self.connected,
+            connection_generation=self.generation,
+            connection_attempts=self.generation,
+            reconnect_count=max(self.generation - 1, 0),
+            frames_received=3,
+            ticks_emitted=3,
+            parse_error_count=0,
+            connected_since=observed_at - timedelta(seconds=1),
+            last_message_at=observed_at,
+            last_tick_at=observed_at,
+            last_error=None,
+        )
+
+    async def stream(self) -> AsyncIterator[MarketTick]:
+        if False:
+            yield _tick()
 
 
 def _tick(*, observed_at: datetime | None = None, sequence: int = 1) -> MarketTick:
@@ -34,6 +64,7 @@ def test_live_routes_are_mounted_with_financial_connectivity_disabled() -> None:
     assert body["source"] == "PUBLIC_READ_ONLY"
     assert body["expected_symbols"] == ["BTC", "ETH", "SOL"]
     assert body["feed_health"]["connected"] is False
+    assert body["feed_health"]["message_fresh"] is False
     assert body["feed_health"]["financial_connectivity"] is False
     assert body["feed_health"]["real_money_execution"] is False
     assert body["financial_connectivity"] is False
@@ -47,8 +78,13 @@ def test_live_source_health_is_read_only_and_account_free() -> None:
     assert response.status_code == 200
     assert body["source"] == "PUBLIC_READ_ONLY"
     assert body["connected"] is False
+    assert body["connection_generation"] == 0
     assert body["connection_attempts"] == 0
     assert body["reconnect_count"] == 0
+    assert body["frames_received"] == 0
+    assert body["ticks_emitted"] == 0
+    assert body["parse_error_count"] == 0
+    assert body["message_fresh"] is False
     assert body["expected_symbols"] == ["BTC", "ETH", "SOL"]
     assert body["financial_connectivity"] is False
     assert body["real_money_execution"] is False
@@ -61,6 +97,8 @@ def test_live_readiness_fails_closed_without_fresh_frames() -> None:
     assert response.status_code == 503
     assert body["status"] == "not_ready"
     assert body["all_symbols_fresh"] is False
+    assert body["all_symbols_current_connection"] is False
+    assert body["source_message_fresh"] is False
     assert body["missing_symbols"] == ["BTC", "ETH", "SOL"]
     assert body["financial_connectivity"] is False
     assert body["real_money_execution"] is False
@@ -125,6 +163,44 @@ async def test_live_monitor_requires_complete_symbol_coverage_for_status() -> No
     assert complete["missing_symbols"] == []
     assert complete["stale_symbols"] == []
     assert complete["fresh_symbols"] == ["BTC", "ETH", "SOL"]
+
+
+@pytest.mark.asyncio
+async def test_live_monitor_requires_all_symbols_from_current_connection_generation() -> None:
+    adapter = StubPublicAdapter()
+    monitor = LiveCryptoMonitor(adapter=adapter)
+    now = datetime.now(UTC)
+
+    for symbol, bid, ask in (
+        ("BTC", 60_000.0, 60_001.0),
+        ("ETH", 3_000.0, 3_001.0),
+        ("SOL", 140.0, 140.1),
+    ):
+        tick = _tick(observed_at=now).model_copy(
+            update={
+                "symbol": symbol,
+                "bid": bid,
+                "ask": ask,
+                "last": (bid + ask) / 2.0,
+            }
+        )
+        assert await monitor.ingest_tick(tick) is True
+
+    initial = monitor.status()
+    assert initial["all_symbols_fresh"] is True
+    assert initial["all_symbols_current_connection"] is True
+    assert initial["source_message_fresh"] is True
+
+    adapter.generation = 2
+    after_reconnect = monitor.status()
+
+    assert after_reconnect["all_symbols_fresh"] is True
+    assert after_reconnect["all_symbols_current_connection"] is False
+    assert after_reconnect["current_connection_symbols"] == []
+    assert all(
+        health["current_connection"] is False
+        for health in after_reconnect["symbol_health"].values()
+    )
 
 
 @pytest.mark.asyncio
