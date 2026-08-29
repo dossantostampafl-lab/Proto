@@ -1,5 +1,4 @@
 from fastapi.testclient import TestClient
-
 from proto_api.main import app
 
 client = TestClient(app)
@@ -50,7 +49,11 @@ def test_risk_rejects_large_order() -> None:
             "bid": 3990,
             "ask": 4000,
         },
-        "limits": {"max_order_notional": 10000, "max_position_notional": 25000, "max_slippage_bps": 75},
+        "limits": {
+            "max_order_notional": 10000,
+            "max_position_notional": 25000,
+            "max_slippage_bps": 75,
+        },
     }
     response = client.post("/v1/simulate", json=payload)
     assert response.status_code == 200
