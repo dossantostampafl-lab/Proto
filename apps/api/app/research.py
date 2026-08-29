@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from .calibration import (
@@ -91,6 +92,35 @@ def replay(request: ReplayRequest) -> dict[str, object]:
 @router.get("/research/metrics")
 def runtime_metrics() -> dict[str, object]:
     return metrics.snapshot()
+
+
+@router.get("/metrics/prometheus", response_class=PlainTextResponse)
+def prometheus_metrics() -> str:
+    snapshot = metrics.snapshot()
+    counters = snapshot["counters"]
+    lines = [
+        "# HELP proto_http_requests_total Total observed HTTP requests.",
+        "# TYPE proto_http_requests_total counter",
+        f"proto_http_requests_total {snapshot['http_request_count']}",
+        "# HELP proto_http_errors_total Total observed HTTP 5xx responses.",
+        "# TYPE proto_http_errors_total counter",
+        f"proto_http_errors_total {snapshot['http_error_count']}",
+        "# HELP proto_http_latency_ms Average HTTP request latency in milliseconds.",
+        "# TYPE proto_http_latency_ms gauge",
+        f"proto_http_latency_ms {snapshot['average_http_latency_ms']}",
+        "# HELP proto_simulation_latency_ms Average simulation latency in milliseconds.",
+        "# TYPE proto_simulation_latency_ms gauge",
+        f"proto_simulation_latency_ms {snapshot['average_simulation_latency_ms']}",
+    ]
+    for name, value in sorted(counters.items()):
+        safe_name = "".join(character if character.isalnum() else "_" for character in name)
+        lines.extend(
+            [
+                f"# TYPE proto_{safe_name}_total counter",
+                f"proto_{safe_name}_total {value}",
+            ]
+        )
+    return "\n".join(lines) + "\n"
 
 
 @router.post("/research/metrics/reset")
