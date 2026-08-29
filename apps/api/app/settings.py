@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     live_history_retention_seconds: int = Field(default=86_400, ge=300, le=604_800)
     live_history_query_max: int = Field(default=1_000, ge=1, le=10_000)
     live_history_prune_every_writes: int = Field(default=1_000, ge=1, le=100_000)
+    live_database_auto_create: bool = True
     database_url: str = "sqlite+aiosqlite:///:memory:"
     redis_url: str = "redis://localhost:6379/0"
     event_bus_backend: str = "memory"
