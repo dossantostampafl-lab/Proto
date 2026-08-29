@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from .live_database import build_live_engine, init_live_database
 from .live_monitor import LiveCryptoMonitor
 from .live_persistence import AsyncSqlLiveTickJournal
-from .persistence import build_engine, init_database
 from .settings import Settings
 
 
@@ -26,14 +26,15 @@ class LiveDurabilityRuntime:
             monitor.configure_persistence(None, required=False)
             return
 
-        engine = build_engine(settings.database_url)
+        engine = build_live_engine(settings.database_url)
         journal = AsyncSqlLiveTickJournal(
             engine,
             retention_seconds=settings.live_history_retention_seconds,
             prune_every_writes=settings.live_history_prune_every_writes,
         )
         try:
-            await init_database(engine)
+            if settings.live_database_auto_create:
+                await init_live_database(engine)
             await journal.prune_expired()
         except Exception:
             await engine.dispose()
