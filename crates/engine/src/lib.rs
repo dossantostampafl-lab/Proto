@@ -49,15 +49,32 @@ mod tests {
 
     #[test]
     fn accepts_order_within_limits() {
-        let order = Order { quantity: 0.1, limit_price: 60_000.0, side: Side::Buy };
-        let limits = RiskLimits { max_order_notional: 10_000.0, max_position_notional: 25_000.0 };
+        let order = Order {
+            quantity: 0.1,
+            limit_price: 60_000.0,
+            side: Side::Buy,
+        };
+        let limits = RiskLimits {
+            max_order_notional: 10_000.0,
+            max_position_notional: 25_000.0,
+        };
         assert_eq!(validate_order(order, 0.0, limits), Ok(()));
     }
 
     #[test]
     fn rejects_order_over_limit() {
-        let order = Order { quantity: 1.0, limit_price: 60_000.0, side: Side::Buy };
-        let limits = RiskLimits { max_order_notional: 10_000.0, max_position_notional: 25_000.0 };
-        assert_eq!(validate_order(order, 0.0, limits), Err(RiskError::OrderNotionalExceeded));
+        let order = Order {
+            quantity: 1.0,
+            limit_price: 60_000.0,
+            side: Side::Buy,
+        };
+        let limits = RiskLimits {
+            max_order_notional: 10_000.0,
+            max_position_notional: 25_000.0,
+        };
+        assert_eq!(
+            validate_order(order, 0.0, limits),
+            Err(RiskError::OrderNotionalExceeded)
+        );
     }
 }
