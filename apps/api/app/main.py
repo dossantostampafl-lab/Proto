@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from time import perf_counter
+from uuid import uuid4
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from services.quant.calibration import (
+    CalibrationBatch,
+    CalibrationMetrics,
+    score_calibration,
+)
 from services.quant.core import (
     EdgeBreakdown,
     ProbabilityEstimate,
@@ -23,11 +31,14 @@ from .models import (
     SimulationResult,
     SystemMode,
 )
-from .persistence import AsyncSqlFillJournal, build_engine, init_database
+from .observability import RuntimeMetrics, access_log
+from .persistence import AsyncSqlFillJournal, build_engine, database_ready, init_database
 from .portfolio import PaperPortfolio
 from .settings import settings
 from .simulation import PaperSimulator
 
+logger = logging.getLogger("proto.api")
+metrics = RuntimeMetrics()
 persistence_engine = build_engine(settings.database_url) if settings.persistence_enabled else None
 persistent_journal = (
     AsyncSqlFillJournal(persistence_engine) if persistence_engine is not None else None
@@ -53,12 +64,52 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Request-ID"],
 )
 
 runtime = RuntimeState()
 simulator = PaperSimulator()
 portfolio = PaperPortfolio()
+
+
+@app.middleware("http")
+async def observe_request(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    started = perf_counter()
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        latency_ms = (perf_counter() - started) * 1_000
+        metrics.record(path=request.url.path, status_code=500, latency_ms=latency_ms)
+        logger.exception(
+            access_log(
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status_code=500,
+                latency_ms=latency_ms,
+            )
+        )
+        raise
+
+    latency_ms = (perf_counter() - started) * 1_000
+    metrics.record(
+        path=request.url.path,
+        status_code=response.status_code,
+        latency_ms=latency_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        access_log(
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            latency_ms=latency_ms,
+        )
+    )
+    return response
 
 
 @app.get("/health")
@@ -68,6 +119,34 @@ def health() -> dict[str, object]:
         "mode": runtime.mode,
         "version": __version__,
         "persistence_enabled": settings.persistence_enabled,
+    }
+
+
+@app.get("/ready")
+async def ready(response: Response) -> dict[str, object]:
+    if persistence_engine is None:
+        return {
+            "status": "ready",
+            "database": "disabled",
+            "mode": runtime.mode,
+        }
+
+    ready_state = await database_ready(persistence_engine)
+    if not ready_state:
+        response.status_code = 503
+    return {
+        "status": "ready" if ready_state else "not_ready",
+        "database": "ready" if ready_state else "unavailable",
+        "mode": runtime.mode,
+    }
+
+
+@app.get("/metrics")
+def runtime_metrics() -> dict[str, object]:
+    return {
+        "mode": runtime.mode,
+        "real_money_execution": False,
+        **metrics.snapshot(),
     }
 
 
@@ -92,6 +171,11 @@ def probability(snapshot: MarketSnapshot) -> ProbabilityEstimate:
         volatility=snapshot.volatility,
         imbalance=snapshot.imbalance,
     )
+
+
+@app.post("/calibration/score", response_model=CalibrationMetrics)
+def calibration_score(batch: CalibrationBatch) -> CalibrationMetrics:
+    return score_calibration(batch)
 
 
 @app.post("/edge/evaluate", response_model=EdgeBreakdown)
