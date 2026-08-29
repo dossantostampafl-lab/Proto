@@ -74,6 +74,14 @@ class LiveCryptoMonitor:
             },
         )
 
+    def source_health(self) -> dict[str, object]:
+        return {
+            "source": "PUBLIC_READ_ONLY",
+            **asdict(self._adapter.health()),
+            "financial_connectivity": False,
+            "real_money_execution": False,
+        }
+
     def status(self) -> dict[str, object]:
         latest = max(
             (tick.timestamp for tick in self._latest.values()),
@@ -92,7 +100,7 @@ class LiveCryptoMonitor:
             "source": "PUBLIC_READ_ONLY",
             "latest_observed_at": latest.isoformat() if latest is not None else None,
             "last_frame_age_seconds": round(age_seconds, 6) if age_seconds is not None else None,
-            "feed_health": asdict(self._adapter.health()),
+            "feed_health": self.source_health(),
             "financial_connectivity": False,
             "real_money_execution": False,
             "symbols": sorted(self._latest),
@@ -225,6 +233,11 @@ router = APIRouter(
 @router.get("/status")
 def live_status() -> dict[str, object]:
     return live_monitor.status()
+
+
+@router.get("/source-health")
+def live_source_health() -> dict[str, object]:
+    return live_monitor.source_health()
 
 
 @router.get("/ready")
