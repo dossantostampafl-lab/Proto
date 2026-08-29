@@ -16,7 +16,14 @@ class WebSocketHub:
         send_timeout_seconds: float = 1.0,
         allowed_origins: frozenset[str] | None = None,
     ) -> None:
+        if max_connections_per_channel <= 0:
+            raise ValueError("max_connections_per_channel must be positive")
+        if max_message_chars <= 0:
+            raise ValueError("max_message_chars must be positive")
+        if send_timeout_seconds <= 0:
+            raise ValueError("send_timeout_seconds must be positive")
         self._connections: dict[str, set[WebSocket]] = defaultdict(set)
+        self._connect_lock = asyncio.Lock()
         self._max_connections_per_channel = max_connections_per_channel
         self._max_message_chars = max_message_chars
         self._send_timeout_seconds = send_timeout_seconds
@@ -35,12 +42,14 @@ class WebSocketHub:
             self._origin_rejections += 1
             await websocket.close(code=1008, reason="origin not allowed")
             return False
-        if self.connection_count(channel) >= self._max_connections_per_channel:
-            self._capacity_rejections += 1
-            await websocket.close(code=1013, reason="channel capacity reached")
-            return False
-        await websocket.accept()
-        self._connections[channel].add(websocket)
+
+        async with self._connect_lock:
+            if self.connection_count(channel) >= self._max_connections_per_channel:
+                self._capacity_rejections += 1
+                await websocket.close(code=1013, reason="channel capacity reached")
+                return False
+            await websocket.accept()
+            self._connections[channel].add(websocket)
         return True
 
     def disconnect(self, channel: str, websocket: WebSocket) -> None:
