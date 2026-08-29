@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from . import __version__
 from .models import RunMode, SimulationRequest, SimulationResult
+from .portfolio import PaperPortfolio
 from .simulation import PaperSimulator
 
 app = FastAPI(
@@ -16,6 +17,7 @@ app = FastAPI(
 )
 
 simulator = PaperSimulator()
+portfolio = PaperPortfolio()
 
 
 @app.get("/health")
@@ -25,4 +27,18 @@ def health() -> dict[str, str]:
 
 @app.post("/v1/simulate", response_model=SimulationResult)
 def simulate(request: SimulationRequest) -> SimulationResult:
-    return simulator.simulate(request)
+    result = simulator.simulate(request)
+    if result.accepted and result.fill is not None:
+        portfolio.apply_fill(request.order, result.fill)
+    return result
+
+
+@app.get("/v1/portfolio")
+def get_portfolio() -> dict[str, object]:
+    return portfolio.snapshot()
+
+
+@app.post("/v1/portfolio/reset")
+def reset_portfolio() -> dict[str, str]:
+    portfolio.reset()
+    return {"status": "reset", "mode": RunMode.SIMULATION}
