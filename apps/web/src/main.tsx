@@ -1,17 +1,134 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-type Metric = { label: string; value: string; note: string };
+type Health = {
+  status: string;
+  mode: string;
+  version: string;
+  persistence_enabled: boolean;
+};
 
-const metrics: Metric[] = [
-  { label: "Mode", value: "SIMULATION", note: "Real execution disabled" },
-  { label: "Markets", value: "BTC · ETH · SOL", note: "Crypto research universe" },
-  { label: "Risk", value: "ENFORCED", note: "Notional + slippage limits" },
-  { label: "Engine", value: "PYTHON + RUST", note: "Research + low-latency core" },
-];
+type Position = {
+  asset: string;
+  quantity: number;
+  average_price: number;
+  mark_price: number | null;
+  market_value: number | null;
+  realized_pnl: number;
+  unrealized_pnl: number | null;
+  fees: number;
+};
+
+type Portfolio = {
+  mode: string;
+  positions: Position[];
+  total_realized_pnl: number;
+  total_unrealized_pnl: number;
+  total_pnl_after_fees: number;
+  total_fees: number;
+};
+
+type FillEntry = {
+  order_id: string;
+  market_id: string;
+  asset: string;
+  side: string;
+  filled_quantity: number;
+  fill_price: number;
+  fee: number;
+  slippage_bps: number;
+  filled_at: string;
+};
+
+type FillJournal = {
+  mode: string;
+  count: number;
+  fills: FillEntry[];
+};
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+function formatNumber(value: number, digits = 2) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  }).format(value);
+}
 
 function App() {
+  const [health, setHealth] = useState<Health | null>(null);
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [journal, setJournal] = useState<FillJournal | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refresh() {
+      try {
+        const [healthResponse, portfolioResponse, fillsResponse] = await Promise.all([
+          fetch(`${API_BASE}/health`),
+          fetch(`${API_BASE}/v1/portfolio`),
+          fetch(`${API_BASE}/v1/fills?limit=8`),
+        ]);
+
+        if (!healthResponse.ok || !portfolioResponse.ok || !fillsResponse.ok) {
+          throw new Error("API returned a non-success response");
+        }
+
+        const [healthBody, portfolioBody, fillsBody] = await Promise.all([
+          healthResponse.json() as Promise<Health>,
+          portfolioResponse.json() as Promise<Portfolio>,
+          fillsResponse.json() as Promise<FillJournal>,
+        ]);
+
+        if (!cancelled) {
+          setHealth(healthBody);
+          setPortfolio(portfolioBody);
+          setJournal(fillsBody);
+          setError(null);
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          const message = requestError instanceof Error ? requestError.message : "Unknown API error";
+          setError(message);
+        }
+      }
+    }
+
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const metrics = [
+    {
+      label: "Mode",
+      value: health?.mode ?? "SIMULATION",
+      note: "Real execution disabled",
+    },
+    {
+      label: "API",
+      value: health?.status === "ok" ? "ONLINE" : "CONNECTING",
+      note: health ? `Version ${health.version}` : API_BASE,
+    },
+    {
+      label: "Persistence",
+      value: health?.persistence_enabled ? "POSTGRESQL" : "MEMORY",
+      note: "Simulated fills only",
+    },
+    {
+      label: "Fill journal",
+      value: String(journal?.count ?? 0),
+      note: "Recent simulated fills",
+    },
+  ];
+
   return (
     <main className="shell">
       <header className="hero">
@@ -19,11 +136,13 @@ function App() {
           <p className="eyebrow">PROTO / PREDICTION MARKET QUANT ENGINE</p>
           <h1>Research. Simulate. Measure edge.</h1>
           <p className="subtitle">
-            Institutional-style quantitative workspace for crypto and binary prediction markets,
-            operating in paper-trading mode by default.
+            Quantitative workspace for crypto and binary prediction-market research. The terminal
+            is intentionally restricted to simulation and paper-trading workflows.
           </p>
         </div>
-        <span className="status">SYSTEM ONLINE</span>
+        <span className={error ? "status statusError" : "status"}>
+          {error ? "API OFFLINE" : health ? "SYSTEM ONLINE" : "CONNECTING"}
+        </span>
       </header>
 
       <section className="grid">
@@ -38,13 +157,78 @@ function App() {
 
       <section className="panel">
         <div>
-          <p className="eyebrow">MVP FOUNDATION</p>
-          <h2>Quant terminal bootstrap active</h2>
+          <p className="eyebrow">SIMULATED PORTFOLIO</p>
+          <h2>P&amp;L and exposure</h2>
         </div>
-        <div className="flow">
-          <span>Market Data</span><b>→</b><span>Fair Value</span><b>→</b><span>Risk</span><b>→</b><span>Simulator</span><b>→</b><span>P&amp;L</span>
+        <div className="summaryMetrics">
+          <span>Realized <b>{formatNumber(portfolio?.total_realized_pnl ?? 0)}</b></span>
+          <span>Unrealized <b>{formatNumber(portfolio?.total_unrealized_pnl ?? 0)}</b></span>
+          <span>Fees <b>{formatNumber(portfolio?.total_fees ?? 0)}</b></span>
+          <span>Net <b>{formatNumber(portfolio?.total_pnl_after_fees ?? 0)}</b></span>
         </div>
       </section>
+
+      <section className="dataGrid">
+        <article className="dataPanel">
+          <div className="panelTitle">
+            <p className="eyebrow">POSITIONS</p>
+            <span>{portfolio?.positions.length ?? 0} open/known</span>
+          </div>
+          <div className="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Qty</th>
+                  <th>Avg</th>
+                  <th>Realized</th>
+                  <th>Fees</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(portfolio?.positions ?? []).map((position) => (
+                  <tr key={position.asset}>
+                    <td>{position.asset}</td>
+                    <td>{formatNumber(position.quantity, 6)}</td>
+                    <td>{formatNumber(position.average_price)}</td>
+                    <td>{formatNumber(position.realized_pnl)}</td>
+                    <td>{formatNumber(position.fees)}</td>
+                  </tr>
+                ))}
+                {(portfolio?.positions.length ?? 0) === 0 && (
+                  <tr><td colSpan={5} className="empty">No simulated positions yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article className="dataPanel">
+          <div className="panelTitle">
+            <p className="eyebrow">FILL JOURNAL</p>
+            <span>Latest {journal?.count ?? 0}</span>
+          </div>
+          <div className="fillList">
+            {(journal?.fills ?? []).map((fill) => (
+              <div className="fillRow" key={fill.order_id}>
+                <div>
+                  <strong>{fill.asset} {fill.side}</strong>
+                  <small>{fill.market_id}</small>
+                </div>
+                <div className="fillNumbers">
+                  <span>{formatNumber(fill.filled_quantity, 6)}</span>
+                  <b>{formatNumber(fill.fill_price)}</b>
+                </div>
+              </div>
+            ))}
+            {(journal?.fills.length ?? 0) === 0 && (
+              <p className="empty">No simulated fills recorded.</p>
+            )}
+          </div>
+        </article>
+      </section>
+
+      {error && <p className="errorBanner">API connection: {error}</p>}
     </main>
   );
 }
