@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .models import Fill, SimulationOrder
+from .schema_registry import canonical_metadata
 
 
 class Base(DeclarativeBase):
@@ -49,6 +50,7 @@ def build_engine(database_url: str) -> AsyncEngine:
 async def init_database(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(canonical_metadata.create_all)
 
 
 async def database_ready(engine: AsyncEngine) -> bool:
