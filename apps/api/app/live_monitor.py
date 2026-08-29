@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from services.market_data import (
     CoinbasePublicMarketDataAdapter,
@@ -54,15 +54,19 @@ class LiveCryptoMonitor:
             (tick.timestamp for tick in self._latest.values()),
             default=None,
         )
+        age_seconds: float | None = None
         stale = True
         if latest is not None:
-            stale = (datetime.now(UTC) - latest).total_seconds() > 10.0
+            age_seconds = max((datetime.now(UTC) - latest).total_seconds(), 0.0)
+            stale = age_seconds > 10.0
         return {
             "mode": SystemMode.LIVE_MONITORING,
             "running": self.running,
             "receiving_data": bool(self._latest) and not stale,
             "stale": stale,
+            "source": "PUBLIC_READ_ONLY",
             "latest_observed_at": latest.isoformat() if latest is not None else None,
+            "last_frame_age_seconds": round(age_seconds, 6) if age_seconds is not None else None,
             "financial_connectivity": False,
             "real_money_execution": False,
             "symbols": sorted(self._latest),
@@ -80,6 +84,8 @@ class LiveCryptoMonitor:
         report = self._quality.evaluate(tick)
         if not report.valid:
             metrics.increment("live_market_frames_rejected")
+            for issue in report.issues:
+                metrics.increment(f"live_data_quality_{issue.value.lower()}")
             return False
 
         self._latest[tick.symbol] = tick
@@ -106,6 +112,8 @@ class LiveCryptoMonitor:
                     "microprice": book.microprice,
                     "imbalance": book.imbalance,
                     "depth": book.depth,
+                    "financial_connectivity": False,
+                    "real_money_execution": False,
                 },
             },
         )
@@ -137,6 +145,8 @@ class LiveCryptoMonitor:
             "bid_size": tick.bid_size,
             "ask_size": tick.ask_size,
             "sequence": tick.sequence,
+            "financial_connectivity": False,
+            "real_money_execution": False,
         }
 
 
@@ -170,10 +180,29 @@ def live_status() -> dict[str, object]:
     return live_monitor.status()
 
 
+@router.get("/ready")
+def live_ready(response: Response) -> dict[str, object]:
+    status = live_monitor.status()
+    ready = bool(status["running"] and status["receiving_data"] and not status["stale"])
+    if not ready:
+        response.status_code = 503
+    return {
+        "status": "ready" if ready else "not_ready",
+        **status,
+    }
+
+
 @router.get("/market-data")
 def live_market_data() -> dict[str, object]:
     snapshots = live_monitor.snapshots()
-    return {"count": len(snapshots), "markets": snapshots}
+    return {
+        "mode": SystemMode.LIVE_MONITORING,
+        "source": "PUBLIC_READ_ONLY",
+        "count": len(snapshots),
+        "markets": snapshots,
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
 
 
 @router.get("/market-data/{symbol}")
