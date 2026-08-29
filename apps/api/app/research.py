@@ -16,11 +16,13 @@ from .lifecycle import router as lifecycle_router
 from .models import MarketSnapshot
 from .observability import RuntimeMetrics
 from .replay import HistoricalReplay, ReplayFrame
+from .safety_surface import router as safety_router
 from .surface import router as surface_router
 
 router = APIRouter(tags=["research"])
 router.include_router(surface_router)
 router.include_router(lifecycle_router)
+router.include_router(safety_router)
 metrics = RuntimeMetrics()
 
 
