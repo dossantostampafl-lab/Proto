@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
-import json
 from typing import Any
 from uuid import UUID, uuid4
 
