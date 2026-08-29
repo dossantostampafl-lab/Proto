@@ -14,8 +14,10 @@ from .calibration import (
 from .models import MarketSnapshot
 from .observability import RuntimeMetrics
 from .replay import HistoricalReplay, ReplayFrame
+from .surface import router as surface_router
 
-router = APIRouter(prefix="/research", tags=["research"])
+router = APIRouter(tags=["research"])
+router.include_router(surface_router)
 metrics = RuntimeMetrics()
 
 
@@ -38,7 +40,7 @@ class ReplayRequest(BaseModel):
     frames: list[ReplayPoint] = Field(min_length=1)
 
 
-@router.post("/calibration")
+@router.post("/research/calibration")
 def calibration(request: CalibrationRequest) -> dict[str, float | int]:
     observations = [
         CalibrationObservation(probability=item.probability, outcome=item.outcome)
@@ -56,7 +58,7 @@ def calibration(request: CalibrationRequest) -> dict[str, float | int]:
     }
 
 
-@router.post("/replay")
+@router.post("/research/replay")
 def replay(request: ReplayRequest) -> dict[str, object]:
     engine = HistoricalReplay(
         [
@@ -86,12 +88,12 @@ def replay(request: ReplayRequest) -> dict[str, object]:
     }
 
 
-@router.get("/metrics")
+@router.get("/research/metrics")
 def runtime_metrics() -> dict[str, object]:
     return metrics.snapshot()
 
 
-@router.post("/metrics/reset")
+@router.post("/research/metrics/reset")
 def reset_runtime_metrics() -> dict[str, object]:
     metrics.reset()
     return metrics.snapshot()
