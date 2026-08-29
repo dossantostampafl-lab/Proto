@@ -18,6 +18,7 @@ from services.quant.core import (
 )
 
 from . import __version__
+from .live import LiveDataController, LiveDataStartRequest, LiveFeedState
 from .models import (
     KillSwitchState,
     MarketSnapshot,
@@ -54,6 +55,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if persistence_engine is not None:
         await init_database(persistence_engine)
     yield
+    await live_controller.stop()
     if persistence_engine is not None:
         await persistence_engine.dispose()
 
@@ -72,10 +74,11 @@ app.add_middleware(
 )
 app.include_router(research_router)
 
-runtime = RuntimeState()
+runtime = RuntimeState(mode=SystemMode.LIVE_DATA_READ_ONLY, running=False)
 simulator = PaperSimulator()
 portfolio = PaperPortfolio()
 replay_session = ReplaySession()
+live_controller = LiveDataController(websocket_hub=hub)
 
 
 @app.middleware("http")
@@ -128,24 +131,39 @@ def health() -> dict[str, object]:
         "mode": runtime.mode,
         "version": __version__,
         "persistence_enabled": settings.persistence_enabled,
+        "live_data_read_only": True,
+        "live_data_state": live_controller.state,
     }
 
 
 @app.get("/ready")
 async def ready(response: Response) -> dict[str, object]:
+    live_status = live_controller.status()
+    live_unready = (
+        runtime.mode == SystemMode.LIVE_DATA_READ_ONLY
+        and runtime.running
+        and (
+            live_status["state"] not in {LiveFeedState.CONNECTING, LiveFeedState.STREAMING}
+            or live_status["stale"]
+        )
+    )
     if persistence_engine is None:
+        if live_unready:
+            response.status_code = 503
         return {
-            "status": "ready",
+            "status": "not_ready" if live_unready else "ready",
             "database": "disabled",
             "mode": runtime.mode,
+            "live_data": live_status,
         }
     ready_state = await database_ready(persistence_engine)
-    if not ready_state:
+    if not ready_state or live_unready:
         response.status_code = 503
     return {
-        "status": "ready" if ready_state else "not_ready",
+        "status": "ready" if ready_state and not live_unready else "not_ready",
         "database": "ready" if ready_state else "unavailable",
         "mode": runtime.mode,
+        "live_data": live_status,
     }
 
 
@@ -154,6 +172,8 @@ def system_metrics() -> dict[str, object]:
     return {
         "mode": runtime.mode,
         "real_money_execution": False,
+        "live_data_read_only": True,
+        "live_data": live_controller.status(),
         **metrics.snapshot(),
     }
 
@@ -204,7 +224,8 @@ def edge(snapshot: MarketSnapshot) -> EdgeBreakdown:
 def risk() -> dict[str, object]:
     return {
         "kill_switch": runtime.kill_switch,
-        "simulation_allowed": runtime.running
+        "simulation_allowed": runtime.mode in {SystemMode.SIMULATION, SystemMode.PAPER_TRADING}
+        and runtime.running
         and runtime.kill_switch == KillSwitchState.ARMED,
         "real_money_execution": False,
         "minimum_net_edge": settings.minimum_net_edge,
@@ -217,7 +238,11 @@ def risk() -> dict[str, object]:
 @app.post("/v1/simulate", response_model=SimulationResult)
 async def simulate(request: SimulationRequest) -> SimulationResult:
     metrics.increment("simulation_requests")
-    if not runtime.running or runtime.kill_switch != KillSwitchState.ARMED:
+    if (
+        runtime.mode not in {SystemMode.SIMULATION, SystemMode.PAPER_TRADING}
+        or not runtime.running
+        or runtime.kill_switch != KillSwitchState.ARMED
+    ):
         metrics.increment("simulation_rejected")
         return SimulationResult(accepted=False, reason="simulation halted")
 
@@ -285,9 +310,7 @@ def _positions_from_fills(entries: list[dict[str, object]]) -> dict[str, float]:
 async def reconciliation_status() -> dict[str, object]:
     memory_entries = portfolio.journal(1_000)
     authoritative_entries = (
-        await persistent_journal.list(1_000)
-        if persistent_journal is not None
-        else memory_entries
+        await persistent_journal.list(1_000) if persistent_journal is not None else memory_entries
     )
     actual_positions = {
         str(position["asset"]): float(position["quantity"])
@@ -318,6 +341,7 @@ async def simulation_start() -> RuntimeState:
     if runtime.kill_switch != KillSwitchState.ARMED:
         runtime.running = False
         return runtime
+    await live_controller.stop()
     replay_session.reset()
     runtime.mode = SystemMode.SIMULATION
     runtime.running = True
@@ -341,6 +365,7 @@ async def simulation_stop() -> RuntimeState:
 @app.post("/simulation/reset", response_model=RuntimeState)
 async def simulation_reset() -> RuntimeState:
     global runtime
+    await live_controller.stop()
     runtime = RuntimeState()
     replay_session.reset()
     portfolio.reset()
@@ -372,6 +397,7 @@ def replay_status() -> dict[str, object]:
 async def replay_start(request: ReplayStartRequest) -> dict[str, object]:
     if runtime.kill_switch != KillSwitchState.ARMED:
         raise HTTPException(status_code=409, detail="kill switch is not armed")
+    await live_controller.stop()
     status = replay_session.start(request)
     runtime.mode = SystemMode.HISTORICAL_REPLAY
     runtime.running = True
@@ -509,6 +535,7 @@ async def killswitch_trigger() -> RuntimeState:
     runtime.running = False
     if replay_session.active and not replay_session.paused:
         replay_session.pause()
+    await live_controller.stop()
     metrics.increment("kill_switch_triggers")
     await hub.broadcast("risk", {"type": "risk", "data": risk()})
     return runtime
@@ -522,6 +549,38 @@ async def killswitch_reset() -> RuntimeState:
         runtime.kill_switch = KillSwitchState.ARMED
     await hub.broadcast("risk", {"type": "risk", "data": risk()})
     return runtime
+
+
+@app.get("/live/status")
+def live_status() -> dict[str, object]:
+    return live_controller.status()
+
+
+@app.post("/live/start")
+async def live_start(request: LiveDataStartRequest) -> dict[str, object]:
+    replay_session.reset()
+    status = await live_controller.start(request)
+    runtime.mode = SystemMode.LIVE_DATA_READ_ONLY
+    runtime.running = True
+    metrics.increment("live_data_starts")
+    await hub.broadcast(
+        "analytics",
+        {"type": "runtime", "data": runtime.model_dump(mode="json")},
+    )
+    return status
+
+
+@app.post("/live/stop")
+async def live_stop() -> dict[str, object]:
+    status = await live_controller.stop()
+    if runtime.mode == SystemMode.LIVE_DATA_READ_ONLY:
+        runtime.running = False
+    metrics.increment("live_data_stops")
+    await hub.broadcast(
+        "analytics",
+        {"type": "runtime", "data": runtime.model_dump(mode="json")},
+    )
+    return status
 
 
 @app.websocket("/ws/market-data")
@@ -557,5 +616,3 @@ async def ws_fills(websocket: WebSocket) -> None:
 @app.websocket("/ws/analytics")
 async def ws_analytics(websocket: WebSocket) -> None:
     await hub.serve("analytics", websocket)
-
-

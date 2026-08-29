@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SystemMode(StrEnum):
+    LIVE_DATA_READ_ONLY = "LIVE_DATA_READ_ONLY"
     SIMULATION = "SIMULATION"
     PAPER_TRADING = "PAPER_TRADING"
     HISTORICAL_REPLAY = "HISTORICAL_REPLAY"
