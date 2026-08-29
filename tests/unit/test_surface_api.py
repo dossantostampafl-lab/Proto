@@ -49,6 +49,24 @@ def test_data_quality_surface_reports_clean_synthetic_tick() -> None:
     assert body["issues"] == []
 
 
+def test_canonical_portfolio_positions_and_pnl_use_simulation_state() -> None:
+    portfolio = client.get("/portfolio")
+    positions = client.get("/positions")
+    pnl = client.get("/pnl")
+
+    assert portfolio.status_code == 200
+    assert positions.status_code == 200
+    assert pnl.status_code == 200
+    assert portfolio.json()["source"] == "SIMULATION_PORTFOLIO"
+    assert positions.json()["source"] == "SIMULATION_PORTFOLIO"
+    assert pnl.json()["source"] == "SIMULATION_PORTFOLIO"
+    assert portfolio.json()["real_money_execution"] is False
+    assert positions.json()["real_money_execution"] is False
+    assert pnl.json()["real_money_execution"] is False
+    assert positions.json()["count"] == len(positions.json()["positions"])
+    assert pnl.json()["pnl_after_fees"] == portfolio.json()["total_pnl_after_fees"]
+
+
 def test_probability_and_edge_are_research_only() -> None:
     probability = client.get("/probability/btc-threshold")
     edge = client.get("/edge/btc-threshold")
