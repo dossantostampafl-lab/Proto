@@ -1,7 +1,6 @@
 from math import isclose
 
 import pytest
-
 from proto_api.calibration import brier_score, expected_calibration_error, log_loss
 from proto_api.hawkes import exponential_hawkes_state
 
