@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from apps.api.app.settings import settings
 from services.events import EventRuntime
-from .settings import settings
 
 
 event_runtime = EventRuntime(
