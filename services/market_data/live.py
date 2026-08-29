@@ -26,6 +26,7 @@ class PublicCryptoFeedError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class PublicFeedHealth:
     connected: bool
+    connection_generation: int
     connection_attempts: int
     reconnect_count: int
     frames_received: int
@@ -145,6 +146,7 @@ class CoinbasePublicMarketDataAdapter:
         self.reconnect_min_seconds = reconnect_min_seconds
         self.reconnect_max_seconds = reconnect_max_seconds
         self._connected = False
+        self._connection_generation = 0
         self._connection_attempts = 0
         self._reconnect_count = 0
         self._frames_received = 0
@@ -162,6 +164,7 @@ class CoinbasePublicMarketDataAdapter:
     def health(self) -> PublicFeedHealth:
         return PublicFeedHealth(
             connected=self._connected,
+            connection_generation=self._connection_generation,
             connection_attempts=self._connection_attempts,
             reconnect_count=self._reconnect_count,
             frames_received=self._frames_received,
@@ -186,6 +189,7 @@ class CoinbasePublicMarketDataAdapter:
                     max_size=2**20,
                 ) as websocket:
                     self._connected = True
+                    self._connection_generation += 1
                     self._connected_since = datetime.now(UTC)
                     self._last_error = None
                     await websocket.send(
