@@ -55,6 +55,7 @@ def test_live_coverage_reports_missing_and_stale_symbols() -> None:
     assert coverage["receiving_data"] is True
     assert coverage["complete"] is False
     assert coverage["all_symbols_fresh"] is False
+    assert coverage["all_symbols_receipts_fresh"] is None
     assert coverage["all_symbols_current_connection"] is False
     assert coverage["fresh_symbols"] == ["BTC"]
     assert coverage["stale_symbols"] == ["ETH"]
@@ -83,8 +84,11 @@ def test_live_coverage_reports_source_age_and_server_receipt_age_separately() ->
     assert health["age_seconds"] == 2.0
     assert health["latest_received_at"] == received_at.isoformat()
     assert health["receipt_age_seconds"] == 0.25
+    assert health["receipt_fresh"] is True
     assert coverage["latest_received_at"] == received_at.isoformat()
     assert coverage["last_receipt_age_seconds"] == 0.25
+    assert coverage["all_symbols_receipts_fresh"] is True
+    assert coverage["fresh_receipt_symbols"] == ["BTC"]
 
 
 def test_live_coverage_rejects_timezone_naive_receive_timestamp() -> None:
@@ -148,6 +152,58 @@ def test_live_coverage_is_fully_healthy_for_fresh_current_generation() -> None:
     assert coverage["all_symbols_current_connection"] is True
     assert coverage["stale"] is False
     assert coverage["missing_symbols"] == []
+
+
+def test_live_coverage_fails_receipt_freshness_when_source_time_looks_fresh() -> None:
+    now = datetime(2026, 8, 29, 21, 0, tzinfo=UTC)
+    coverage = evaluate_live_coverage(
+        expected_symbols=("BTC",),
+        latest={"BTC": _tick("BTC", now - timedelta(seconds=1))},
+        symbol_connection_generation={"BTC": 2},
+        current_generation=2,
+        connected=True,
+        stale_after_seconds=10.0,
+        received_times={"BTC": now - timedelta(seconds=20)},
+        now=now,
+    )
+
+    assert coverage["all_symbols_fresh"] is True
+    assert coverage["all_symbols_receipts_fresh"] is False
+    assert coverage["stale_receipt_symbols"] == ["BTC"]
+    assert coverage["symbol_health"]["BTC"]["receipt_fresh"] is False
+
+    failures = live_readiness_failures(
+        running=True,
+        connected=True,
+        message_fresh=True,
+        coverage=coverage,
+    )
+    assert failures == ["STALE_SYMBOL_RECEIPTS"]
+
+
+def test_live_coverage_fails_closed_when_receipt_tracking_misses_symbol() -> None:
+    now = datetime(2026, 8, 29, 21, 0, tzinfo=UTC)
+    coverage = evaluate_live_coverage(
+        expected_symbols=("BTC",),
+        latest={"BTC": _tick("BTC", now - timedelta(seconds=1))},
+        symbol_connection_generation={"BTC": 2},
+        current_generation=2,
+        connected=True,
+        stale_after_seconds=10.0,
+        received_times={},
+        now=now,
+    )
+
+    assert coverage["all_symbols_receipts_fresh"] is False
+    assert coverage["missing_receipt_symbols"] == ["BTC"]
+
+    failures = live_readiness_failures(
+        running=True,
+        connected=True,
+        message_fresh=True,
+        coverage=coverage,
+    )
+    assert failures == ["MISSING_SYMBOL_RECEIPTS"]
 
 
 def test_readiness_failures_are_explicit_for_stopped_disconnected_monitor() -> None:

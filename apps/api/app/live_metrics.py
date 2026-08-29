@@ -43,6 +43,13 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
         "# TYPE proto_live_all_symbols_fresh gauge",
         f"proto_live_all_symbols_fresh {_metric_bool(status.get('all_symbols_fresh'))}",
         (
+            "# HELP proto_live_all_symbols_receipts_fresh "
+            "Whether BTC ETH and SOL were recently received by Proto."
+        ),
+        "# TYPE proto_live_all_symbols_receipts_fresh gauge",
+        "proto_live_all_symbols_receipts_fresh "
+        f"{_metric_bool(status.get('all_symbols_receipts_fresh'))}",
+        (
             "# HELP proto_live_all_symbols_current_connection "
             "Whether all symbols are from the current socket generation."
         ),
@@ -87,6 +94,10 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
             labels = f'{{symbol="{_prometheus_label(symbol)}"}}'
             lines.append(
                 f"proto_live_symbol_fresh{labels} {_metric_bool(item.get('fresh'))}"
+            )
+            lines.append(
+                "proto_live_symbol_receipt_fresh"
+                f"{labels} {_metric_bool(item.get('receipt_fresh'))}"
             )
             lines.append(
                 "proto_live_symbol_current_connection"
