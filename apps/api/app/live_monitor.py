@@ -29,12 +29,17 @@ from .websockets import hub
 _HISTORY_LIMIT = 512
 _STALE_AFTER_SECONDS = 10.0
 _SOURCE_MESSAGE_STALE_SECONDS = 30.0
+_NO_STORE_CACHE_CONTROL = "no-store, max-age=0"
 
 
 def _age_seconds(value: datetime | None, *, now: datetime) -> float | None:
     if value is None or value.tzinfo is None or value.utcoffset() is None:
         return None
     return max((now - value).total_seconds(), 0.0)
+
+
+def _mark_no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = _NO_STORE_CACHE_CONTROL
 
 
 class LiveCryptoMonitor:
@@ -279,17 +284,20 @@ router = APIRouter(
 
 
 @router.get("/status")
-def live_status() -> dict[str, object]:
+def live_status(response: Response) -> dict[str, object]:
+    _mark_no_store(response)
     return live_monitor.status()
 
 
 @router.get("/source-health")
-def live_source_health() -> dict[str, object]:
+def live_source_health(response: Response) -> dict[str, object]:
+    _mark_no_store(response)
     return live_monitor.source_health()
 
 
 @router.get("/ready")
 def live_ready(response: Response) -> dict[str, object]:
+    _mark_no_store(response)
     status = live_monitor.status()
     feed_health = status["feed_health"]
     connected = isinstance(feed_health, dict) and bool(feed_health.get("connected"))
@@ -311,7 +319,8 @@ def live_ready(response: Response) -> dict[str, object]:
 
 
 @router.get("/market-data")
-def live_market_data() -> dict[str, object]:
+def live_market_data(response: Response) -> dict[str, object]:
+    _mark_no_store(response)
     snapshots = live_monitor.snapshots()
     return {
         "mode": SystemMode.LIVE_MONITORING,
@@ -324,16 +333,26 @@ def live_market_data() -> dict[str, object]:
 
 
 @router.get("/market-data/{symbol}")
-def live_market_data_symbol(symbol: str) -> dict[str, object]:
+def live_market_data_symbol(symbol: str, response: Response) -> dict[str, object]:
+    _mark_no_store(response)
     snapshot = live_monitor.snapshot(symbol)
     if snapshot is None:
-        raise HTTPException(status_code=404, detail="no live snapshot available for symbol")
+        raise HTTPException(
+            status_code=404,
+            detail="no live snapshot available for symbol",
+            headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
+        )
     return snapshot
 
 
 @router.get("/analytics/{symbol}")
-def live_analytics_symbol(symbol: str) -> dict[str, object]:
+def live_analytics_symbol(symbol: str, response: Response) -> dict[str, object]:
+    _mark_no_store(response)
     analytics = live_monitor.analytics(symbol)
     if analytics is None:
-        raise HTTPException(status_code=404, detail="no live analytics available for symbol")
+        raise HTTPException(
+            status_code=404,
+            detail="no live analytics available for symbol",
+            headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
+        )
     return analytics
