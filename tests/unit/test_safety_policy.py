@@ -13,13 +13,24 @@ def test_allowed_sandbox_modes(mode: str) -> None:
     state = validate_sandbox_mode(mode)
 
     assert state.synthetic_only is True
+    assert state.live_market_data is False
+    assert state.financial_connectivity is False
     assert state.real_money_execution is False
     assert mode in state.allowed_modes
 
 
-def test_policy_rejects_live_mode() -> None:
+def test_live_monitoring_allows_market_data_but_not_financial_connectivity() -> None:
+    state = validate_sandbox_mode("LIVE_MONITORING")
+
+    assert state.synthetic_only is False
+    assert state.live_market_data is True
+    assert state.financial_connectivity is False
+    assert state.real_money_execution is False
+
+
+def test_policy_rejects_live_trading_mode() -> None:
     with pytest.raises(SafetyPolicyError):
-        validate_sandbox_mode("LIVE")
+        validate_sandbox_mode("LIVE_TRADING")
 
 
 def test_settings_fail_closed_for_unknown_mode() -> None:
@@ -31,9 +42,12 @@ def test_policy_snapshot_is_explicit_about_execution_boundary() -> None:
     snapshot = policy_snapshot("SIMULATION")
 
     assert snapshot["synthetic_only"] is True
+    assert snapshot["live_market_data"] is False
+    assert snapshot["financial_connectivity"] is False
     assert snapshot["real_money_execution"] is False
     assert snapshot["allowed_modes"] == [
         "HISTORICAL_REPLAY",
+        "LIVE_MONITORING",
         "PAPER_TRADING",
         "SIMULATION",
     ]
