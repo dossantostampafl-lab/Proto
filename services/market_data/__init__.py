@@ -17,13 +17,12 @@ from .core import (
 )
 from .live import (
     CoinbasePublicMarketDataAdapter,
-    PublicCryptoFeedError,
     PublicFeedHealth,
     PublicFeedTimeoutError,
     PublicMarketDataAdapter,
-    parse_public_ticker_message,
 )
 from .live_status import evaluate_live_coverage, live_readiness_failures
+from .public_feed_parser import PublicCryptoFeedError, parse_public_ticker_message
 
 __all__ = [
     "CSVReplayAdapter",
