@@ -1,0 +1,49 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      APP_ENV: development
+      SYSTEM_MODE: SIMULATION
+      DATABASE_URL: postgresql+asyncpg://prediction:prediction@postgres:5432/prediction_quant
+      PERSISTENCE_ENABLED: "true"
+      MINIMUM_NET_EDGE: "0.01"
+      MINIMUM_CONFIDENCE: "0.55"
+      MAX_NOTIONAL: "100000"
+      MAX_DAILY_DRAWDOWN: "5000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./apps/web:/app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: prediction_quant
+      POSTGRES_USER: prediction
+      POSTGRES_PASSWORD: prediction
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prediction -d prediction_quant"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - proto_pgdata:/var/lib/postgresql/data
+
+volumes:
+  proto_pgdata:
