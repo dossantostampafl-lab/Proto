@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import erf, exp, log, sqrt
+from math import erf, exp, isfinite, log, sqrt
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,14 +12,17 @@ class BinaryContractInputs:
     time_to_expiry_years: float
 
     def validate(self) -> None:
-        if self.spot <= 0.0:
-            raise ValueError("spot must be positive")
-        if self.strike <= 0.0:
-            raise ValueError("strike must be positive")
-        if self.volatility <= 0.0:
-            raise ValueError("volatility must be positive")
-        if self.time_to_expiry_years <= 0.0:
-            raise ValueError("time_to_expiry_years must be positive")
+        values = {
+            "spot": self.spot,
+            "strike": self.strike,
+            "volatility": self.volatility,
+            "time_to_expiry_years": self.time_to_expiry_years,
+        }
+        for name, value in values.items():
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
+            if value <= 0.0:
+                raise ValueError(f"{name} must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +46,10 @@ def threshold_probability(inputs: BinaryContractInputs) -> float:
         log(inputs.spot / inputs.strike)
         - 0.5 * inputs.volatility * inputs.volatility * inputs.time_to_expiry_years
     ) / sigma_sqrt_t
-    return min(max(_normal_cdf(z_score), 0.0), 1.0)
+    probability = _normal_cdf(z_score)
+    if not isfinite(probability):
+        raise ValueError("threshold probability must be finite")
+    return min(max(probability, 0.0), 1.0)
 
 
 def synthetic_greeks(inputs: BinaryContractInputs) -> SyntheticGreeks:
@@ -119,6 +125,10 @@ def synthetic_greeks(inputs: BinaryContractInputs) -> SyntheticGreeks:
     )
     theta = (later - earlier) / ((inputs.time_to_expiry_years + time_step) - earlier_time)
 
+    sensitivities = (delta, gamma, vega, theta)
+    if not all(isfinite(value) for value in sensitivities):
+        raise ValueError("synthetic sensitivities must be finite")
+
     return SyntheticGreeks(
         fair_probability=base,
         delta=delta,
@@ -129,8 +139,8 @@ def synthetic_greeks(inputs: BinaryContractInputs) -> SyntheticGreeks:
 
 
 def probability_odds(probability: float) -> float:
-    if not 0.0 < probability < 1.0:
-        raise ValueError("probability must be strictly between zero and one")
+    if not isfinite(probability) or not 0.0 < probability < 1.0:
+        raise ValueError("probability must be finite and strictly between zero and one")
     return probability / (1.0 - probability)
 
 
@@ -139,6 +149,8 @@ def log_odds(probability: float) -> float:
 
 
 def probability_from_log_odds(value: float) -> float:
+    if not isfinite(value):
+        raise ValueError("log-odds value must be finite")
     if value >= 0.0:
         return 1.0 / (1.0 + exp(-value))
     exp_value = exp(value)
