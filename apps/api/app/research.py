@@ -14,6 +14,7 @@ from .calibration import (
     log_loss,
     reliability_curve,
 )
+from .circuit_surface import router as circuit_router
 from .event_surface import router as event_router
 from .lifecycle import router as lifecycle_router
 from .live_monitor import router as live_router
@@ -28,6 +29,7 @@ router = APIRouter(tags=["research"])
 router.include_router(surface_router)
 router.include_router(lifecycle_router)
 router.include_router(safety_router)
+router.include_router(circuit_router)
 router.include_router(event_router)
 router.include_router(live_router)
 
