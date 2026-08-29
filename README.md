@@ -1,4 +1,4 @@
-# Proto â€” Prediction Market Quant Engine
+# Proto — Prediction Market Quant Engine
 
 Research terminal for deterministic market simulation, paper trading, and historical replay.
 
@@ -61,4 +61,3 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cd apps/web && npm run build
 ```
-
