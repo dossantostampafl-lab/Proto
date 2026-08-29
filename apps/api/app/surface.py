@@ -9,7 +9,6 @@ from services.hawkes.core import ExponentialHawkesEngine
 from services.market_data.core import MarketTick, compute_orderbook_metrics
 from services.quant.core import compute_edge, estimate_probability
 
-from .research import metrics
 from .settings import settings
 
 router = APIRouter(tags=["analytics-surface"])
@@ -133,9 +132,9 @@ def market_data(symbol: str) -> dict[str, object]:
 @router.get("/orderbook/{symbol}")
 def orderbook(symbol: str) -> dict[str, object]:
     market = _market_for_symbol(symbol)
-    metrics = compute_orderbook_metrics(_tick(market))
+    orderbook_metrics = compute_orderbook_metrics(_tick(market))
     return {
-        **metrics.model_dump(),
+        **orderbook_metrics.model_dump(),
         "symbol": market.symbol,
         "source": "SYNTHETIC_DEMO",
     }
@@ -159,7 +158,8 @@ def model_metrics() -> dict[str, object]:
     return {
         "model_version": "baseline-logit-v0",
         "feature_version": "microstructure-v0",
-        "runtime": metrics.snapshot(),
+        "status": "RUNTIME_METRICS_EXPOSED_SEPARATELY",
+        "runtime_metrics_endpoint": "/metrics",
         "live_trading_enabled": False,
     }
 
@@ -186,7 +186,6 @@ def probability_for_market(market_id: str) -> dict[str, object]:
         volatility=market.volatility,
         imbalance=imbalance,
     )
-    metrics.increment("probability_surface_requests")
     return {
         "market_id": market.market_id,
         "symbol": market.symbol,
@@ -217,7 +216,6 @@ def edge_for_market(market_id: str) -> dict[str, object]:
         latency_penalty=0.0005,
         minimum_edge=settings.minimum_net_edge,
     )
-    metrics.increment("edge_surface_requests")
     return {
         "market_id": market.market_id,
         "symbol": market.symbol,
