@@ -6,12 +6,14 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from websockets.asyncio.client import connect
 
 from .core import MarketTick
 
 _COINBASE_PUBLIC_WS = "wss://advanced-trade-ws.coinbase.com"
+_COINBASE_PUBLIC_HOST = "advanced-trade-ws.coinbase.com"
 _SUPPORTED_PRODUCTS: dict[str, str] = {
     "BTC-USD": "BTC",
     "ETH-USD": "ETH",
@@ -78,6 +80,27 @@ def _parse_timestamp(value: object) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise PublicCryptoFeedError("ticker timestamp must be timezone-aware")
     return parsed.astimezone(UTC)
+
+
+def _validate_public_endpoint(endpoint: str) -> str:
+    if endpoint != endpoint.strip() or not endpoint:
+        raise ValueError("public endpoint must be a canonical WSS URL")
+    try:
+        parsed = urlsplit(endpoint)
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("public endpoint is invalid") from error
+    if parsed.scheme != "wss":
+        raise ValueError("public endpoint must use wss")
+    if parsed.hostname != _COINBASE_PUBLIC_HOST:
+        raise ValueError("public endpoint host is not allowlisted")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("public endpoint must not contain credentials")
+    if port not in (None, 443):
+        raise ValueError("public endpoint must use the standard TLS port")
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError("public endpoint must not contain path parameters or query data")
+    return endpoint
 
 
 def parse_public_ticker_message(
@@ -153,7 +176,7 @@ class CoinbasePublicMarketDataAdapter:
         if reconnect_min_seconds <= 0 or reconnect_max_seconds < reconnect_min_seconds:
             raise ValueError("invalid reconnect interval")
         self.products = resolved_products
-        self.endpoint = endpoint
+        self.endpoint = _validate_public_endpoint(endpoint)
         self.reconnect_min_seconds = reconnect_min_seconds
         self.reconnect_max_seconds = reconnect_max_seconds
         self._connected = False
