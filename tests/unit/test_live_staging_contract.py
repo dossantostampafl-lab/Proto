@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "docker-compose.live.yml"
 DOCKERFILE = ROOT / "Dockerfile.api"
