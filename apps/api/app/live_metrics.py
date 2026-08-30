@@ -35,6 +35,10 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
     )
     journal_raw = persistence.get("journal")
     journal: Mapping[str, object] = journal_raw if isinstance(journal_raw, Mapping) else {}
+    history_raw = status.get("history_reads")
+    history_reads: Mapping[str, object] = (
+        history_raw if isinstance(history_raw, Mapping) else {}
+    )
     lines = [
         "# HELP proto_live_running Whether the read-only live monitor task is running.",
         "# TYPE proto_live_running gauge",
@@ -135,6 +139,17 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
         ("proto_live_journal_retention_seconds", "retention_seconds"),
     ):
         _append_optional_gauge(lines, metric=metric, value=journal.get(key))
+
+    for metric, key in (
+        ("proto_live_history_requests_total", "requests_total"),
+        ("proto_live_history_successes_total", "successes_total"),
+        ("proto_live_history_rows_returned_total", "rows_returned_total"),
+        ("proto_live_history_pages_with_more_total", "pages_with_more_total"),
+        ("proto_live_history_cursor_rejections_total", "cursor_rejections_total"),
+        ("proto_live_history_backend_failures_total", "backend_failures_total"),
+        ("proto_live_history_disabled_total", "disabled_total"),
+    ):
+        _append_optional_gauge(lines, metric=metric, value=history_reads.get(key))
 
     symbol_health = status.get("symbol_health")
     expected_symbols = status.get("expected_symbols")
