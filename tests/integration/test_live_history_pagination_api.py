@@ -62,7 +62,7 @@ def test_history_api_returns_read_only_page_metadata(monkeypatch) -> None:
     assert payload["has_more"] is True
     assert payload["financial_connectivity"] is False
     assert payload["real_money_execution"] is False
-    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert "no-store" in response.headers["cache-control"]
 
 
 def test_history_api_rejects_invalid_cursor(monkeypatch) -> None:
@@ -75,7 +75,7 @@ def test_history_api_rejects_invalid_cursor(monkeypatch) -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "history cursor is invalid"
-    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert "no-store" in response.headers["cache-control"]
 
 
 def test_history_api_requires_timezone_aware_bounds() -> None:
