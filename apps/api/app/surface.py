@@ -15,6 +15,7 @@ from services.market_data.core import (
 from services.quant.core import compute_edge, estimate_probability
 from services.quant.expected_value import calculate_expected_value
 
+from .app_state import portfolio
 from .settings import settings
 
 router = APIRouter(tags=["analytics-surface"])
@@ -171,9 +172,7 @@ def data_quality(symbol: str) -> dict[str, object]:
 
 @router.get("/portfolio")
 def canonical_portfolio() -> dict[str, object]:
-    from . import main as api_main
-
-    snapshot = api_main.portfolio.snapshot()
+    snapshot = portfolio.snapshot()
     return {
         **snapshot,
         "source": "SIMULATION_PORTFOLIO",
@@ -183,9 +182,7 @@ def canonical_portfolio() -> dict[str, object]:
 
 @router.get("/positions")
 def canonical_positions() -> dict[str, object]:
-    from . import main as api_main
-
-    snapshot = api_main.portfolio.snapshot()
+    snapshot = portfolio.snapshot()
     return {
         "mode": snapshot["mode"],
         "source": "SIMULATION_PORTFOLIO",
@@ -197,9 +194,7 @@ def canonical_positions() -> dict[str, object]:
 
 @router.get("/pnl")
 def canonical_pnl() -> dict[str, object]:
-    from . import main as api_main
-
-    snapshot = api_main.portfolio.snapshot()
+    snapshot = portfolio.snapshot()
     return {
         "mode": snapshot["mode"],
         "source": "SIMULATION_PORTFOLIO",
