@@ -74,6 +74,24 @@ groups:
           summary: Persisted live history reads are degraded
           description: Durable live history exists but read access is unhealthy.
 
+      - alert: ProtoLiveHistoryBackendFailures
+        expr: increase(proto_live_history_backend_failures_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: Persisted live history backend returned a read failure
+          description: At least one read-only history request failed because the persistence backend was unavailable during the last five minutes.
+
+      - alert: ProtoLiveHistoryUnavailableRequests
+        expr: increase(proto_live_history_disabled_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: History requests reached a process without live persistence
+          description: At least one read-only history request reached a process where persistence was disabled during the last five minutes.
+
       - alert: ProtoLiveParserDegraded
         expr: proto_live_consecutive_parse_errors > 0
         for: 30s
