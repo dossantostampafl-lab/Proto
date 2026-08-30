@@ -4,10 +4,12 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from math import isfinite
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MarketTick(BaseModel):
+    """Canonical normalized market-data event used across research and live monitoring."""
+
     model_config = ConfigDict(frozen=True)
 
     timestamp: datetime
@@ -20,6 +22,46 @@ class MarketTick(BaseModel):
     bid_size: float
     ask_size: float
     sequence: int = Field(ge=0)
+
+    @field_validator("timestamp")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("market tick timestamp must be timezone-aware")
+        return value.astimezone(UTC)
+
+    @field_validator("venue", "symbol")
+    @classmethod
+    def normalize_identifier(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("market tick identifiers must not be blank")
+        return normalized
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        return value.upper()
+
+    @model_validator(mode="after")
+    def validate_market_values(self) -> MarketTick:
+        values = (
+            self.bid,
+            self.ask,
+            self.last,
+            self.volume,
+            self.bid_size,
+            self.ask_size,
+        )
+        if not all(isfinite(value) for value in values):
+            raise ValueError("market tick values must be finite")
+        if min(self.bid, self.ask, self.last) <= 0:
+            raise ValueError("market tick prices must be positive")
+        if self.ask < self.bid:
+            raise ValueError("market tick ask must be greater than or equal to bid")
+        if self.volume < 0 or self.bid_size < 0 or self.ask_size < 0:
+            raise ValueError("market tick volume and sizes must be non-negative")
+        return self
 
     @property
     def mid(self) -> float:
@@ -95,39 +137,11 @@ class DataQualityMonitor:
         if current_time.tzinfo is None or current_time.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
 
-        numeric_values = (
-            tick.bid,
-            tick.ask,
-            tick.last,
-            tick.volume,
-            tick.bid_size,
-            tick.ask_size,
-        )
-        numeric_values_finite = all(isfinite(value) for value in numeric_values)
-        if not numeric_values_finite:
-            issues.append(DataQualityIssue.NON_FINITE_VALUE)
-        else:
-            if min(tick.bid, tick.ask, tick.last) <= 0:
-                issues.append(DataQualityIssue.NON_POSITIVE_PRICE)
-            if tick.ask < tick.bid:
-                issues.append(DataQualityIssue.INVALID_SPREAD)
-            if tick.bid_size < 0 or tick.ask_size < 0:
-                issues.append(DataQualityIssue.NEGATIVE_SIZE)
-            if tick.volume < 0:
-                issues.append(DataQualityIssue.NEGATIVE_VOLUME)
-
-        timestamp_aware = (
-            tick.timestamp.tzinfo is not None
-            and tick.timestamp.utcoffset() is not None
-        )
-        if not timestamp_aware:
-            issues.append(DataQualityIssue.NAIVE_TIMESTAMP)
-        else:
-            age_seconds = (current_time - tick.timestamp).total_seconds()
-            if age_seconds > self.stale_after_seconds:
-                issues.append(DataQualityIssue.STALE_FEED)
-            elif age_seconds < -self.max_future_skew_seconds:
-                issues.append(DataQualityIssue.FUTURE_TIMESTAMP)
+        age_seconds = (current_time - tick.timestamp).total_seconds()
+        if age_seconds > self.stale_after_seconds:
+            issues.append(DataQualityIssue.STALE_FEED)
+        elif age_seconds < -self.max_future_skew_seconds:
+            issues.append(DataQualityIssue.FUTURE_TIMESTAMP)
 
         key = (tick.venue, tick.symbol)
         previous = self._last_by_key.get(key)
@@ -137,15 +151,14 @@ class DataQualityMonitor:
             elif tick.sequence < previous.sequence:
                 issues.append(DataQualityIssue.OUT_OF_ORDER_SEQUENCE)
 
-            if timestamp_aware and tick.timestamp < previous.timestamp:
+            if tick.timestamp < previous.timestamp:
                 issues.append(DataQualityIssue.OUT_OF_ORDER_TIMESTAMP)
 
-            if numeric_values_finite:
-                previous_mid = previous.mid
-                if isfinite(previous_mid) and previous_mid > 0:
-                    relative_jump = abs(tick.mid - previous_mid) / previous_mid
-                    if relative_jump > self.max_relative_price_jump:
-                        issues.append(DataQualityIssue.PRICE_JUMP)
+            previous_mid = previous.mid
+            if previous_mid > 0:
+                relative_jump = abs(tick.mid - previous_mid) / previous_mid
+                if relative_jump > self.max_relative_price_jump:
+                    issues.append(DataQualityIssue.PRICE_JUMP)
 
         if not issues:
             self._last_by_key[key] = tick
@@ -165,7 +178,7 @@ def compute_orderbook_metrics(tick: MarketTick) -> OrderBookMetrics:
         microprice = tick.mid
 
     spread = tick.spread
-    book_pressure = imbalance * max(spread, 0.0)
+    book_pressure = imbalance * spread
     return OrderBookMetrics(
         best_bid=tick.bid,
         best_ask=tick.ask,
