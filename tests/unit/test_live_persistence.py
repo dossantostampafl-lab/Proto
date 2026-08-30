@@ -2,8 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from apps.api.app.live_database import build_live_engine, init_live_database
 from apps.api.app.live_persistence import AsyncSqlLiveTickJournal
-from apps.api.app.persistence import build_engine, init_database
 from services.market_data import MarketTick
 
 
@@ -24,8 +24,8 @@ def _tick(*, sequence: int, observed_at: datetime) -> MarketTick:
 
 @pytest.mark.asyncio
 async def test_live_sql_journal_is_idempotent_and_restart_queryable() -> None:
-    engine = build_engine("sqlite+aiosqlite:///:memory:")
-    await init_database(engine)
+    engine = build_live_engine("sqlite+aiosqlite:///:memory:")
+    await init_live_database(engine)
     journal = AsyncSqlLiveTickJournal(engine, prune_every_writes=100)
     observed_at = datetime.now(UTC)
     tick = _tick(sequence=42, observed_at=observed_at)
@@ -72,8 +72,8 @@ async def test_live_sql_journal_is_idempotent_and_restart_queryable() -> None:
 
 @pytest.mark.asyncio
 async def test_live_sql_journal_prunes_expired_rows_during_write_maintenance() -> None:
-    engine = build_engine("sqlite+aiosqlite:///:memory:")
-    await init_database(engine)
+    engine = build_live_engine("sqlite+aiosqlite:///:memory:")
+    await init_live_database(engine)
     journal = AsyncSqlLiveTickJournal(
         engine,
         retention_seconds=300,
@@ -110,8 +110,8 @@ async def test_live_sql_journal_prunes_expired_rows_during_write_maintenance() -
 
 @pytest.mark.asyncio
 async def test_live_sql_journal_explicit_prune_is_bounded_and_query_limit_applies() -> None:
-    engine = build_engine("sqlite+aiosqlite:///:memory:")
-    await init_database(engine)
+    engine = build_live_engine("sqlite+aiosqlite:///:memory:")
+    await init_live_database(engine)
     journal = AsyncSqlLiveTickJournal(engine, prune_every_writes=100)
     now = datetime.now(UTC)
 

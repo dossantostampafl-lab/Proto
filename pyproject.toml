@@ -8,6 +8,7 @@ version = "0.2.0"
 description = "Prediction-market research terminal with read-only public crypto monitoring"
 requires-python = ">=3.13"
 dependencies = [
+  "alembic>=1.16,<2",
   "fastapi>=0.116,<1",
   "uvicorn[standard]>=0.35,<1",
   "pydantic>=2.11,<3",
