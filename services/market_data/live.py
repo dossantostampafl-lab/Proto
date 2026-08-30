@@ -3,15 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
-from typing import Any, Protocol
+from typing import Any
 from urllib.parse import urlsplit
 
 from websockets.asyncio.client import connect
 
 from .core import MarketTick
+from .live_contracts import PublicFeedHealth as PublicFeedHealth
+from .live_contracts import PublicMarketDataAdapter as PublicMarketDataAdapter
 from .public_feed_parser import (
     MAX_PUBLIC_FRAME_BYTES,
     SUPPORTED_PUBLIC_PRODUCTS,
@@ -25,34 +26,6 @@ _COINBASE_PUBLIC_HOST = "advanced-trade-ws.coinbase.com"
 
 class PublicFeedTimeoutError(PublicCryptoFeedError):
     """Raised when an established public feed stops producing messages."""
-
-
-@dataclass(frozen=True, slots=True)
-class PublicFeedHealth:
-    connected: bool
-    connection_generation: int
-    connection_attempts: int
-    reconnect_count: int
-    frames_received: int
-    ticks_emitted: int
-    parse_error_count: int
-    connected_since: datetime | None
-    last_message_at: datetime | None
-    last_tick_at: datetime | None
-    last_error: str | None
-    message_timeout_count: int = 0
-    consecutive_parse_errors: int = 0
-
-
-class PublicMarketDataAdapter(Protocol):
-    """Minimal read-only adapter contract used by the live monitor."""
-
-    @property
-    def symbols(self) -> tuple[str, ...]: ...
-
-    def health(self) -> PublicFeedHealth: ...
-
-    def stream(self) -> AsyncIterator[MarketTick]: ...
 
 
 def _validate_public_endpoint(endpoint: str) -> str:
