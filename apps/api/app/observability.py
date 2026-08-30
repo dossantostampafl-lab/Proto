@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from threading import Lock
@@ -70,6 +71,32 @@ class RuntimeMetrics:
             self.http_latency_ms_total = 0.0
             self.http_by_path.clear()
             self.http_by_status.clear()
+
+    def prometheus(self) -> str:
+        snapshot = self.snapshot()
+        lines = [
+            "# HELP proto_http_requests_total Total observed HTTP requests.",
+            "# TYPE proto_http_requests_total counter",
+            f"proto_http_requests_total {snapshot['http_request_count']}",
+            "# HELP proto_http_errors_total Total observed HTTP 5xx responses.",
+            "# TYPE proto_http_errors_total counter",
+            f"proto_http_errors_total {snapshot['http_error_count']}",
+            "# HELP proto_http_latency_milliseconds_average Average HTTP request latency.",
+            "# TYPE proto_http_latency_milliseconds_average gauge",
+            f"proto_http_latency_milliseconds_average {snapshot['average_http_latency_ms']}",
+        ]
+        counters = snapshot["counters"]
+        if isinstance(counters, dict):
+            for name, value in counters.items():
+                safe_name = re.sub(r"[^a-zA-Z0-9_:]", "_", str(name))
+                metric_name = f"proto_{safe_name}_total"
+                lines.extend(
+                    (
+                        f"# TYPE {metric_name} counter",
+                        f"{metric_name} {value}",
+                    )
+                )
+        return "\n".join(lines) + "\n"
 
 
 class LatencyTimer:

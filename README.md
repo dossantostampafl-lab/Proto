@@ -72,10 +72,11 @@ curl http://localhost:8000/live/status
 
 ```bash
 ruff check apps services tests
+python -m mypy --explicit-package-bases services/security/live_data_policy.py services/market_data/live.py apps/api/app/live.py
 pytest
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
-cd apps/web && npm run build
+cd apps/web && npm ci && npm run typecheck && npm run build && npm audit --audit-level=moderate
 ```
 

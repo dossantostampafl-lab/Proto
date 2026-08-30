@@ -11,6 +11,9 @@ COPY services ./services
 
 RUN pip install --no-cache-dir .
 
+RUN addgroup --system proto && adduser --system --ingroup proto proto
+USER proto
+
 EXPOSE 8000
 
 CMD ["uvicorn", "apps.api.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

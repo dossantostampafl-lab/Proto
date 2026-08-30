@@ -34,10 +34,12 @@ connection is fixed to the unauthenticated public TLS feed; callers cannot suppl
 - `X-Request-ID` is accepted or generated and returned for HTTP correlation.
 - `/metrics` exposes HTTP counts, errors, latency, live ticks/rejections/reconnects/gaps, and
   simulation/replay counters.
+- `/metrics/prometheus` exposes the same operational counters in Prometheus text format.
 - `/live/status` exposes source, symbol, feed state, last tick, latency, staleness, rejected
   frames, sequence gaps, reconnects, and the read-only flag.
 - `/ready` probes the database and degrades when an active live feed is stale or disconnected.
 - `/v1/reconciliation` compares the in-memory journal, authoritative fill store, and positions.
+- Reconciliation also runs periodically and broadcasts its result on the risk channel.
 - WebSocket clients are bounded per channel; failed or slow peers are pruned independently.
 
 ## Incident actions

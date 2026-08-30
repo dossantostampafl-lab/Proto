@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     live_data_stale_after_seconds: float = 10.0
     live_data_connect_timeout_seconds: float = 10.0
     live_data_max_backoff_seconds: float = 30.0
+    reconciliation_interval_seconds: float = 30.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

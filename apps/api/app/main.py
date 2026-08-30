@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -60,10 +61,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     validate_live_data_configuration()
     if persistence_engine is not None:
         await init_database(persistence_engine)
-    yield
-    await live_controller.stop()
-    if persistence_engine is not None:
-        await persistence_engine.dispose()
+    reconciliation_task = asyncio.create_task(
+        _reconciliation_loop(), name="periodic-reconciliation"
+    )
+    try:
+        yield
+    finally:
+        reconciliation_task.cancel()
+        try:
+            await reconciliation_task
+        except asyncio.CancelledError:
+            pass
+        await live_controller.stop()
+        if persistence_engine is not None:
+            await persistence_engine.dispose()
 
 
 app = FastAPI(
@@ -182,6 +193,14 @@ def system_metrics() -> dict[str, object]:
         "live_data": live_controller.status(),
         **metrics.snapshot(),
     }
+
+
+@app.get("/metrics/prometheus")
+def prometheus_metrics() -> Response:
+    return Response(
+        content=metrics.prometheus(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 
 @app.get("/system/status", response_model=RuntimeState)
@@ -345,6 +364,19 @@ async def reconciliation_status() -> dict[str, object]:
         "journal_fill_count": len(memory_entries),
         "authoritative_fill_count": len(authoritative_entries),
     }
+
+
+async def _reconciliation_loop() -> None:
+    while True:
+        try:
+            result = await reconciliation_status()
+            await hub.broadcast("risk", {"type": "reconciliation", "data": result})
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            metrics.increment("reconciliation_loop_errors")
+            logger.exception("periodic reconciliation failed")
+        await asyncio.sleep(max(settings.reconciliation_interval_seconds, 1.0))
 
 
 @app.post("/simulation/start", response_model=RuntimeState)
