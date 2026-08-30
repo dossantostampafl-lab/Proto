@@ -11,7 +11,12 @@ COPY migrations ./migrations
 COPY apps ./apps
 COPY services ./services
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && groupadd --system proto \
+    && useradd --system --gid proto --home-dir /nonexistent --shell /usr/sbin/nologin proto \
+    && chown -R proto:proto /app
+
+USER proto:proto
 
 EXPOSE 8000
 
