@@ -15,6 +15,7 @@ from services.market_data import (
 )
 
 from .live_durability import live_durability
+from .live_history_metrics import live_history_read_metrics
 from .live_metrics import render_live_prometheus
 from .live_monitor import live_monitor
 from .models import SystemMode
@@ -49,6 +50,13 @@ def _validate_history_time_bounds(
         )
 
 
+def _status_with_history_metrics() -> dict[str, object]:
+    return {
+        **live_monitor.status(),
+        "history_reads": live_history_read_metrics.snapshot(),
+    }
+
+
 @asynccontextmanager
 async def live_router_lifespan(_: APIRouter) -> AsyncIterator[None]:
     await live_durability.start(monitor=live_monitor, settings=settings)
@@ -76,7 +84,7 @@ router = APIRouter(
 @router.get("/status")
 def live_status(response: Response) -> dict[str, object]:
     _mark_no_store(response)
-    return live_monitor.status()
+    return _status_with_history_metrics()
 
 
 @router.get("/source-health")
@@ -167,6 +175,7 @@ async def live_persisted_history(
             headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
         )
     _validate_history_time_bounds(start_at=start_at, end_at=end_at)
+    live_history_read_metrics.record_request()
     try:
         page = await live_monitor.persisted_history_page(
             symbol=normalized_symbol,
@@ -176,12 +185,14 @@ async def live_persisted_history(
             end_at=end_at,
         )
     except LiveHistoryCursorError as error:
+        live_history_read_metrics.record_cursor_rejection()
         raise HTTPException(
             status_code=422,
             detail="history cursor is invalid",
             headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
         ) from error
     except LiveTickJournalError as error:
+        live_history_read_metrics.record_backend_failure()
         raise HTTPException(
             status_code=503,
             detail="persisted live history is temporarily unavailable",
@@ -191,12 +202,18 @@ async def live_persisted_history(
             },
         ) from error
     if page is None:
+        live_history_read_metrics.record_disabled()
         raise HTTPException(
             status_code=503,
             detail="live persistence is disabled",
             headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
         )
     rows = [row.as_dict() for row in page.items]
+    has_more = page.next_cursor is not None
+    live_history_read_metrics.record_success(
+        rows_returned=len(rows),
+        has_more=has_more,
+    )
     return {
         "mode": SystemMode.LIVE_MONITORING,
         "source": "PUBLIC_READ_ONLY_PERSISTED",
@@ -204,7 +221,7 @@ async def live_persisted_history(
         "count": len(rows),
         "history": rows,
         "next_cursor": page.next_cursor,
-        "has_more": page.next_cursor is not None,
+        "has_more": has_more,
         "start_at": start_at.isoformat() if start_at is not None else None,
         "end_at": end_at.isoformat() if end_at is not None else None,
         "financial_connectivity": False,
@@ -228,4 +245,4 @@ def live_analytics_symbol(symbol: str, response: Response) -> dict[str, object]:
 @router.get("/metrics/prometheus", response_class=PlainTextResponse)
 def live_prometheus_metrics(response: Response) -> str:
     _mark_no_store(response)
-    return render_live_prometheus(live_monitor.status())
+    return render_live_prometheus(_status_with_history_metrics())
