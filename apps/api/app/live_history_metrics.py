@@ -23,8 +23,14 @@ class LiveHistoryReadMetrics:
             self._requests_total += 1
 
     def record_success(self, *, rows_returned: int, has_more: bool) -> None:
-        if isinstance(rows_returned, bool) or rows_returned < 0:
+        if (
+            isinstance(rows_returned, bool)
+            or not isinstance(rows_returned, int)
+            or rows_returned < 0
+        ):
             raise ValueError("rows_returned must be a non-negative integer")
+        if not isinstance(has_more, bool):
+            raise ValueError("has_more must be a boolean")
         with self._lock:
             self._successes_total += 1
             self._rows_returned_total += rows_returned
