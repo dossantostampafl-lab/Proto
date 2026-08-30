@@ -4,10 +4,12 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from math import isfinite
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MarketTick(BaseModel):
+    """Canonical normalized market-data event used across research and live monitoring."""
+
     model_config = ConfigDict(frozen=True)
 
     timestamp: datetime
@@ -20,6 +22,19 @@ class MarketTick(BaseModel):
     bid_size: float
     ask_size: float
     sequence: int = Field(ge=0)
+
+    @field_validator("venue", "symbol")
+    @classmethod
+    def normalize_identifier(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("market tick identifiers must not be blank")
+        return normalized
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        return value.upper()
 
     @property
     def mid(self) -> float:
