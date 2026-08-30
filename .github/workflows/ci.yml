@@ -42,6 +42,7 @@ jobs:
         run: >-
           pytest
           tests/chaos/test_live_monitor_recovery.py
+          tests/chaos/test_live_backup_restore.py
           tests/unit/test_live_staging_contract.py
           tests/unit/test_live_isolation.py
 
