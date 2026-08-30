@@ -216,3 +216,68 @@ async def test_live_history_cursor_rejects_malformed_input() -> None:
             await journal.list_page(symbol="BTC", limit=10, cursor="not-a-valid-cursor!!")
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_live_history_cursor_is_bound_to_symbol() -> None:
+    engine = build_live_engine("sqlite+aiosqlite:///:memory:")
+    await init_live_database(engine)
+    journal = AsyncSqlLiveTickJournal(engine, prune_every_writes=100)
+    now = datetime.now(UTC)
+
+    try:
+        for sequence in range(1, 4):
+            observed_at = now + timedelta(seconds=sequence)
+            assert await journal.append(
+                _tick(sequence=sequence, observed_at=observed_at),
+                received_at=observed_at,
+                connection_generation=1,
+            )
+
+        first = await journal.list_page(symbol="BTC", limit=1)
+        assert first.next_cursor is not None
+        with pytest.raises(LiveHistoryCursorError):
+            await journal.list_page(
+                symbol="ETH",
+                limit=1,
+                cursor=first.next_cursor,
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_live_history_cursor_is_bound_to_time_window() -> None:
+    engine = build_live_engine("sqlite+aiosqlite:///:memory:")
+    await init_live_database(engine)
+    journal = AsyncSqlLiveTickJournal(engine, prune_every_writes=100)
+    now = datetime.now(UTC)
+    start_at = now
+    end_at = now + timedelta(seconds=10)
+
+    try:
+        for sequence in range(1, 4):
+            observed_at = now + timedelta(seconds=sequence)
+            assert await journal.append(
+                _tick(sequence=sequence, observed_at=observed_at),
+                received_at=observed_at,
+                connection_generation=1,
+            )
+
+        first = await journal.list_page(
+            symbol="BTC",
+            limit=1,
+            start_at=start_at,
+            end_at=end_at,
+        )
+        assert first.next_cursor is not None
+        with pytest.raises(LiveHistoryCursorError):
+            await journal.list_page(
+                symbol="BTC",
+                limit=1,
+                cursor=first.next_cursor,
+                start_at=start_at,
+                end_at=end_at + timedelta(seconds=1),
+            )
+    finally:
+        await engine.dispose()

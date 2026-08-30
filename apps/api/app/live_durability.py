@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy.ext.asyncio import AsyncEngine
-
-from services.market_data import PersistedLiveTickPage
 
 from .live_database import build_live_engine, init_live_database
 from .live_monitor import LiveCryptoMonitor
@@ -48,26 +44,6 @@ class LiveDurabilityRuntime:
         self._engine = engine
         self._journal = journal
         monitor.configure_persistence(journal, required=True)
-
-    async def history_page(
-        self,
-        *,
-        symbol: str,
-        limit: int,
-        cursor: str | None = None,
-        start_at: datetime | None = None,
-        end_at: datetime | None = None,
-    ) -> PersistedLiveTickPage | None:
-        journal = self._journal
-        if journal is None:
-            return None
-        return await journal.list_page(
-            symbol=symbol,
-            limit=limit,
-            cursor=cursor,
-            start_at=start_at,
-            end_at=end_at,
-        )
 
     async def stop(self, *, monitor: LiveCryptoMonitor) -> None:
         engine = self._engine

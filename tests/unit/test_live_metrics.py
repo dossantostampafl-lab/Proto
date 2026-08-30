@@ -34,6 +34,15 @@ def _status() -> dict[str, object]:
                 "retention_seconds": 86400,
             },
         },
+        "history_reads": {
+            "requests_total": 11,
+            "successes_total": 8,
+            "rows_returned_total": 321,
+            "pages_with_more_total": 6,
+            "cursor_rejections_total": 1,
+            "backend_failures_total": 1,
+            "disabled_total": 1,
+        },
         "expected_symbols": ["BTC"],
         "feed_health": {
             "connected": True,
@@ -75,6 +84,13 @@ def test_live_prometheus_renders_read_only_invariants_and_finite_values() -> Non
     assert "proto_live_persisted_current_connection 12" in body
     assert "proto_live_journal_writes_inserted 12" in body
     assert "proto_live_journal_pruned_rows 4" in body
+    assert "proto_live_history_requests_total 11" in body
+    assert "proto_live_history_successes_total 8" in body
+    assert "proto_live_history_rows_returned_total 321" in body
+    assert "proto_live_history_pages_with_more_total 6" in body
+    assert "proto_live_history_cursor_rejections_total 1" in body
+    assert "proto_live_history_backend_failures_total 1" in body
+    assert "proto_live_history_disabled_total 1" in body
     assert 'proto_live_symbol_receipt_fresh{symbol="BTC"} 1' in body
     assert 'proto_live_symbol_last_sequence{symbol="BTC"} 42' in body
     assert (
@@ -117,6 +133,9 @@ def test_live_prometheus_omits_non_finite_numeric_telemetry() -> None:
     journal = persistence["journal"]
     assert isinstance(journal, dict)
     journal["pruned_rows"] = float("inf")
+    history_reads = status["history_reads"]
+    assert isinstance(history_reads, dict)
+    history_reads["rows_returned_total"] = float("nan")
     symbol_health = status["symbol_health"]
     assert isinstance(symbol_health, dict)
     btc = symbol_health["BTC"]
@@ -129,6 +148,7 @@ def test_live_prometheus_omits_non_finite_numeric_telemetry() -> None:
     assert "proto_live_last_message_age_seconds" not in body
     assert "proto_live_symbol_source_age_seconds" not in body
     assert "proto_live_journal_pruned_rows" not in body
+    assert "proto_live_history_rows_returned_total" not in body
     assert "proto_live_sequence_rejections_current_connection nan" not in body.lower()
     assert " nan" not in body.lower()
     assert " inf" not in body.lower()

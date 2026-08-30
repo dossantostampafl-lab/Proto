@@ -5,6 +5,7 @@ LIVE_SCOPE = (
     Path("apps/api/app/live_app.py"),
     Path("apps/api/app/live_database.py"),
     Path("apps/api/app/live_durability.py"),
+    Path("apps/api/app/live_history_metrics.py"),
     Path("apps/api/app/live_metrics.py"),
     Path("apps/api/app/live_monitor.py"),
     Path("apps/api/app/live_persistence.py"),
