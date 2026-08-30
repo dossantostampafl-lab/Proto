@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from apps.api.app import app_state, main, safety_surface, surface
 
 API_APP = Path("apps/api/app")
@@ -44,3 +46,17 @@ def test_api_main_uses_canonical_state_objects() -> None:
 def test_safety_surface_shares_api_runtime() -> None:
     assert safety_surface.runtime is app_state.runtime
     assert safety_surface.runtime is main.runtime
+
+
+@pytest.mark.asyncio
+async def test_simulation_reset_preserves_canonical_runtime_identity() -> None:
+    original_runtime = app_state.runtime
+    original_runtime.running = True
+
+    result = await main.simulation_reset()
+
+    assert result is original_runtime
+    assert main.runtime is original_runtime
+    assert app_state.runtime is original_runtime
+    assert safety_surface.runtime is original_runtime
+    assert original_runtime.running is False
