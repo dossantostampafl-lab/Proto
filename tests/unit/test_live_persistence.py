@@ -4,7 +4,7 @@ import pytest
 
 from apps.api.app.live_database import build_live_engine, init_live_database
 from apps.api.app.live_persistence import AsyncSqlLiveTickJournal
-from services.market_data import MarketTick
+from services.market_data import LiveHistoryCursorError, MarketTick
 
 
 def _tick(*, sequence: int, observed_at: datetime) -> MarketTick:
@@ -134,5 +134,85 @@ async def test_live_sql_journal_explicit_prune_is_bounded_and_query_limit_applie
         assert deleted == 2
         remaining = await journal.list_recent(symbol="BTC", limit=10)
         assert [row.tick.sequence for row in remaining] == [3]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_live_history_cursor_paginates_without_duplicates_or_gaps() -> None:
+    engine = build_live_engine("sqlite+aiosqlite:///:memory:")
+    await init_live_database(engine)
+    journal = AsyncSqlLiveTickJournal(engine, prune_every_writes=100)
+    now = datetime.now(UTC)
+
+    try:
+        for sequence in range(1, 6):
+            observed_at = now + timedelta(seconds=sequence)
+            assert await journal.append(
+                _tick(sequence=sequence, observed_at=observed_at),
+                received_at=observed_at,
+                connection_generation=1,
+            )
+
+        first = await journal.list_page(symbol="BTC", limit=2)
+        second = await journal.list_page(
+            symbol="BTC",
+            limit=2,
+            cursor=first.next_cursor,
+        )
+        third = await journal.list_page(
+            symbol="BTC",
+            limit=2,
+            cursor=second.next_cursor,
+        )
+
+        assert [row.tick.sequence for row in first.items] == [5, 4]
+        assert [row.tick.sequence for row in second.items] == [3, 2]
+        assert [row.tick.sequence for row in third.items] == [1]
+        assert first.next_cursor is not None
+        assert second.next_cursor is not None
+        assert third.next_cursor is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_live_history_page_applies_timezone_aware_time_bounds() -> None:
+    engine = build_live_engine("sqlite+aiosqlite:///:memory:")
+    await init_live_database(engine)
+    journal = AsyncSqlLiveTickJournal(engine, prune_every_writes=100)
+    now = datetime.now(UTC)
+
+    try:
+        for sequence in range(1, 6):
+            observed_at = now + timedelta(seconds=sequence)
+            assert await journal.append(
+                _tick(sequence=sequence, observed_at=observed_at),
+                received_at=observed_at,
+                connection_generation=1,
+            )
+
+        page = await journal.list_page(
+            symbol="BTC",
+            limit=10,
+            start_at=now + timedelta(seconds=2),
+            end_at=now + timedelta(seconds=4),
+        )
+
+        assert [row.tick.sequence for row in page.items] == [4, 3, 2]
+        assert page.next_cursor is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_live_history_cursor_rejects_malformed_input() -> None:
+    engine = build_live_engine("sqlite+aiosqlite:///:memory:")
+    await init_live_database(engine)
+    journal = AsyncSqlLiveTickJournal(engine, prune_every_writes=100)
+
+    try:
+        with pytest.raises(LiveHistoryCursorError):
+            await journal.list_page(symbol="BTC", limit=10, cursor="not-a-valid-cursor!!")
     finally:
         await engine.dispose()
