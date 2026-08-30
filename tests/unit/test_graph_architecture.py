@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from apps.api.app import app_state, main, safety_surface, surface
+from apps.api.app.models import KillSwitchState, SystemMode
 
 API_APP = Path("apps/api/app")
 
@@ -51,7 +52,10 @@ def test_safety_surface_shares_api_runtime() -> None:
 @pytest.mark.asyncio
 async def test_simulation_reset_preserves_canonical_runtime_identity() -> None:
     original_runtime = app_state.runtime
-    original_runtime.running = True
+    original_runtime.mode = SystemMode.HISTORICAL_REPLAY
+    original_runtime.running = False
+    original_runtime.kill_switch = KillSwitchState.TRIGGERED
+    original_runtime.replay_speed = 42
 
     result = await main.simulation_reset()
 
@@ -59,4 +63,7 @@ async def test_simulation_reset_preserves_canonical_runtime_identity() -> None:
     assert main.runtime is original_runtime
     assert app_state.runtime is original_runtime
     assert safety_surface.runtime is original_runtime
-    assert original_runtime.running is False
+    assert original_runtime.mode == SystemMode.SIMULATION
+    assert original_runtime.running is True
+    assert original_runtime.kill_switch == KillSwitchState.ARMED
+    assert original_runtime.replay_speed == 1
