@@ -7,6 +7,21 @@ from math import isfinite
 from .core import MarketTick
 
 
+def _canonical_symbols(expected_symbols: Sequence[str]) -> tuple[str, ...]:
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for raw_symbol in expected_symbols:
+        symbol = raw_symbol.strip().upper()
+        if not symbol:
+            raise ValueError("expected_symbols must not contain blank symbols")
+        if symbol not in seen:
+            seen.add(symbol)
+            symbols.append(symbol)
+    if not symbols:
+        raise ValueError("expected_symbols must not be empty")
+    return tuple(symbols)
+
+
 def evaluate_live_coverage(
     *,
     expected_symbols: Sequence[str],
@@ -24,9 +39,7 @@ def evaluate_live_coverage(
     if current_time.tzinfo is None or current_time.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
 
-    symbols = tuple(dict.fromkeys(expected_symbols))
-    if not symbols:
-        raise ValueError("expected_symbols must not be empty")
+    symbols = _canonical_symbols(expected_symbols)
 
     receipt_tracking_enabled = received_times is not None
     receipt_map = received_times or {}
