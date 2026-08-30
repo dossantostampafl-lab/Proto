@@ -23,6 +23,28 @@ jobs:
       - run: ruff check apps services tests
       - run: pytest
 
+  live-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - name: Validate standalone live compose
+        env:
+          PROTO_DB_PASSWORD: ci-placeholder-only
+          GRAFANA_ADMIN_PASSWORD: ci-placeholder-only
+        run: docker compose -f docker-compose.live.yml config > /tmp/proto-live-compose.yml
+      - name: Run live recovery and release-contract gates
+        run: >-
+          pytest
+          tests/chaos/test_live_monitor_recovery.py
+          tests/unit/test_live_staging_contract.py
+          tests/unit/test_live_isolation.py
+
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -47,4 +69,3 @@ jobs:
           node-version: "22"
       - run: npm ci
       - run: npm run build
-
