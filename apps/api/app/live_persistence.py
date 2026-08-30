@@ -1,22 +1,94 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 
-from sqlalchemy import DateTime, Float, Index, Integer, String, UniqueConstraint, delete, select
+from sqlalchemy import (
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    and_,
+    delete,
+    or_,
+    select,
+)
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from sqlalchemy.orm import Mapped, mapped_column
 
-from services.market_data import LiveTickJournalError, MarketTick, PersistedLiveTick
+from services.market_data import (
+    LiveHistoryCursorError,
+    LiveTickJournalError,
+    MarketTick,
+    PersistedLiveTick,
+    PersistedLiveTickPage,
+)
 
 from .live_database import LiveBase
+
+_HISTORY_CURSOR_VERSION = 1
+_MAX_HISTORY_CURSOR_CHARS = 512
 
 
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _require_aware(value: datetime | None, *, field: str) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return value.astimezone(UTC)
+
+
+def _encode_history_cursor(*, received_at: datetime, row_id: int) -> str:
+    payload = json.dumps(
+        {
+            "v": _HISTORY_CURSOR_VERSION,
+            "received_at": _as_utc(received_at).isoformat(),
+            "id": row_id,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_history_cursor(cursor: str) -> tuple[datetime, int]:
+    if not cursor or len(cursor) > _MAX_HISTORY_CURSOR_CHARS:
+        raise LiveHistoryCursorError("history cursor is malformed")
+    try:
+        encoded = cursor.encode("ascii")
+        padded = encoded + b"=" * (-len(encoded) % 4)
+        raw = base64.b64decode(padded, altchars=b"-_", validate=True)
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError, TypeError, binascii.Error, json.JSONDecodeError) as error:
+        raise LiveHistoryCursorError("history cursor is malformed") from error
+
+    if not isinstance(payload, dict) or payload.get("v") != _HISTORY_CURSOR_VERSION:
+        raise LiveHistoryCursorError("history cursor version is unsupported")
+    row_id = payload.get("id")
+    received_raw = payload.get("received_at")
+    if isinstance(row_id, bool) or not isinstance(row_id, int) or row_id <= 0:
+        raise LiveHistoryCursorError("history cursor row id is invalid")
+    if not isinstance(received_raw, str):
+        raise LiveHistoryCursorError("history cursor timestamp is invalid")
+    try:
+        received_at = datetime.fromisoformat(received_raw)
+    except ValueError as error:
+        raise LiveHistoryCursorError("history cursor timestamp is invalid") from error
+    if received_at.tzinfo is None or received_at.utcoffset() is None:
+        raise LiveHistoryCursorError("history cursor timestamp must be timezone-aware")
+    return received_at.astimezone(UTC), row_id
 
 
 class LiveMarketTickRecord(LiveBase):
@@ -185,30 +257,81 @@ class AsyncSqlLiveTickJournal:
         symbol: str,
         limit: int = 100,
     ) -> list[PersistedLiveTick]:
+        page = await self.list_page(symbol=symbol, limit=limit)
+        return list(page.items)
+
+    async def list_page(
+        self,
+        *,
+        symbol: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> PersistedLiveTickPage:
         normalized_symbol = symbol.strip().upper()
         if not normalized_symbol:
             raise ValueError("symbol must not be empty")
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise ValueError("limit must be a positive integer")
         safe_limit = min(limit, 10_000)
+        normalized_start = _require_aware(start_at, field="start_at")
+        normalized_end = _require_aware(end_at, field="end_at")
+        if (
+            normalized_start is not None
+            and normalized_end is not None
+            and normalized_start > normalized_end
+        ):
+            raise ValueError("start_at must not be after end_at")
+
+        conditions = [LiveMarketTickRecord.symbol == normalized_symbol]
+        if normalized_start is not None:
+            conditions.append(LiveMarketTickRecord.received_at >= normalized_start)
+        if normalized_end is not None:
+            conditions.append(LiveMarketTickRecord.received_at <= normalized_end)
+        if cursor is not None:
+            cursor_received_at, cursor_id = _decode_history_cursor(cursor)
+            conditions.append(
+                or_(
+                    LiveMarketTickRecord.received_at < cursor_received_at,
+                    and_(
+                        LiveMarketTickRecord.received_at == cursor_received_at,
+                        LiveMarketTickRecord.id < cursor_id,
+                    ),
+                )
+            )
+
         async with self.session_factory() as session:
             try:
                 result = await session.scalars(
                     select(LiveMarketTickRecord)
-                    .where(LiveMarketTickRecord.symbol == normalized_symbol)
+                    .where(*conditions)
                     .order_by(
                         LiveMarketTickRecord.received_at.desc(),
                         LiveMarketTickRecord.id.desc(),
                     )
-                    .limit(safe_limit)
+                    .limit(safe_limit + 1)
                 )
-                rows = result.all()
+                rows = list(result.all())
             except SQLAlchemyError as error:
                 self._read_failures += 1
                 self._last_read_error = type(error).__name__
                 raise LiveTickJournalError("failed to read persisted live history") from error
+
         self._last_read_error = None
-        return [row.as_persisted() for row in rows]
+        has_more = len(rows) > safe_limit
+        page_rows = rows[:safe_limit]
+        next_cursor = None
+        if has_more and page_rows:
+            last_row = page_rows[-1]
+            next_cursor = _encode_history_cursor(
+                received_at=last_row.received_at,
+                row_id=last_row.id,
+            )
+        return PersistedLiveTickPage(
+            items=tuple(row.as_persisted() for row in page_rows),
+            next_cursor=next_cursor,
+        )
 
     async def prune_before(self, cutoff: datetime) -> int:
         if cutoff.tzinfo is None or cutoff.utcoffset() is None:

@@ -12,6 +12,10 @@ class LiveTickJournalError(RuntimeError):
     """Raised when durable read-only live-market storage is unavailable."""
 
 
+class LiveHistoryCursorError(ValueError):
+    """Raised when a persisted-history cursor is malformed or unsupported."""
+
+
 @dataclass(frozen=True, slots=True)
 class PersistedLiveTick:
     tick: MarketTick
@@ -42,6 +46,12 @@ class PersistedLiveTick:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class PersistedLiveTickPage:
+    items: Sequence[PersistedLiveTick]
+    next_cursor: str | None
+
+
 class LiveTickJournal(Protocol):
     """Durable append/query contract for accepted public market observations."""
 
@@ -59,6 +69,16 @@ class LiveTickJournal(Protocol):
         symbol: str,
         limit: int = 100,
     ) -> Sequence[PersistedLiveTick]: ...
+
+    async def list_page(
+        self,
+        *,
+        symbol: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> PersistedLiveTickPage: ...
 
     async def prune_before(self, cutoff: datetime) -> int: ...
 
