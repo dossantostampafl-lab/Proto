@@ -3,9 +3,11 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from apps.api.app.live_app import app
+from apps.api.app.live_history_metrics import live_history_read_metrics
 from apps.api.app.live_monitor import live_monitor
 from services.market_data import (
     LiveHistoryCursorError,
+    LiveTickJournalError,
     MarketTick,
     PersistedLiveTick,
     PersistedLiveTickPage,
@@ -43,6 +45,7 @@ def test_history_api_returns_read_only_page_metadata(monkeypatch) -> None:
     async def history_page(**_: object) -> PersistedLiveTickPage:
         return _page()
 
+    live_history_read_metrics.reset()
     monkeypatch.setattr(live_monitor, "persisted_history_page", history_page)
     with TestClient(app) as client:
         response = client.get(
@@ -64,11 +67,20 @@ def test_history_api_returns_read_only_page_metadata(monkeypatch) -> None:
     assert payload["real_money_execution"] is False
     assert "no-store" in response.headers["cache-control"]
 
+    observed = live_history_read_metrics.snapshot()
+    assert observed["requests_total"] == 1
+    assert observed["successes_total"] == 1
+    assert observed["rows_returned_total"] == 1
+    assert observed["pages_with_more_total"] == 1
+    assert observed["cursor_rejections_total"] == 0
+    assert observed["backend_failures_total"] == 0
 
-def test_history_api_rejects_invalid_cursor(monkeypatch) -> None:
+
+def test_history_api_rejects_invalid_cursor_without_marking_backend_failure(monkeypatch) -> None:
     async def history_page(**_: object) -> PersistedLiveTickPage:
         raise LiveHistoryCursorError("bad cursor")
 
+    live_history_read_metrics.reset()
     monkeypatch.setattr(live_monitor, "persisted_history_page", history_page)
     with TestClient(app) as client:
         response = client.get("/live/history/BTC", params={"cursor": "bad"})
@@ -76,6 +88,30 @@ def test_history_api_rejects_invalid_cursor(monkeypatch) -> None:
     assert response.status_code == 422
     assert response.json()["detail"] == "history cursor is invalid"
     assert "no-store" in response.headers["cache-control"]
+
+    observed = live_history_read_metrics.snapshot()
+    assert observed["requests_total"] == 1
+    assert observed["cursor_rejections_total"] == 1
+    assert observed["backend_failures_total"] == 0
+    assert observed["successes_total"] == 0
+
+
+def test_history_api_counts_backend_failure_separately(monkeypatch) -> None:
+    async def history_page(**_: object) -> PersistedLiveTickPage:
+        raise LiveTickJournalError("database unavailable")
+
+    live_history_read_metrics.reset()
+    monkeypatch.setattr(live_monitor, "persisted_history_page", history_page)
+    with TestClient(app) as client:
+        response = client.get("/live/history/BTC")
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    observed = live_history_read_metrics.snapshot()
+    assert observed["requests_total"] == 1
+    assert observed["backend_failures_total"] == 1
+    assert observed["cursor_rejections_total"] == 0
+    assert observed["successes_total"] == 0
 
 
 def test_history_api_requires_timezone_aware_bounds() -> None:
