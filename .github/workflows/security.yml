@@ -20,7 +20,10 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip pip-audit
       - run: pip install -e .
-      - run: pip-audit
+      - name: Audit repository Python environment
+        run: pip-audit
+      - name: Audit standalone live dependency manifest
+        run: pip-audit -r requirements-live.txt
 
   rust-audit:
     runs-on: ubuntu-24.04
