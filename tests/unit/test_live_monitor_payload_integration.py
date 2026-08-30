@@ -8,5 +8,4 @@ def test_live_monitor_delegates_payload_serialization() -> None:
     assert "market_payload(" in source
     assert "orderbook_payload(" in source
     assert "def _market_payload(" not in source
-    assert '"financial_connectivity": False' not in source
-    assert '"real_money_execution": False' not in source
+    assert "def _payload_for_tick(" in source
