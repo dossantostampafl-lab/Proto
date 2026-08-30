@@ -3,8 +3,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from apps.api.app import app_state, surface
-
+from apps.api.app import app_state
+from apps.api.app import surface
 
 API_APP = Path("apps/api/app")
 
