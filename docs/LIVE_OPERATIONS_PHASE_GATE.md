@@ -22,7 +22,7 @@ Every release candidate must preserve:
 - public unauthenticated crypto market data only;
 - `financial_connectivity=false`;
 - `real_money_execution=false`;
-- no account, order, deposit, withdrawal, custody or credential surface;
+- no account, order, deposit, withdrawal, custody or exchange-credential surface;
 - durable-before-fanout when persistence is required;
 - restart-safe persisted history that cannot satisfy current live readiness by itself;
 - live database metadata isolated from legacy simulation persistence.
@@ -40,37 +40,60 @@ Critical alerts cover:
 - any non-zero financial-connectivity invariant;
 - any non-zero real-money-execution invariant.
 
-Warning alerts cover public-feed disconnects, stale source messages, stale source timestamps, degraded persisted-history reads and repeated parser errors.
+Warning alerts cover public-feed disconnects, stale source messages, stale source timestamps, degraded persisted-history reads, history backend failures, requests reaching a process with persistence disabled and repeated parser errors.
+
+The dashboard includes freshness, feed recovery, durability and persisted-history read telemetry.
 
 ## Deterministic chaos gate
 
-The unit suite must prove that repeated transient durable-write failures:
+The automated release suite proves that transient durable-write failures:
 
 1. reject affected ticks before snapshots/history/fanout;
-2. do not corrupt sequence progression;
-3. recover on later successful writes without process restart;
-4. keep the in-memory analytics window bounded;
-5. preserve both financial capability invariants as false.
+2. recover on a later successful write without process restart;
+3. clear old-generation snapshots before accepting data from a new connection generation;
+4. do not leak an old snapshot when the first durable write in a new generation fails;
+5. distinguish transient history-read failure from write health and recover read health on the next successful query;
+6. preserve both financial capability invariants as false.
+
+## Automated backup and restore drill
+
+The release suite creates a local durable live database, writes a public market observation, copies the database as a backup, opens the restored database through a fresh journal and verifies that the observation is queryable.
+
+The same test verifies that restored persisted history does not hydrate the monitor's current snapshot or make current live coverage complete. Historical recovery and live readiness remain separate state domains.
+
+## CI release job
+
+The `CI` workflow contains a dedicated `live-release` job. It must:
+
+1. validate `docker-compose.live.yml` with required staging variables present;
+2. run live-only chaos/recovery tests;
+3. run the backup/restore drill;
+4. run the staging deployment contract tests;
+5. run the static live-isolation gate.
+
+The ordinary Python, Rust and web jobs still run independently, so the live release gate is additive rather than a replacement for the repository-wide CI.
 
 ## Staging validation
 
-Before promoting a release candidate:
+Before promoting a release candidate to a remote environment:
 
 1. Start the live-only stack with fresh volumes and confirm the migration service completes successfully before the API starts.
 2. Confirm `/health` returns the two capability invariants as false.
 3. Confirm `/live/ready` becomes ready only after fresh BTC, ETH and SOL observations and healthy required persistence.
 4. Confirm Prometheus target `proto-live-read-only` is up and all rule files load without error.
-5. Confirm the provisioned Grafana dashboard renders freshness and durability telemetry.
+5. Confirm the provisioned Grafana dashboard renders freshness, recovery, durability and history-read telemetry.
 6. Restart the API and verify persisted history is queryable while readiness remains false until fresh post-restart observations arrive.
-7. Restart Redis and verify the application recovers after the event runtime reconnects/restarts.
+7. Restart Redis and verify the event runtime recovers without changing the live financial capability invariants.
 8. Restart PostgreSQL and verify durable-before-fanout fails closed while storage is unavailable and recovers when storage returns.
-9. Verify there are no `/probability`, `/edge`, `/simulation`, `/replay`, `/portfolio`, `/fills` or trading-oriented WebSocket routes in the standalone app.
+9. Verify there are no prediction, simulation, portfolio, fill or trading-oriented routes in the standalone app.
 10. Verify the database contains the Alembic-managed live schema without legacy simulation tables.
-
-## Backup and restore drill
-
-The PostgreSQL volume is the durable source for live history. A staging release is not considered operationally complete until a backup can be restored into a fresh database and `/live/history/{symbol}` returns the restored read-only observations. Restored history must never make `/live/ready` pass without current live data.
 
 ## Exit criteria
 
-This phase can merge only when CI, Security and Graphify are green on the exact PR head and the standalone deployment remains read-only by construction.
+This phase can merge only when:
+
+- the `live-release` CI job is green;
+- repository Python, Rust and web CI jobs are green;
+- Security is green;
+- Graphify is green on the exact PR head;
+- staging contracts and read-only safety invariants remain intact.

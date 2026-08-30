@@ -82,6 +82,19 @@
         {"expr": "proto_live_persistence_read_failures", "legendFormat": "read failures", "refId": "C"},
         {"expr": "proto_live_journal_pruned_rows", "legendFormat": "pruned rows", "refId": "D"}
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Persisted history read telemetry",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+      "targets": [
+        {"expr": "proto_live_history_requests_total", "legendFormat": "requests", "refId": "A"},
+        {"expr": "proto_live_history_successes_total", "legendFormat": "successful pages", "refId": "B"},
+        {"expr": "proto_live_history_rows_returned_total", "legendFormat": "rows returned", "refId": "C"},
+        {"expr": "proto_live_history_cursor_rejections_total", "legendFormat": "cursor rejections", "refId": "D"},
+        {"expr": "proto_live_history_backend_failures_total", "legendFormat": "backend failures", "refId": "E"},
+        {"expr": "proto_live_history_disabled_total", "legendFormat": "persistence disabled", "refId": "F"}
+      ]
     }
   ],
   "refresh": "10s",
@@ -92,5 +105,5 @@
   "timezone": "browser",
   "title": "Proto Live Monitoring",
   "uid": "proto-live-read-only",
-  "version": 1
+  "version": 2
 }
