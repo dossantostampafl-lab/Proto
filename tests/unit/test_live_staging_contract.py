@@ -4,6 +4,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "docker-compose.live.yml"
 DOCKERFILE = ROOT / "Dockerfile.api"
+DOCKERIGNORE = ROOT / ".dockerignore"
+LIVE_REQUIREMENTS = ROOT / "requirements-live.txt"
 PROMETHEUS = ROOT / "infra/monitoring/prometheus.yml"
 ALERTS = ROOT / "infra/monitoring/live-alerts.yml"
 DASHBOARD = ROOT / "infra/monitoring/grafana/dashboards/live-monitoring.json"
@@ -35,8 +37,43 @@ def test_live_staging_services_are_hardened_and_bound_to_loopback() -> None:
 
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     assert "USER proto:proto" in dockerfile
+    assert "requirements-live.txt" in dockerfile
+    assert "pip install --no-cache-dir -r requirements-live.txt" in dockerfile
     assert "apps.api.app.live_app:app" in dockerfile
     assert "apps.api.app.main:app" not in dockerfile
+
+
+def test_live_image_dependency_manifest_excludes_research_stack() -> None:
+    requirements = LIVE_REQUIREMENTS.read_text(encoding="utf-8").lower().splitlines()
+    package_names = {line.split("<", 1)[0].split(">", 1)[0].split("[", 1)[0] for line in requirements}
+
+    required = {
+        "alembic",
+        "fastapi",
+        "uvicorn",
+        "pydantic",
+        "pydantic-settings",
+        "redis",
+        "sqlalchemy",
+        "asyncpg",
+        "websockets",
+    }
+    forbidden = {
+        "numpy",
+        "pandas",
+        "polars",
+        "scipy",
+        "scikit-learn",
+        "statsmodels",
+    }
+    assert required <= package_names
+    assert package_names.isdisjoint(forbidden)
+
+
+def test_live_docker_context_excludes_development_and_legacy_top_level_assets() -> None:
+    ignored = set(DOCKERIGNORE.read_text(encoding="utf-8").splitlines())
+
+    assert {".git", ".github", "apps/web", "docs", "engines", "tests", "scripts"} <= ignored
 
 
 def test_prometheus_loads_live_rules_and_scrapes_only_live_metrics_surface() -> None:
