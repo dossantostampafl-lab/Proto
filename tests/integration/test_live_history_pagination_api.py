@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from apps.api.app.live_app import app
-from apps.api.app.live_durability import live_durability
+from apps.api.app.live_monitor import live_monitor
 from services.market_data import (
     LiveHistoryCursorError,
     MarketTick,
@@ -43,7 +43,7 @@ def test_history_api_returns_read_only_page_metadata(monkeypatch) -> None:
     async def history_page(**_: object) -> PersistedLiveTickPage:
         return _page()
 
-    monkeypatch.setattr(live_durability, "history_page", history_page)
+    monkeypatch.setattr(live_monitor, "persisted_history_page", history_page)
     with TestClient(app) as client:
         response = client.get(
             "/live/history/BTC",
@@ -69,7 +69,7 @@ def test_history_api_rejects_invalid_cursor(monkeypatch) -> None:
     async def history_page(**_: object) -> PersistedLiveTickPage:
         raise LiveHistoryCursorError("bad cursor")
 
-    monkeypatch.setattr(live_durability, "history_page", history_page)
+    monkeypatch.setattr(live_monitor, "persisted_history_page", history_page)
     with TestClient(app) as client:
         response = client.get("/live/history/BTC", params={"cursor": "bad"})
 

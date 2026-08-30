@@ -32,7 +32,7 @@ from services.market_data import (
 
 from .live_database import LiveBase
 
-_HISTORY_CURSOR_VERSION = 1
+_HISTORY_CURSOR_VERSION = 2
 _MAX_HISTORY_CURSOR_CHARS = 512
 
 
@@ -50,12 +50,26 @@ def _require_aware(value: datetime | None, *, field: str) -> datetime | None:
     return value.astimezone(UTC)
 
 
-def _encode_history_cursor(*, received_at: datetime, row_id: int) -> str:
+def _cursor_bound(value: datetime | None) -> str | None:
+    return _as_utc(value).isoformat() if value is not None else None
+
+
+def _encode_history_cursor(
+    *,
+    symbol: str,
+    received_at: datetime,
+    row_id: int,
+    start_at: datetime | None,
+    end_at: datetime | None,
+) -> str:
     payload = json.dumps(
         {
             "v": _HISTORY_CURSOR_VERSION,
+            "symbol": symbol,
             "received_at": _as_utc(received_at).isoformat(),
             "id": row_id,
+            "start_at": _cursor_bound(start_at),
+            "end_at": _cursor_bound(end_at),
         },
         separators=(",", ":"),
         sort_keys=True,
@@ -63,7 +77,13 @@ def _encode_history_cursor(*, received_at: datetime, row_id: int) -> str:
     return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
 
 
-def _decode_history_cursor(cursor: str) -> tuple[datetime, int]:
+def _decode_history_cursor(
+    cursor: str,
+    *,
+    symbol: str,
+    start_at: datetime | None,
+    end_at: datetime | None,
+) -> tuple[datetime, int]:
     if not cursor or len(cursor) > _MAX_HISTORY_CURSOR_CHARS:
         raise LiveHistoryCursorError("history cursor is malformed")
     try:
@@ -76,6 +96,13 @@ def _decode_history_cursor(cursor: str) -> tuple[datetime, int]:
 
     if not isinstance(payload, dict) or payload.get("v") != _HISTORY_CURSOR_VERSION:
         raise LiveHistoryCursorError("history cursor version is unsupported")
+    if payload.get("symbol") != symbol:
+        raise LiveHistoryCursorError("history cursor does not match symbol")
+    if payload.get("start_at") != _cursor_bound(start_at):
+        raise LiveHistoryCursorError("history cursor does not match start_at")
+    if payload.get("end_at") != _cursor_bound(end_at):
+        raise LiveHistoryCursorError("history cursor does not match end_at")
+
     row_id = payload.get("id")
     received_raw = payload.get("received_at")
     if isinstance(row_id, bool) or not isinstance(row_id, int) or row_id <= 0:
@@ -290,7 +317,12 @@ class AsyncSqlLiveTickJournal:
         if normalized_end is not None:
             conditions.append(LiveMarketTickRecord.received_at <= normalized_end)
         if cursor is not None:
-            cursor_received_at, cursor_id = _decode_history_cursor(cursor)
+            cursor_received_at, cursor_id = _decode_history_cursor(
+                cursor,
+                symbol=normalized_symbol,
+                start_at=normalized_start,
+                end_at=normalized_end,
+            )
             conditions.append(
                 or_(
                     LiveMarketTickRecord.received_at < cursor_received_at,
@@ -325,8 +357,11 @@ class AsyncSqlLiveTickJournal:
         if has_more and page_rows:
             last_row = page_rows[-1]
             next_cursor = _encode_history_cursor(
+                symbol=normalized_symbol,
                 received_at=last_row.received_at,
                 row_id=last_row.id,
+                start_at=normalized_start,
+                end_at=normalized_end,
             )
         return PersistedLiveTickPage(
             items=tuple(row.as_persisted() for row in page_rows),

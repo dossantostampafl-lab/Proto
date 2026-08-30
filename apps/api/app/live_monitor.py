@@ -14,6 +14,7 @@ from services.market_data import (
     LiveTickJournal,
     LiveTickJournalError,
     MarketTick,
+    PersistedLiveTickPage,
     PublicMarketDataAdapter,
     compute_orderbook_metrics,
     evaluate_live_coverage,
@@ -152,6 +153,7 @@ class LiveCryptoMonitor:
     def persistence_status(self) -> dict[str, object]:
         journal_status = dict(self._journal.status()) if self._journal is not None else {}
         backend_write_healthy = bool(journal_status.get("write_healthy", True))
+        backend_read_healthy = bool(journal_status.get("read_healthy", True))
         configured = self._journal is not None
         healthy = bool(
             not self._persistence_required
@@ -166,7 +168,9 @@ class LiveCryptoMonitor:
             "required": self._persistence_required,
             "healthy": healthy,
             "write_healthy": healthy,
-            "read_healthy": self._last_persistence_read_error is None,
+            "read_healthy": (
+                backend_read_healthy and self._last_persistence_read_error is None
+            ),
             "persisted_current_connection": self._persisted_current_connection,
             "idempotent_hits_current_connection": (
                 self._persistence_idempotent_current_connection
@@ -263,21 +267,27 @@ class LiveCryptoMonitor:
             "real_money_execution": False,
         }
 
-    async def persisted_history(
+    async def persisted_history_page(
         self,
         symbol: str,
         *,
         limit: int = 100,
-    ) -> list[dict[str, object]] | None:
+        cursor: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> PersistedLiveTickPage | None:
         normalized_symbol = symbol.strip().upper()
         if normalized_symbol not in self._adapter.symbols:
             raise ValueError("symbol is outside the configured live allowlist")
         if self._journal is None:
             return None
         try:
-            rows = await self._journal.list_recent(
+            page = await self._journal.list_page(
                 symbol=normalized_symbol,
                 limit=limit,
+                cursor=cursor,
+                start_at=start_at,
+                end_at=end_at,
             )
         except LiveTickJournalError as error:
             self._persistence_read_failures += 1
@@ -285,7 +295,18 @@ class LiveCryptoMonitor:
             metrics.increment("live_market_persistence_read_failures")
             raise
         self._last_persistence_read_error = None
-        return [row.as_dict() for row in rows]
+        return page
+
+    async def persisted_history(
+        self,
+        symbol: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, object]] | None:
+        page = await self.persisted_history_page(symbol, limit=limit)
+        if page is None:
+            return None
+        return [row.as_dict() for row in page.items]
 
     def _sync_connection_generation(self, generation: int) -> None:
         if generation == self._connection_generation:

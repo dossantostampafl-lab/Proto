@@ -14,7 +14,7 @@ Results remain ordered newest-first by `(received_at, id)` and return `next_curs
 
 ## Cursor contract
 
-The cursor is opaque to API clients. It is bounded to 512 characters, versioned internally and contains only the persisted receipt position needed to continue a deterministic read. Invalid, malformed or unsupported cursors return HTTP 422.
+The cursor is opaque to API clients. It is bounded to 512 characters, versioned internally and contains only the persisted receipt position plus the symbol/time-window binding needed to continue the same deterministic read. Invalid, malformed, unsupported or query-mismatched cursors return HTTP 422.
 
 Pagination must not duplicate or skip rows when the underlying page is traversed without concurrent deletion of retained rows.
 

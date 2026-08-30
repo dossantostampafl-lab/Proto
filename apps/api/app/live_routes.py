@@ -168,7 +168,7 @@ async def live_persisted_history(
         )
     _validate_history_time_bounds(start_at=start_at, end_at=end_at)
     try:
-        page = await live_durability.history_page(
+        page = await live_monitor.persisted_history_page(
             symbol=normalized_symbol,
             limit=limit,
             cursor=cursor,

@@ -8,6 +8,7 @@ from services.market_data import (
     LiveTickJournalError,
     MarketTick,
     PersistedLiveTick,
+    PersistedLiveTickPage,
     PublicFeedHealth,
 )
 
@@ -71,6 +72,20 @@ class RecordingJournal:
         limit: int = 100,
     ) -> list[PersistedLiveTick]:
         return [row for row in reversed(self.rows) if row.tick.symbol == symbol][:limit]
+
+    async def list_page(
+        self,
+        *,
+        symbol: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> PersistedLiveTickPage:
+        if self.fail:
+            raise LiveTickJournalError("storage unavailable")
+        rows = [row for row in reversed(self.rows) if row.tick.symbol == symbol][:limit]
+        return PersistedLiveTickPage(items=tuple(rows), next_cursor=None)
 
     async def prune_before(self, cutoff: datetime) -> int:
         before = len(self.rows)
@@ -177,3 +192,21 @@ async def test_required_persistence_without_journal_fails_closed() -> None:
     assert status["required"] is True
     assert status["healthy"] is False
     assert status["last_write_error"] == "JOURNAL_NOT_CONFIGURED"
+
+
+@pytest.mark.asyncio
+async def test_history_page_read_failure_updates_monitor_persistence_health() -> None:
+    journal = RecordingJournal(fail=True)
+    monitor = LiveCryptoMonitor(
+        StaticAdapter(),
+        journal=journal,
+        persistence_required=True,
+    )
+
+    with pytest.raises(LiveTickJournalError):
+        await monitor.persisted_history_page("BTC", limit=10)
+
+    status = monitor.persistence_status()
+    assert status["read_healthy"] is False
+    assert status["read_failures"] == 1
+    assert status["last_read_error"] == "LiveTickJournalError"
