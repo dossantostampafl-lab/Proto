@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from apps.api.app import app_state, surface
+from apps.api.app import app_state, main, safety_surface, surface
 
 API_APP = Path("apps/api/app")
 
@@ -30,3 +30,17 @@ def test_analytics_surface_does_not_import_api_main() -> None:
 
 def test_analytics_surface_uses_canonical_portfolio_state() -> None:
     assert surface.portfolio is app_state.portfolio
+
+
+def test_api_main_uses_canonical_state_objects() -> None:
+    assert main.runtime is app_state.runtime
+    assert main.simulator is app_state.simulator
+    assert main.portfolio is app_state.portfolio
+    assert main.replay_session is app_state.replay_session
+    assert main.persistence_engine is app_state.persistence_engine
+    assert main.persistent_journal is app_state.persistent_journal
+
+
+def test_safety_surface_shares_api_runtime() -> None:
+    assert safety_surface.runtime is app_state.runtime
+    assert safety_surface.runtime is main.runtime
