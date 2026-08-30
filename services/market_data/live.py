@@ -11,7 +11,10 @@ from urllib.parse import urlsplit
 from websockets.asyncio.client import connect
 
 from .core import MarketTick
-from .live_contracts import PublicFeedHealth, PublicMarketDataAdapter
+from .live_contracts import (
+    PublicFeedHealth as PublicFeedHealth,
+    PublicMarketDataAdapter as PublicMarketDataAdapter,
+)
 from .public_feed_parser import (
     MAX_PUBLIC_FRAME_BYTES,
     SUPPORTED_PUBLIC_PRODUCTS,
