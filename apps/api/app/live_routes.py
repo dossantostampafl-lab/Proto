@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
 
-from services.market_data import LiveTickJournalError, live_readiness_failures
+from services.market_data import (
+    LiveHistoryCursorError,
+    LiveTickJournalError,
+    live_readiness_failures,
+)
 
 from .live_durability import live_durability
 from .live_metrics import render_live_prometheus
@@ -17,10 +22,31 @@ from .settings import settings
 
 _NO_STORE_CACHE_CONTROL = "no-store, max-age=0"
 _READINESS_RETRY_AFTER_SECONDS = "1"
+_MAX_HISTORY_CURSOR_CHARS = 512
 
 
 def _mark_no_store(response: Response) -> None:
     response.headers["Cache-Control"] = _NO_STORE_CACHE_CONTROL
+
+
+def _validate_history_time_bounds(
+    *,
+    start_at: datetime | None,
+    end_at: datetime | None,
+) -> None:
+    for field_name, value in (("start_at", start_at), ("end_at", end_at)):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field_name} must include a timezone offset",
+                headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
+            )
+    if start_at is not None and end_at is not None and start_at > end_at:
+        raise HTTPException(
+            status_code=422,
+            detail="start_at must not be after end_at",
+            headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
+        )
 
 
 @asynccontextmanager
@@ -125,6 +151,12 @@ async def live_persisted_history(
         int,
         Query(ge=1, le=settings.live_history_query_max),
     ] = 100,
+    cursor: Annotated[
+        str | None,
+        Query(max_length=_MAX_HISTORY_CURSOR_CHARS),
+    ] = None,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
 ) -> dict[str, object]:
     _mark_no_store(response)
     normalized_symbol = symbol.strip().upper()
@@ -134,8 +166,21 @@ async def live_persisted_history(
             detail="symbol is outside the configured live allowlist",
             headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
         )
+    _validate_history_time_bounds(start_at=start_at, end_at=end_at)
     try:
-        rows = await live_monitor.persisted_history(normalized_symbol, limit=limit)
+        page = await live_durability.history_page(
+            symbol=normalized_symbol,
+            limit=limit,
+            cursor=cursor,
+            start_at=start_at,
+            end_at=end_at,
+        )
+    except LiveHistoryCursorError as error:
+        raise HTTPException(
+            status_code=422,
+            detail="history cursor is invalid",
+            headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
+        ) from error
     except LiveTickJournalError as error:
         raise HTTPException(
             status_code=503,
@@ -145,18 +190,23 @@ async def live_persisted_history(
                 "Retry-After": _READINESS_RETRY_AFTER_SECONDS,
             },
         ) from error
-    if rows is None:
+    if page is None:
         raise HTTPException(
             status_code=503,
             detail="live persistence is disabled",
             headers={"Cache-Control": _NO_STORE_CACHE_CONTROL},
         )
+    rows = [row.as_dict() for row in page.items]
     return {
         "mode": SystemMode.LIVE_MONITORING,
         "source": "PUBLIC_READ_ONLY_PERSISTED",
         "symbol": normalized_symbol,
         "count": len(rows),
         "history": rows,
+        "next_cursor": page.next_cursor,
+        "has_more": page.next_cursor is not None,
+        "start_at": start_at.isoformat() if start_at is not None else None,
+        "end_at": end_at.isoformat() if end_at is not None else None,
         "financial_connectivity": False,
         "real_money_execution": False,
     }
