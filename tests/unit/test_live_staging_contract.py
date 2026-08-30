@@ -34,6 +34,7 @@ def test_live_staging_services_are_hardened_and_bound_to_loopback() -> None:
     assert "0.0.0.0:" not in compose
 
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    assert "USER proto:proto" in dockerfile
     assert "apps.api.app.live_app:app" in dockerfile
     assert "apps.api.app.main:app" not in dockerfile
 
