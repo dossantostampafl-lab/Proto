@@ -18,6 +18,15 @@ from services.quant.core import (
 )
 
 from . import __version__
+from .app_state import (
+    persistence_engine,
+    persistent_journal,
+    portfolio,
+    replay_session,
+    reset_runtime_state,
+    runtime,
+    simulator,
+)
 from .models import (
     KillSwitchState,
     MarketSnapshot,
@@ -28,25 +37,18 @@ from .models import (
     SystemMode,
 )
 from .observability import LatencyTimer, access_log
-from .persistence import AsyncSqlFillJournal, build_engine, database_ready, init_database
-from .portfolio import PaperPortfolio
+from .persistence import database_ready, init_database
 from .replay import (
     ReplaySeekRequest,
-    ReplaySession,
     ReplaySpeedRequest,
     ReplayStartRequest,
 )
 from .research import metrics
 from .research import router as research_router
 from .settings import settings
-from .simulation import PaperSimulator
 from .websockets import hub
 
 logger = logging.getLogger("proto.api")
-persistence_engine = build_engine(settings.database_url) if settings.persistence_enabled else None
-persistent_journal = (
-    AsyncSqlFillJournal(persistence_engine) if persistence_engine is not None else None
-)
 
 
 @asynccontextmanager
@@ -71,11 +73,6 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-Request-ID"],
 )
 app.include_router(research_router)
-
-runtime = RuntimeState()
-simulator = PaperSimulator()
-portfolio = PaperPortfolio()
-replay_session = ReplaySession()
 
 
 @app.middleware("http")
@@ -340,8 +337,7 @@ async def simulation_stop() -> RuntimeState:
 
 @app.post("/simulation/reset", response_model=RuntimeState)
 async def simulation_reset() -> RuntimeState:
-    global runtime
-    runtime = RuntimeState()
+    reset_runtime_state()
     replay_session.reset()
     portfolio.reset()
     metrics.reset()
@@ -557,5 +553,3 @@ async def ws_fills(websocket: WebSocket) -> None:
 @app.websocket("/ws/analytics")
 async def ws_analytics(websocket: WebSocket) -> None:
     await hub.serve("analytics", websocket)
-
-
