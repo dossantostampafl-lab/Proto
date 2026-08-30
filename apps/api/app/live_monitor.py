@@ -21,6 +21,7 @@ from services.market_data import (
 )
 
 from .event_state import event_runtime
+from .live_payloads import age_seconds, market_payload, orderbook_payload, source_to_server_delta_ms
 from .metrics_state import metrics
 from .models import SystemMode
 from .websockets import hub
@@ -28,16 +29,6 @@ from .websockets import hub
 _HISTORY_LIMIT = 512
 _STALE_AFTER_SECONDS = 10.0
 _SOURCE_MESSAGE_STALE_SECONDS = 30.0
-
-
-def _age_seconds(value: datetime | None, *, now: datetime) -> float | None:
-    if value is None or value.tzinfo is None or value.utcoffset() is None:
-        return None
-    return max((now - value).total_seconds(), 0.0)
-
-
-def _source_to_server_delta_ms(*, source_at: datetime, received_at: datetime) -> float:
-    return round((received_at - source_at).total_seconds() * 1_000.0, 3)
 
 
 class LiveCryptoMonitor:
@@ -127,8 +118,8 @@ class LiveCryptoMonitor:
     def source_health(self) -> dict[str, object]:
         now = datetime.now(UTC)
         health = self._adapter.health()
-        last_message_age = _age_seconds(health.last_message_at, now=now)
-        last_tick_age = _age_seconds(health.last_tick_at, now=now)
+        last_message_age = age_seconds(health.last_message_at, now=now)
+        last_tick_age = age_seconds(health.last_tick_at, now=now)
         message_fresh = bool(
             health.connected
             and last_message_age is not None
@@ -236,11 +227,13 @@ class LiveCryptoMonitor:
         }
 
     def snapshots(self) -> list[dict[str, object]]:
-        return [self._market_payload(self._latest[symbol]) for symbol in sorted(self._latest)]
+        return [
+            self._payload_for_tick(self._latest[symbol]) for symbol in sorted(self._latest)
+        ]
 
     def snapshot(self, symbol: str) -> dict[str, object] | None:
         tick = self._latest.get(symbol.upper())
-        return self._market_payload(tick) if tick is not None else None
+        return self._payload_for_tick(tick) if tick is not None else None
 
     def analytics(self, symbol: str) -> dict[str, object] | None:
         normalized_symbol = symbol.upper()
@@ -255,7 +248,7 @@ class LiveCryptoMonitor:
             "latest_source_at": latest_tick.timestamp.isoformat(),
             "latest_received_at": received_at.isoformat() if received_at is not None else None,
             "latest_source_to_server_delta_ms": (
-                _source_to_server_delta_ms(
+                source_to_server_delta_ms(
                     source_at=latest_tick.timestamp,
                     received_at=received_at,
                 )
@@ -410,39 +403,21 @@ class LiveCryptoMonitor:
         self._symbol_connection_generation[tick.symbol] = health.connection_generation
         metrics.increment("live_market_frames")
         book = compute_orderbook_metrics(tick)
-        source_to_server_delta_ms = _source_to_server_delta_ms(
-            source_at=tick.timestamp,
-            received_at=received_at,
-        )
         await asyncio.gather(
             hub.broadcast(
                 "market-data",
-                {"type": "market-data", "data": self._market_payload(tick)},
+                {"type": "market-data", "data": self._payload_for_tick(tick)},
             ),
             hub.broadcast(
                 "orderbook",
                 {
                     "type": "orderbook",
-                    "data": {
-                        "timestamp": tick.timestamp.isoformat(),
-                        "received_at": received_at.isoformat(),
-                        "source_to_server_delta_ms": source_to_server_delta_ms,
-                        "source": "PUBLIC_READ_ONLY",
-                        "symbol": tick.symbol,
-                        "connection_generation": health.connection_generation,
-                        "sequence": tick.sequence,
-                        "best_bid": book.best_bid,
-                        "best_ask": book.best_ask,
-                        "bid_size": tick.bid_size,
-                        "ask_size": tick.ask_size,
-                        "mid_price": book.mid_price,
-                        "spread": book.spread,
-                        "microprice": book.microprice,
-                        "imbalance": book.imbalance,
-                        "depth": book.depth,
-                        "financial_connectivity": False,
-                        "real_money_execution": False,
-                    },
+                    "data": orderbook_payload(
+                        tick,
+                        book,
+                        received_at=received_at,
+                        connection_generation=health.connection_generation,
+                    ),
                 },
             ),
         )
@@ -465,38 +440,15 @@ class LiveCryptoMonitor:
                 },
             )
 
-    def _market_payload(self, tick: MarketTick) -> dict[str, object]:
-        received_at = self._received_at.get(tick.symbol)
-        return {
-            "timestamp": tick.timestamp.isoformat(),
-            "received_at": received_at.isoformat() if received_at is not None else None,
-            "source_to_server_delta_ms": (
-                _source_to_server_delta_ms(
-                    source_at=tick.timestamp,
-                    received_at=received_at,
-                )
-                if received_at is not None
-                else None
-            ),
-            "source": "PUBLIC_READ_ONLY",
-            "venue": tick.venue,
-            "symbol": tick.symbol,
-            "connection_generation": self._symbol_connection_generation.get(
+    def _payload_for_tick(self, tick: MarketTick) -> dict[str, object]:
+        return market_payload(
+            tick,
+            received_at=self._received_at.get(tick.symbol),
+            connection_generation=self._symbol_connection_generation.get(
                 tick.symbol,
                 self._connection_generation,
             ),
-            "bid": tick.bid,
-            "ask": tick.ask,
-            "mid": tick.mid,
-            "last": tick.last,
-            "spread": tick.spread,
-            "volume_24h": tick.volume,
-            "bid_size": tick.bid_size,
-            "ask_size": tick.ask_size,
-            "sequence": tick.sequence,
-            "financial_connectivity": False,
-            "real_money_execution": False,
-        }
+        )
 
 
 live_monitor = LiveCryptoMonitor()
