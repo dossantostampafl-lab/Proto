@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from .models import Fill, Side, SimulationRequest, SimulationResult
 
@@ -9,6 +10,8 @@ from .models import Fill, Side, SimulationRequest, SimulationResult
 class SimulationConfig:
     fee_bps: float = 2.0
     base_slippage_bps: float = 3.0
+    max_snapshot_age_seconds: float = 10.0
+    max_future_skew_seconds: float = 1.0
 
 
 class RiskEngine:
@@ -34,7 +37,23 @@ class PaperSimulator:
         self.config = config or SimulationConfig()
         self.risk = RiskEngine()
 
+    def _validate_snapshot_time(self, request: SimulationRequest) -> tuple[bool, str]:
+        observed_at = request.snapshot.observed_at
+        if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+            return False, "snapshot timestamp must be timezone-aware"
+        now = datetime.now(UTC)
+        age_seconds = (now - observed_at).total_seconds()
+        if age_seconds > self.config.max_snapshot_age_seconds:
+            return False, "stale market snapshot"
+        if age_seconds < -self.config.max_future_skew_seconds:
+            return False, "market snapshot timestamp is in the future"
+        return True, "accepted"
+
     def simulate(self, request: SimulationRequest) -> SimulationResult:
+        snapshot_time_valid, snapshot_time_reason = self._validate_snapshot_time(request)
+        if not snapshot_time_valid:
+            return SimulationResult(accepted=False, reason=snapshot_time_reason)
+
         order = request.order
         snapshot = request.snapshot
         executable_price = snapshot.ask if order.side == Side.BUY else snapshot.bid
