@@ -28,12 +28,14 @@ def _request() -> SimulationRequest:
         current_position_notional=1.0,
         current_gross_exposure=1.0,
         current_asset_exposure=1.0,
+        current_drawdown=0.0,
         limits=RiskLimits(
             max_order_notional=1_000_000.0,
             max_position_notional=1_000_000.0,
             max_slippage_bps=1_000.0,
             max_gross_exposure=1_000_000.0,
             max_asset_concentration=1.0,
+            max_drawdown=1_000_000.0,
         ),
     )
 
@@ -55,6 +57,7 @@ def test_authoritative_policy_caps_client_risk_limits() -> None:
         effective.limits.max_asset_concentration
         == settings.simulation_max_asset_concentration
     )
+    assert effective.limits.max_drawdown == settings.max_daily_drawdown
 
 
 def test_authoritative_policy_uses_canonical_position_when_client_underreports() -> None:
@@ -64,6 +67,7 @@ def test_authoritative_policy_uses_canonical_position_when_client_underreports()
             "positions": [{"asset": "BTC", "quantity": 0.3}],
             "gross_exposure": 42_000.0,
             "exposure_by_asset": {"BTC": 18_000.0, "ETH": 24_000.0},
+            "total_pnl_after_fees": -6_000.0,
         },
         max_order_notional=10_000.0,
         max_position_notional=25_000.0,
@@ -74,6 +78,20 @@ def test_authoritative_policy_uses_canonical_position_when_client_underreports()
     assert effective.current_position_notional == expected_notional
     assert effective.current_gross_exposure == 42_000.0
     assert effective.current_asset_exposure == 18_000.0
+    assert effective.current_drawdown == 6_000.0
+
+
+def test_authoritative_policy_ignores_client_drawdown_spoofing() -> None:
+    request = _request().model_copy(update={"current_drawdown": 0.0})
+    effective = authoritative_simulation_request(
+        request,
+        {"positions": [], "total_pnl_after_fees": -7_500.0},
+        max_order_notional=10_000.0,
+        max_position_notional=25_000.0,
+        max_slippage_bps=75.0,
+    )
+
+    assert effective.current_drawdown == 7_500.0
 
 
 def test_authoritative_policy_preserves_stricter_client_limits() -> None:
@@ -85,6 +103,7 @@ def test_authoritative_policy_preserves_stricter_client_limits() -> None:
                 max_slippage_bps=20.0,
                 max_gross_exposure=50_000.0,
                 max_asset_concentration=0.60,
+                max_drawdown=2_500.0,
             )
         }
     )

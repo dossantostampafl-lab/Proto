@@ -35,6 +35,8 @@ def authoritative_simulation_request(
         canonical_asset_exposure = float(
             exposure_by_asset.get(request.order.asset.value, 0.0)
         )
+    canonical_total_pnl = float(portfolio_snapshot.get("total_pnl_after_fees", 0.0))
+    canonical_drawdown = max(-canonical_total_pnl, 0.0)
 
     requested_limits = request.limits
     effective_limits = RiskLimits(
@@ -52,6 +54,7 @@ def authoritative_simulation_request(
             requested_limits.max_asset_concentration,
             settings.simulation_max_asset_concentration,
         ),
+        max_drawdown=min(requested_limits.max_drawdown, settings.max_daily_drawdown),
     )
     return request.model_copy(
         update={
@@ -59,6 +62,7 @@ def authoritative_simulation_request(
             "current_position_quantity": canonical_position_quantity,
             "current_gross_exposure": canonical_gross_exposure,
             "current_asset_exposure": canonical_asset_exposure,
+            "current_drawdown": canonical_drawdown,
             "limits": effective_limits,
             "server_execution_permitted": simulation_execution_allowed(),
         }

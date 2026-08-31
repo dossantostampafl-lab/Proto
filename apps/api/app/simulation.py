@@ -26,6 +26,10 @@ class RiskEngine:
         )
         projected_quantity = request.current_position_quantity + signed_order_quantity
         projected_position_notional = abs(projected_quantity) * request.order.limit_price
+        risk_reducing = (
+            request.current_position_quantity * signed_order_quantity < 0.0
+            and abs(signed_order_quantity) <= abs(request.current_position_quantity)
+        )
         other_asset_exposure = max(
             request.current_gross_exposure - request.current_asset_exposure,
             0.0,
@@ -43,6 +47,8 @@ class RiskEngine:
             return False, "market mismatch"
         if order_notional > request.limits.max_order_notional:
             return False, "max order notional exceeded"
+        if request.current_drawdown >= request.limits.max_drawdown and not risk_reducing:
+            return False, "max drawdown exceeded"
         if projected_position_notional > request.limits.max_position_notional:
             return False, "max position notional exceeded"
         if projected_gross_exposure > request.limits.max_gross_exposure:
