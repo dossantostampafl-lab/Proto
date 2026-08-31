@@ -12,6 +12,7 @@ from .overfitting import (
     expected_max_sharpe_under_null,
     probability_of_backtest_overfitting,
 )
+from .perturbation import apply_signal_returns, delay_signal, timestamp_shuffle
 from .resampling import (
     MonteCarloSummary,
     block_bootstrap_path,
@@ -35,9 +36,11 @@ __all__ = [
     "RegimePerformance",
     "RegimeRobustnessReport",
     "ValidationReport",
+    "apply_signal_returns",
     "block_bootstrap_path",
     "combinatorial_purged_cv_splits",
     "deflated_sharpe_ratio",
+    "delay_signal",
     "expected_max_sharpe_under_null",
     "monte_carlo_block_bootstrap",
     "parameter_stability",
@@ -45,5 +48,6 @@ __all__ = [
     "probability_of_backtest_overfitting",
     "purged_walk_forward_splits",
     "regime_robustness",
+    "timestamp_shuffle",
     "validation_report",
 ]
