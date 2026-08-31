@@ -14,6 +14,8 @@ class SimulationConfig:
     latency_ms: float = 25.0
     latency_slippage_bps_per_100ms: float = 0.5
     tick_size: float = 0.01
+    depth_impact_bps_at_full_book: float = 8.0
+    depth_impact_exponent: float = 1.5
     max_snapshot_age_seconds: float = 10.0
     max_future_skew_seconds: float = 1.0
 
@@ -24,6 +26,8 @@ class SimulationConfig:
             "latency_ms": self.latency_ms,
             "latency_slippage_bps_per_100ms": self.latency_slippage_bps_per_100ms,
             "tick_size": self.tick_size,
+            "depth_impact_bps_at_full_book": self.depth_impact_bps_at_full_book,
+            "depth_impact_exponent": self.depth_impact_exponent,
             "max_snapshot_age_seconds": self.max_snapshot_age_seconds,
             "max_future_skew_seconds": self.max_future_skew_seconds,
         }
@@ -40,6 +44,10 @@ class SimulationConfig:
             raise ValueError("latency_slippage_bps_per_100ms must be non-negative")
         if self.tick_size <= 0:
             raise ValueError("tick_size must be positive")
+        if self.depth_impact_bps_at_full_book < 0:
+            raise ValueError("depth_impact_bps_at_full_book must be non-negative")
+        if self.depth_impact_exponent <= 0:
+            raise ValueError("depth_impact_exponent must be positive")
         if self.max_snapshot_age_seconds <= 0:
             raise ValueError("max_snapshot_age_seconds must be positive")
         if self.max_future_skew_seconds < 0:
@@ -127,6 +135,14 @@ class PaperSimulator:
         grid_ticks = ceil(ticks - 1e-12) if side == Side.BUY else floor(ticks + 1e-12)
         return grid_ticks * self.config.tick_size
 
+    def _depth_impact_bps(self, *, order_quantity: float, available_quantity: float) -> float:
+        if available_quantity <= 0.0:
+            return float("inf")
+        participation = max(order_quantity / available_quantity, 0.0)
+        return self.config.depth_impact_bps_at_full_book * (
+            participation**self.config.depth_impact_exponent
+        )
+
     def simulate(self, request: SimulationRequest) -> SimulationResult:
         snapshot_time_valid, snapshot_time_reason = self._validate_snapshot_time(request)
         if not snapshot_time_valid:
@@ -135,6 +151,7 @@ class PaperSimulator:
         order = request.order
         snapshot = request.snapshot
         executable_price = snapshot.ask if order.side == Side.BUY else snapshot.bid
+        available_quantity = snapshot.ask_size if order.side == Side.BUY else snapshot.bid_size
 
         if order.side == Side.BUY and order.limit_price < executable_price:
             return SimulationResult(accepted=False, reason="buy limit below ask")
@@ -145,10 +162,15 @@ class PaperSimulator:
         latency_slippage_bps = (
             self.config.latency_slippage_bps_per_100ms * self.config.latency_ms / 100.0
         )
+        depth_impact_bps = self._depth_impact_bps(
+            order_quantity=order.quantity,
+            available_quantity=available_quantity,
+        )
         slippage_bps = (
             self.config.base_slippage_bps
             + max(spread_bps * 0.10, 0)
             + latency_slippage_bps
+            + depth_impact_bps
         )
         accepted, reason = self.risk.validate(request, slippage_bps)
         if not accepted:
