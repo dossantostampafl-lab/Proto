@@ -6,11 +6,11 @@ from collections.abc import Mapping
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .public_l2 import PublicL2Frame
+from .public_l2 import PublicL2Frame, parse_public_l2_message
 
 CORPUS_FORMAT_VERSION = "proto-public-l2-jsonl-v1"
 CORPUS_SCHEMA_VERSION = "coinbase-public-l2-normalized-v1"
@@ -23,8 +23,13 @@ class PublicL2CorpusError(RuntimeError):
 
 
 class PublicL2CorpusSink(Protocol):
-    def append(self, frame: PublicL2Frame, *, connection_generation: int) -> None:
-        """Append one validated public L2 frame to a research corpus."""
+    def append_message(
+        self,
+        message: str | bytes | dict[str, Any],
+        *,
+        connection_generation: int,
+    ) -> None:
+        """Append one validated public L2 wire message to a research corpus."""
 
 
 class PublicL2DatasetProvenance(BaseModel):
@@ -33,7 +38,7 @@ class PublicL2DatasetProvenance(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     source: str = CORPUS_SOURCE
     venue: str = CORPUS_VENUE
-    data_level: str = "L2"
+    data_level: Literal["L2"] = "L2"
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     schema_version: str = CORPUS_SCHEMA_VERSION
     symbols: tuple[str, ...] = Field(min_length=1)
@@ -41,6 +46,15 @@ class PublicL2DatasetProvenance(BaseModel):
     end_at: datetime
     event_count: int = Field(gt=0)
     quality: dict[str, object]
+
+    @model_validator(mode="after")
+    def validate_coverage(self) -> PublicL2DatasetProvenance:
+        for value in (self.start_at, self.end_at):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("public L2 dataset timestamps must be timezone-aware")
+        if self.start_at >= self.end_at:
+            raise ValueError("public L2 dataset start_at must be before end_at")
+        return self
 
 
 class PublicL2CorpusManifest(BaseModel):
@@ -137,6 +151,17 @@ class PublicL2CorpusWriter:
         self._handle.flush()
         os.fsync(self._handle.fileno())
 
+    def append_message(
+        self,
+        message: str | bytes | dict[str, Any],
+        *,
+        connection_generation: int,
+    ) -> None:
+        frame = parse_public_l2_message(message)
+        if frame is None:
+            return
+        self.append(frame, connection_generation=connection_generation)
+
     def append(self, frame: PublicL2Frame, *, connection_generation: int) -> None:
         if self.closed:
             raise PublicL2CorpusError("public L2 corpus writer is closed")
@@ -165,9 +190,9 @@ class PublicL2CorpusWriter:
         )
         record_hash = _record_hash(core)
         record = {**core, "record_hash": record_hash}
-        encoded = (_canonical_json(record) + "\n").encode()
-        self._handle.write(encoded.decode())
-        self._content_digest.update(encoded)
+        line = _canonical_json(record) + "\n"
+        self._handle.write(line)
+        self._content_digest.update(line.encode())
 
         self._frame_count += 1
         self._event_count += len(frame.events)
@@ -254,6 +279,8 @@ def verify_public_l2_corpus(
     except (OSError, ValueError) as error:
         raise PublicL2CorpusError("public L2 corpus artifacts cannot be read") from error
 
+    if manifest.corpus_file != corpus_path.name:
+        raise PublicL2CorpusError("public L2 corpus manifest filename mismatch")
     if sha256(raw).hexdigest() != manifest.dataset.content_sha256:
         raise PublicL2CorpusError("public L2 corpus content checksum mismatch")
 
