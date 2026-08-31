@@ -7,11 +7,13 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 
 from services.analytics.live_market import calculate_live_market_analytics
+from services.events.runtime import EventRuntime
 from services.market_data import (
     CoinbasePublicMarketDataAdapter,
     DataQualityIssue,
     DataQualityMonitor,
     LiveTickJournal,
+    MarketDataPipeline,
     MarketTick,
     PersistedLiveTickPage,
     PublicMarketDataAdapter,
@@ -39,9 +41,14 @@ class LiveCryptoMonitor:
         *,
         journal: LiveTickJournal | None = None,
         persistence_required: bool = False,
+        normalized_event_runtime: EventRuntime | None = None,
     ) -> None:
         self._adapter = adapter or CoinbasePublicMarketDataAdapter()
         self._quality = DataQualityMonitor(stale_after_seconds=_STALE_AFTER_SECONDS)
+        self._normalized_pipeline = MarketDataPipeline(
+            event_runtime=normalized_event_runtime,
+            quality_monitor=DataQualityMonitor(stale_after_seconds=_STALE_AFTER_SECONDS),
+        )
         self._persistence = LivePersistenceCoordinator(
             journal,
             required=persistence_required,
@@ -157,6 +164,7 @@ class LiveCryptoMonitor:
             "source": "PUBLIC_READ_ONLY",
             "feed_health": feed_health,
             "persistence": self.persistence_status(),
+            "normalized_pipeline": asdict(self._normalized_pipeline.snapshot()),
             "financial_connectivity": False,
             "real_money_execution": False,
             "expected_symbols": list(self._adapter.symbols),
@@ -238,6 +246,7 @@ class LiveCryptoMonitor:
             return
         self._connection_generation = generation
         self._quality.reset()
+        self._normalized_pipeline.reset()
         self._latest.clear()
         self._history.clear()
         self._received_at.clear()
@@ -284,6 +293,20 @@ class LiveCryptoMonitor:
             received_at=received_at,
             connection_generation=health.connection_generation,
         ):
+            metrics.increment("live_market_frames_rejected")
+            return False
+
+        try:
+            normalized = await self._normalized_pipeline.ingest(
+                tick,
+                received_at=received_at,
+            )
+        except Exception:
+            metrics.increment("live_market_normalized_pipeline_failures")
+            metrics.increment("live_market_frames_rejected")
+            return False
+        if normalized.duplicate:
+            metrics.increment("live_market_normalized_pipeline_duplicates")
             metrics.increment("live_market_frames_rejected")
             return False
 
@@ -348,4 +371,4 @@ class LiveCryptoMonitor:
         )
 
 
-live_monitor = LiveCryptoMonitor()
+live_monitor = LiveCryptoMonitor(normalized_event_runtime=event_runtime)
