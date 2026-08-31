@@ -118,12 +118,19 @@ class PaperSimulator:
         self.config = config or SimulationConfig()
         self.risk = RiskEngine()
 
-    def _validate_snapshot_time(self, request: SimulationRequest) -> tuple[bool, str]:
+    def _validate_snapshot_time(
+        self,
+        request: SimulationRequest,
+        *,
+        reference_time: datetime | None = None,
+    ) -> tuple[bool, str]:
         observed_at = request.snapshot.observed_at
         if observed_at.tzinfo is None or observed_at.utcoffset() is None:
             return False, "snapshot timestamp must be timezone-aware"
-        now = datetime.now(UTC)
-        age_seconds = (now - observed_at).total_seconds()
+        clock = reference_time or datetime.now(UTC)
+        if clock.tzinfo is None or clock.utcoffset() is None:
+            return False, "simulation reference timestamp must be timezone-aware"
+        age_seconds = (clock - observed_at).total_seconds()
         if age_seconds > self.config.max_snapshot_age_seconds:
             return False, "stale market snapshot"
         if age_seconds < -self.config.max_future_skew_seconds:
@@ -143,8 +150,16 @@ class PaperSimulator:
             participation**self.config.depth_impact_exponent
         )
 
-    def simulate(self, request: SimulationRequest) -> SimulationResult:
-        snapshot_time_valid, snapshot_time_reason = self._validate_snapshot_time(request)
+    def simulate(
+        self,
+        request: SimulationRequest,
+        *,
+        reference_time: datetime | None = None,
+    ) -> SimulationResult:
+        snapshot_time_valid, snapshot_time_reason = self._validate_snapshot_time(
+            request,
+            reference_time=reference_time,
+        )
         if not snapshot_time_valid:
             return SimulationResult(accepted=False, reason=snapshot_time_reason)
 
