@@ -39,6 +39,10 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
     history_reads: Mapping[str, object] = (
         history_raw if isinstance(history_raw, Mapping) else {}
     )
+    pipeline_raw = status.get("data_pipeline")
+    data_pipeline: Mapping[str, object] = (
+        pipeline_raw if isinstance(pipeline_raw, Mapping) else {}
+    )
     lines = [
         "# HELP proto_live_running Whether the read-only live monitor task is running.",
         "# TYPE proto_live_running gauge",
@@ -150,6 +154,18 @@ def render_live_prometheus(status: Mapping[str, object]) -> str:
         ("proto_live_history_disabled_total", "disabled_total"),
     ):
         _append_optional_gauge(lines, metric=metric, value=history_reads.get(key))
+
+    for metric, key in (
+        ("proto_live_pipeline_accepted_total", "accepted"),
+        ("proto_live_pipeline_duplicates_total", "duplicates"),
+        ("proto_live_pipeline_quality_rejections_total", "quality_rejections"),
+        ("proto_live_pipeline_publish_failures_total", "publish_failures"),
+        ("proto_live_pipeline_published_total", "published"),
+        ("proto_live_pipeline_tracked_event_ids", "tracked_event_ids"),
+        ("proto_live_pipeline_dedupe_capacity", "dedupe_capacity"),
+        ("proto_live_pipeline_tracked_markets", "tracked_markets"),
+    ):
+        _append_optional_gauge(lines, metric=metric, value=data_pipeline.get(key))
 
     symbol_health = status.get("symbol_health")
     expected_symbols = status.get("expected_symbols")
