@@ -99,6 +99,7 @@ def test_validation_experiment_is_deterministic_and_normalizes_provenance() -> N
     assert first_body["experiment_id"] == second_body["experiment_id"]
     assert first_body["dataset_fingerprint"] == second_body["dataset_fingerprint"]
     assert first_body["returns_fingerprint"] == second_body["returns_fingerprint"]
+    assert first_body["trial_family_fingerprint"] is None
     assert first_body["validation_result"] == second_body["validation_result"]
     assert len(first_body["experiment_id"]) == 64
     assert first_body["manifest"]["dataset"]["content_sha256"] == "a" * 64
@@ -152,6 +153,34 @@ def test_returns_are_evidence_not_part_of_experiment_identity() -> None:
         first_response.json()["returns_fingerprint"]
         != second_response.json()["returns_fingerprint"]
     )
+
+
+def test_trial_family_is_fingerprinted_as_validation_evidence() -> None:
+    without_family = _payload()
+    with_family = deepcopy(without_family)
+    with_family["validation"]["trial_returns"] = [RETURNS, RETURNS, RETURNS]
+
+    first_response = client.post(
+        "/research/validation/experiments/validate",
+        json=without_family,
+    )
+    second_response = client.post(
+        "/research/validation/experiments/validate",
+        json=with_family,
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    first_body = first_response.json()
+    second_body = second_response.json()
+    assert first_body["experiment_id"] == second_body["experiment_id"]
+    assert first_body["trial_family_fingerprint"] is None
+    assert len(second_body["trial_family_fingerprint"]) == 64
+    assert "trial_returns" not in second_body["validation_plan"]
+    assert second_body["validation_result"]["dsr_trials"] == 1
+    assert second_body["validation_result"]["trial_accounting"][
+        "effective_independent_trials"
+    ] == 1
 
 
 def test_dataset_requires_timezone_aware_bounds() -> None:

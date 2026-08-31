@@ -4,26 +4,27 @@ from apps.api.app.main import app
 
 client = TestClient(app)
 
+RETURNS = [
+    0.01,
+    -0.004,
+    0.012,
+    0.003,
+    -0.002,
+    0.009,
+    0.006,
+    -0.003,
+    0.008,
+    0.004,
+    -0.001,
+    0.007,
+]
+
 
 def test_validation_report_exposes_research_metrics_and_safety_invariants() -> None:
-    returns = [
-        0.01,
-        -0.004,
-        0.012,
-        0.003,
-        -0.002,
-        0.009,
-        0.006,
-        -0.003,
-        0.008,
-        0.004,
-        -0.001,
-        0.007,
-    ]
     response = client.post(
         "/research/validation/report",
         json={
-            "returns": returns,
+            "returns": RETURNS,
             "train_size": 6,
             "test_size": 3,
             "purge_size": 1,
@@ -45,11 +46,78 @@ def test_validation_report_exposes_research_metrics_and_safety_invariants() -> N
     assert response.status_code == 200
     assert body["fold_count"] >= 1
     assert 0.0 <= body["deflated_sharpe_ratio"] <= 1.0
+    assert body["dsr_trials"] == 20
+    assert body["trial_accounting"]["method"] == "declared_trials"
+    assert body["trial_accounting"]["effective_independent_trials"] == 20
     assert 0.0 <= body["monte_carlo"]["probability_of_loss"] <= 1.0
     assert body["regime"] is not None
     assert body["parameter_stability"] is not None
     assert body["financial_connectivity"] is False
     assert body["real_money_execution"] is False
+
+
+def test_validation_report_uses_correlation_adjusted_trial_burden_for_dsr() -> None:
+    response = client.post(
+        "/research/validation/report",
+        json={
+            "returns": RETURNS,
+            "train_size": 6,
+            "test_size": 3,
+            "trials": 99,
+            "trial_returns": [RETURNS, RETURNS, RETURNS],
+            "monte_carlo_simulations": 20,
+            "monte_carlo_block_size": 2,
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["dsr_trials"] == 1
+    assert body["trial_accounting"]["declared_trials"] == 3
+    assert body["trial_accounting"]["effective_independent_trials"] == 1
+    assert body["trial_accounting"]["average_pairwise_correlation"] == 1.0
+    assert body["trial_accounting"]["method"] == "average_pairwise_correlation"
+
+
+def test_effective_trials_endpoint_exposes_search_burden_and_safety_flags() -> None:
+    response = client.post(
+        "/research/validation/trials/effective",
+        json={"trial_returns": [RETURNS, RETURNS, RETURNS]},
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["trial_accounting"]["declared_trials"] == 3
+    assert body["trial_accounting"]["effective_independent_trials"] == 1
+    assert body["trial_accounting"]["pair_count"] == 3
+    assert body["financial_connectivity"] is False
+    assert body["real_money_execution"] is False
+
+
+def test_effective_trials_endpoint_rejects_unusable_correlation_evidence() -> None:
+    response = client.post(
+        "/research/validation/trials/effective",
+        json={"trial_returns": [RETURNS, [0.01] * len(RETURNS)]},
+    )
+
+    assert response.status_code == 422
+    assert "non-zero variance" in response.json()["detail"]
+
+
+def test_validation_report_rejects_trial_family_with_different_sample_length() -> None:
+    response = client.post(
+        "/research/validation/report",
+        json={
+            "returns": RETURNS,
+            "train_size": 6,
+            "test_size": 3,
+            "trial_returns": [RETURNS[:-1]],
+            "monte_carlo_simulations": 20,
+            "monte_carlo_block_size": 2,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_validation_report_serializes_infinite_ratio_metrics_as_null() -> None:
