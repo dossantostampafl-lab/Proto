@@ -13,6 +13,7 @@ from services.validation import (
     PromotionGateEvidence,
     PromotionGatePolicy,
     deflated_sharpe_ratio,
+    effective_number_of_trials,
     evaluate_promotion_gate,
     monte_carlo_block_bootstrap,
     parameter_stability,
@@ -53,6 +54,12 @@ def _aware(value: datetime) -> bool:
     return value.tzinfo is not None and value.utcoffset() is not None
 
 
+def _trial_matrix(
+    values: list[list[float]],
+) -> tuple[tuple[float, ...], ...]:
+    return tuple(tuple(item) for item in values)
+
+
 class ParameterPointRequest(BaseModel):
     parameter: float
     score: float
@@ -66,6 +73,7 @@ class ValidationRequest(BaseModel):
     embargo_size: int = Field(default=0, ge=0)
     step_size: int | None = Field(default=None, gt=0)
     trials: int = Field(default=1, gt=0)
+    trial_returns: list[list[float]] | None = None
     monte_carlo_simulations: int = Field(default=500, ge=10, le=20_000)
     monte_carlo_block_size: int = Field(default=2, gt=0)
     monte_carlo_seed: int = 7
@@ -81,7 +89,16 @@ class ValidationRequest(BaseModel):
             raise ValueError("monte_carlo_block_size must not exceed returns length")
         if self.parameter_points is not None and len(self.parameter_points) < 3:
             raise ValueError("parameter_points requires at least three points")
+        if self.trial_returns is not None:
+            if not self.trial_returns:
+                raise ValueError("trial_returns requires at least one trial")
+            if any(len(values) != len(self.returns) for values in self.trial_returns):
+                raise ValueError("trial_returns must have the same sample length as returns")
         return self
+
+
+class EffectiveTrialsRequest(BaseModel):
+    trial_returns: list[list[float]] = Field(min_length=1)
 
 
 class PboRequest(BaseModel):
@@ -315,6 +332,17 @@ class PromotionEvaluationRequest(BaseModel):
     policy: PromotionPolicyRequest = Field(default_factory=PromotionPolicyRequest)
 
 
+def _declared_trial_accounting(trials: int) -> dict[str, object]:
+    return {
+        "declared_trials": trials,
+        "implied_independent_trials": float(trials),
+        "effective_independent_trials": trials,
+        "average_pairwise_correlation": None,
+        "pair_count": None,
+        "method": "declared_trials",
+    }
+
+
 def run_validation_report(request: ValidationRequest) -> dict[str, object]:
     returns = tuple(request.returns)
     try:
@@ -333,7 +361,17 @@ def run_validation_report(request: ValidationRequest) -> dict[str, object]:
             block_size=request.monte_carlo_block_size,
             seed=request.monte_carlo_seed,
         )
-        dsr = deflated_sharpe_ratio(returns, trials=request.trials)
+        trial_report = (
+            effective_number_of_trials(_trial_matrix(request.trial_returns))
+            if request.trial_returns is not None
+            else None
+        )
+        dsr_trials = (
+            trial_report.effective_independent_trials
+            if trial_report is not None
+            else request.trials
+        )
+        dsr = deflated_sharpe_ratio(returns, trials=dsr_trials)
         regime_report = (
             regime_robustness(returns, tuple(request.regimes))
             if request.regimes is not None
@@ -355,6 +393,8 @@ def run_validation_report(request: ValidationRequest) -> dict[str, object]:
         raise _unprocessable(error) from error
 
     metrics.increment("validation_report_requests")
+    if trial_report is not None:
+        metrics.increment("validation_effective_trial_evidence_used")
     return {
         "fold_count": len(folds),
         "performance": _json_safe(report.metrics),
@@ -363,6 +403,12 @@ def run_validation_report(request: ValidationRequest) -> dict[str, object]:
         "median_fold_return": report.median_fold_return,
         "robustness_score": report.robustness_score,
         "deflated_sharpe_ratio": dsr,
+        "dsr_trials": dsr_trials,
+        "trial_accounting": (
+            _json_safe(trial_report)
+            if trial_report is not None
+            else _declared_trial_accounting(request.trials)
+        ),
         "monte_carlo": _json_safe(monte_carlo),
         "regime": _json_safe(regime_report) if regime_report is not None else None,
         "parameter_stability": (
@@ -376,6 +422,22 @@ def run_validation_report(request: ValidationRequest) -> dict[str, object]:
 @router.post("/report")
 def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
     return run_validation_report(request)
+
+
+@router.post("/trials/effective")
+def effective_trials_endpoint(request: EffectiveTrialsRequest) -> dict[str, object]:
+    try:
+        report = effective_number_of_trials(_trial_matrix(request.trial_returns))
+    except ValueError as error:
+        metrics.increment("validation_effective_trials_rejected")
+        raise _unprocessable(error) from error
+
+    metrics.increment("validation_effective_trials_requests")
+    return {
+        "trial_accounting": _json_safe(report),
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
 
 
 @router.post("/pbo")
@@ -464,7 +526,10 @@ async def validate_experiment(
     request: ExperimentValidationRequest,
 ) -> dict[str, object]:
     manifest = request.manifest.model_dump(mode="json")
-    validation_plan = request.validation.model_dump(mode="json", exclude={"returns"})
+    validation_plan = request.validation.model_dump(
+        mode="json",
+        exclude={"returns", "trial_returns"},
+    )
     try:
         dataset_fingerprint = stable_fingerprint(manifest["dataset"])
         experiment_id = stable_fingerprint(
@@ -474,6 +539,11 @@ async def validate_experiment(
             }
         )
         returns_fingerprint = stable_fingerprint({"returns": request.validation.returns})
+        trial_family_fingerprint = (
+            stable_fingerprint({"trial_returns": request.validation.trial_returns})
+            if request.validation.trial_returns is not None
+            else None
+        )
     except ValueError as error:
         metrics.increment("research_experiment_rejected")
         raise _unprocessable(error) from error
@@ -483,6 +553,7 @@ async def validate_experiment(
         "manifest": manifest,
         "validation_plan": validation_plan,
         "returns_fingerprint": returns_fingerprint,
+        "trial_family_fingerprint": trial_family_fingerprint,
         "validation_result": validation_result,
     }
     try:
@@ -502,6 +573,7 @@ async def validate_experiment(
         "experiment_id": experiment_id,
         "dataset_fingerprint": dataset_fingerprint,
         "returns_fingerprint": returns_fingerprint,
+        "trial_family_fingerprint": trial_family_fingerprint,
         "manifest": manifest,
         "validation_plan": validation_plan,
         "validation_result": validation_result,
