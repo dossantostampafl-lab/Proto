@@ -74,7 +74,7 @@ def test_authoritative_policy_uses_canonical_position_when_client_underreports()
             "positions": [{"asset": "BTC", "quantity": 0.3}],
             "gross_exposure": 42_000.0,
             "exposure_by_asset": {"BTC": 18_000.0, "ETH": 24_000.0},
-            "total_pnl_after_fees": -6_000.0,
+            "realized_drawdown": 6_000.0,
         },
         max_order_notional=10_000.0,
         max_position_notional=25_000.0,
@@ -92,13 +92,29 @@ def test_authoritative_policy_ignores_client_drawdown_spoofing() -> None:
     request = _request().model_copy(update={"current_drawdown": 0.0})
     effective = authoritative_simulation_request(
         request,
-        {"positions": [], "total_pnl_after_fees": -7_500.0},
+        {"positions": [], "realized_drawdown": 7_500.0},
         max_order_notional=10_000.0,
         max_position_notional=25_000.0,
         max_slippage_bps=75.0,
     )
 
     assert effective.current_drawdown == 7_500.0
+
+
+def test_authoritative_policy_does_not_treat_loss_from_zero_as_peak_drawdown() -> None:
+    effective = authoritative_simulation_request(
+        _request(),
+        {
+            "positions": [],
+            "total_pnl_after_fees": -7_500.0,
+            "realized_drawdown": 2_000.0,
+        },
+        max_order_notional=10_000.0,
+        max_position_notional=25_000.0,
+        max_slippage_bps=75.0,
+    )
+
+    assert effective.current_drawdown == 2_000.0
 
 
 def test_authoritative_policy_preserves_stricter_client_limits() -> None:

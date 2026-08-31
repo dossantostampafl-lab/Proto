@@ -35,8 +35,7 @@ def authoritative_simulation_request(
         canonical_asset_exposure = float(
             exposure_by_asset.get(request.order.asset.value, 0.0)
         )
-    canonical_total_pnl = float(portfolio_snapshot.get("total_pnl_after_fees", 0.0))
-    canonical_drawdown = max(-canonical_total_pnl, 0.0)
+    canonical_drawdown = float(portfolio_snapshot.get("realized_drawdown", 0.0))
 
     requested_limits = request.limits
     effective_limits = RiskLimits(
