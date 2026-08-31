@@ -14,7 +14,7 @@ def authoritative_simulation_request(
     """Apply server-side simulation risk authority without blocking stricter client limits."""
 
     mid_price = (request.snapshot.bid + request.snapshot.ask) / 2.0
-    canonical_position_notional = 0.0
+    canonical_position_quantity = 0.0
     positions = portfolio_snapshot.get("positions", [])
     if isinstance(positions, list):
         for position in positions:
@@ -22,10 +22,10 @@ def authoritative_simulation_request(
                 continue
             if str(position.get("asset")) != request.order.asset.value:
                 continue
-            quantity = float(position.get("quantity", 0.0))
-            canonical_position_notional = abs(quantity) * mid_price
+            canonical_position_quantity = float(position.get("quantity", 0.0))
             break
 
+    canonical_position_notional = abs(canonical_position_quantity) * mid_price
     requested_limits = request.limits
     effective_limits = RiskLimits(
         max_order_notional=min(requested_limits.max_order_notional, max_order_notional),
@@ -37,10 +37,8 @@ def authoritative_simulation_request(
     )
     return request.model_copy(
         update={
-            "current_position_notional": max(
-                request.current_position_notional,
-                canonical_position_notional,
-            ),
+            "current_position_notional": canonical_position_notional,
+            "current_position_quantity": canonical_position_quantity,
             "limits": effective_limits,
         }
     )

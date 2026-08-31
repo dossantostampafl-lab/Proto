@@ -20,12 +20,18 @@ class RiskEngine:
         request: SimulationRequest,
         estimated_slippage_bps: float,
     ) -> tuple[bool, str]:
-        notional = request.order.quantity * request.order.limit_price
+        order_notional = request.order.quantity * request.order.limit_price
+        signed_order_quantity = (
+            request.order.quantity if request.order.side == Side.BUY else -request.order.quantity
+        )
+        projected_quantity = request.current_position_quantity + signed_order_quantity
+        projected_position_notional = abs(projected_quantity) * request.order.limit_price
+
         if request.order.market_id != request.snapshot.market_id:
             return False, "market mismatch"
-        if notional > request.limits.max_order_notional:
+        if order_notional > request.limits.max_order_notional:
             return False, "max order notional exceeded"
-        if request.current_position_notional + notional > request.limits.max_position_notional:
+        if projected_position_notional > request.limits.max_position_notional:
             return False, "max position notional exceeded"
         if estimated_slippage_bps > request.limits.max_slippage_bps:
             return False, "max slippage exceeded"
