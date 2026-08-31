@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.quant.pipeline import QuantPipelineResult
+from services.validation.experiments import stable_fingerprint
 from services.validation.l2_evidence import L2BaselineExperimentEvidence
 
 from .schema_registry import CANONICAL_TABLES
@@ -225,6 +226,57 @@ async def persist_research_experiment(
             "experiment identity collision: persisted payload differs"
         ) from error
     return True
+
+
+async def persist_model_promotion_decision(
+    engine: AsyncEngine | None,
+    *,
+    experiment_id: str,
+    decision_fingerprint: str,
+    payload: dict[str, object],
+) -> tuple[str, bool]:
+    """Append one immutable model-promotion decision linked to an experiment.
+
+    Promotion records use a namespaced deterministic identity so they never reuse
+    the experiment primary key. Re-evaluating the same evidence/policy is
+    idempotent, while any payload mismatch for the same deterministic identity
+    fails closed.
+    """
+    promotion_id = stable_fingerprint(
+        {
+            "record_type": "model_promotion_decision",
+            "experiment_id": experiment_id,
+            "decision_fingerprint": decision_fingerprint,
+        }
+    )
+    if engine is None:
+        return promotion_id, False
+
+    table = CANONICAL_TABLES["research_experiments"]
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                insert(table).values(
+                    id=promotion_id,
+                    created_at=datetime.now(UTC),
+                    correlation_id=experiment_id,
+                    payload=payload,
+                )
+            )
+    except IntegrityError as error:
+        async with engine.connect() as connection:
+            existing = await connection.execute(
+                select(table.c.payload).where(table.c.id == promotion_id)
+            )
+            existing_payload = existing.scalar_one_or_none()
+        if existing_payload is None:
+            raise
+        if existing_payload == payload:
+            return promotion_id, True
+        raise RuntimeError(
+            "promotion identity collision: persisted payload differs"
+        ) from error
+    return promotion_id, True
 
 
 async def persist_l2_baseline_evidence(
