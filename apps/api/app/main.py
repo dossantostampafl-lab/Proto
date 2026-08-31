@@ -333,10 +333,22 @@ async def simulation_stop() -> RuntimeState:
 
 @app.post("/simulation/reset", response_model=RuntimeState)
 async def simulation_reset() -> RuntimeState:
+    if persistent_journal is not None:
+        try:
+            await persistent_journal.start_new_session()
+        except Exception as error:
+            metrics.increment("simulation_session_reset_failures")
+            logger.exception("simulation session rotation failed")
+            raise HTTPException(
+                status_code=503,
+                detail="simulation persistence unavailable",
+            ) from error
+
     reset_runtime_state()
     replay_session.reset()
     portfolio.reset()
     metrics.reset()
+    metrics.increment("simulation_session_resets")
     await hub.broadcast("portfolio", {"type": "portfolio", "data": portfolio.snapshot()})
     await hub.broadcast(
         "analytics",
