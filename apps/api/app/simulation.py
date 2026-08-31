@@ -44,9 +44,8 @@ class RiskEngine:
             executable_book_notional = request.snapshot.ask * request.snapshot.ask_size
         else:
             executable_book_notional = request.snapshot.bid * request.snapshot.bid_size
-        max_book_supported_notional = (
-            executable_book_notional * request.limits.max_order_to_book_ratio
-        )
+        allowed_book_ratio = 1.0 if risk_reducing else request.limits.max_order_to_book_ratio
+        max_book_supported_notional = executable_book_notional * allowed_book_ratio
 
         if not request.server_execution_permitted:
             return False, "simulation mode does not permit execution"
