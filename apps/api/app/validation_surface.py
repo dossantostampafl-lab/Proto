@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from math import isfinite
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from services.validation import (
@@ -32,6 +32,10 @@ def _json_safe(value: object) -> object:
     if isinstance(value, float) and not isfinite(value):
         return None
     return value
+
+
+def _unprocessable(error: ValueError) -> HTTPException:
+    return HTTPException(status_code=422, detail=str(error))
 
 
 class ParameterPointRequest(BaseModel):
@@ -85,37 +89,42 @@ class PboRequest(BaseModel):
 @router.post("/report")
 def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
     returns = tuple(request.returns)
-    folds = purged_walk_forward_splits(
-        len(returns),
-        train_size=request.train_size,
-        test_size=request.test_size,
-        purge_size=request.purge_size,
-        embargo_size=request.embargo_size,
-        step_size=request.step_size,
-    )
-    report = validation_report(returns, folds)
-    monte_carlo = monte_carlo_block_bootstrap(
-        returns,
-        simulations=request.monte_carlo_simulations,
-        block_size=request.monte_carlo_block_size,
-        seed=request.monte_carlo_seed,
-    )
-    regime_report = (
-        regime_robustness(returns, tuple(request.regimes))
-        if request.regimes is not None
-        else None
-    )
-    stability_report = (
-        parameter_stability(
-            tuple(
-                ParameterPoint(parameter=item.parameter, score=item.score)
-                for item in request.parameter_points
-            ),
-            relative_tolerance=request.parameter_relative_tolerance,
+    try:
+        folds = purged_walk_forward_splits(
+            len(returns),
+            train_size=request.train_size,
+            test_size=request.test_size,
+            purge_size=request.purge_size,
+            embargo_size=request.embargo_size,
+            step_size=request.step_size,
         )
-        if request.parameter_points is not None
-        else None
-    )
+        report = validation_report(returns, folds)
+        monte_carlo = monte_carlo_block_bootstrap(
+            returns,
+            simulations=request.monte_carlo_simulations,
+            block_size=request.monte_carlo_block_size,
+            seed=request.monte_carlo_seed,
+        )
+        dsr = deflated_sharpe_ratio(returns, trials=request.trials)
+        regime_report = (
+            regime_robustness(returns, tuple(request.regimes))
+            if request.regimes is not None
+            else None
+        )
+        stability_report = (
+            parameter_stability(
+                tuple(
+                    ParameterPoint(parameter=item.parameter, score=item.score)
+                    for item in request.parameter_points
+                ),
+                relative_tolerance=request.parameter_relative_tolerance,
+            )
+            if request.parameter_points is not None
+            else None
+        )
+    except ValueError as error:
+        metrics.increment("validation_report_rejected")
+        raise _unprocessable(error) from error
 
     metrics.increment("validation_report_requests")
     return {
@@ -125,7 +134,7 @@ def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
         "worst_fold_return": report.worst_fold_return,
         "median_fold_return": report.median_fold_return,
         "robustness_score": report.robustness_score,
-        "deflated_sharpe_ratio": deflated_sharpe_ratio(returns, trials=request.trials),
+        "deflated_sharpe_ratio": dsr,
         "monte_carlo": _json_safe(monte_carlo),
         "regime": _json_safe(regime_report) if regime_report is not None else None,
         "parameter_stability": (
@@ -138,12 +147,18 @@ def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
 
 @router.post("/pbo")
 def pbo_endpoint(request: PboRequest) -> dict[str, object]:
-    metrics.increment("validation_pbo_requests")
-    return {
-        "probability_of_backtest_overfitting": probability_of_backtest_overfitting(
+    try:
+        pbo = probability_of_backtest_overfitting(
             tuple(tuple(values) for values in request.strategy_returns),
             segments=request.segments,
-        ),
+        )
+    except ValueError as error:
+        metrics.increment("validation_pbo_rejected")
+        raise _unprocessable(error) from error
+
+    metrics.increment("validation_pbo_requests")
+    return {
+        "probability_of_backtest_overfitting": pbo,
         "strategy_count": len(request.strategy_returns),
         "financial_connectivity": False,
         "real_money_execution": False,
