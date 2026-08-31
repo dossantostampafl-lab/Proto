@@ -24,11 +24,32 @@ class Settings(BaseSettings):
     max_position: float = Field(default=10.0, gt=0.0, allow_inf_nan=False)
     max_notional: float = Field(default=100_000.0, gt=0.0, allow_inf_nan=False)
     max_daily_drawdown: float = Field(default=5_000.0, gt=0.0, allow_inf_nan=False)
-    simulation_max_order_notional: float = Field(default=10_000.0, gt=0.0, allow_inf_nan=False)
-    simulation_max_position_notional: float = Field(default=25_000.0, gt=0.0, allow_inf_nan=False)
-    simulation_max_slippage_bps: float = Field(default=75.0, ge=0.0, allow_inf_nan=False)
-    simulation_max_gross_exposure: float = Field(default=75_000.0, gt=0.0, allow_inf_nan=False)
-    simulation_max_asset_concentration: float = Field(default=0.80, gt=0.0, le=1.0, allow_inf_nan=False)
+    simulation_max_order_notional: float = Field(
+        default=10_000.0,
+        gt=0.0,
+        allow_inf_nan=False,
+    )
+    simulation_max_position_notional: float = Field(
+        default=25_000.0,
+        gt=0.0,
+        allow_inf_nan=False,
+    )
+    simulation_max_slippage_bps: float = Field(
+        default=75.0,
+        ge=0.0,
+        allow_inf_nan=False,
+    )
+    simulation_max_gross_exposure: float = Field(
+        default=75_000.0,
+        gt=0.0,
+        allow_inf_nan=False,
+    )
+    simulation_max_asset_concentration: float = Field(
+        default=0.80,
+        gt=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
 
     @field_validator("system_mode")
     @classmethod
