@@ -48,12 +48,14 @@ from .public_l2 import (
     PublicL2Update,
     parse_public_l2_message,
 )
+from .public_l2_live import CoinbasePublicL2StreamAdapter, PublicL2StreamHealth
 
 __all__ = [
     "BinaryContractSnapshot",
     "BookLevel",
     "CSVReplayAdapter",
     "Candle",
+    "CoinbasePublicL2StreamAdapter",
     "CoinbasePublicMarketDataAdapter",
     "DataQualityIssue",
     "DataQualityMonitor",
@@ -81,6 +83,7 @@ __all__ = [
     "PublicL2Event",
     "PublicL2Frame",
     "PublicL2IntegrityError",
+    "PublicL2StreamHealth",
     "PublicL2Update",
     "PublicMarketDataAdapter",
     "ResearchAsset",
