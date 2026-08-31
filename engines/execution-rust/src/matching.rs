@@ -31,6 +31,12 @@ pub struct LimitIntent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PriceCollar {
+    pub reference_price: Decimal,
+    pub max_deviation_bps: Decimal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MatchState {
     Resting,
     PartiallyFilled,
@@ -53,6 +59,38 @@ pub enum MatchError {
     InvalidInput,
     #[error("book must not be crossed")]
     CrossedBook,
+    #[error("price collar requires positive reference price and non-negative deviation")]
+    InvalidPriceCollar,
+    #[error("limit price exceeds configured execution price collar")]
+    PriceOutsideCollar,
+}
+
+pub fn validate_price_collar(intent: LimitIntent, collar: PriceCollar) -> Result<(), MatchError> {
+    if collar.reference_price <= Decimal::ZERO || collar.max_deviation_bps < Decimal::ZERO {
+        return Err(MatchError::InvalidPriceCollar);
+    }
+    if intent.limit_price <= Decimal::ZERO {
+        return Err(MatchError::InvalidInput);
+    }
+
+    let ten_thousand = Decimal::new(10_000, 0);
+    let deviation_bps = ((intent.limit_price - collar.reference_price).abs()
+        / collar.reference_price)
+        * ten_thousand;
+
+    if deviation_bps > collar.max_deviation_bps {
+        return Err(MatchError::PriceOutsideCollar);
+    }
+    Ok(())
+}
+
+pub fn match_limit_with_collar(
+    intent: LimitIntent,
+    book: TopOfBook,
+    collar: PriceCollar,
+) -> Result<MatchOutcome, MatchError> {
+    validate_price_collar(intent, collar)?;
+    match_limit(intent, book)
 }
 
 pub fn match_limit(intent: LimitIntent, book: TopOfBook) -> Result<MatchOutcome, MatchError> {
@@ -198,5 +236,57 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.state, MatchState::Filled);
         assert_eq!(outcome.fill_price, Some(Decimal::new(99, 2)));
+    }
+
+    #[test]
+    fn price_collar_accepts_limit_inside_threshold() {
+        let result = validate_price_collar(
+            LimitIntent {
+                side: Side::Buy,
+                limit_price: Decimal::new(101, 2),
+                quantity: Decimal::ONE,
+                time_in_force: TimeInForce::Gtc,
+            },
+            PriceCollar {
+                reference_price: Decimal::ONE,
+                max_deviation_bps: Decimal::new(150, 0),
+            },
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn price_collar_rejects_extreme_limit_before_matching() {
+        let result = match_limit_with_collar(
+            LimitIntent {
+                side: Side::Buy,
+                limit_price: Decimal::new(120, 2),
+                quantity: Decimal::ONE,
+                time_in_force: TimeInForce::Gtc,
+            },
+            book(),
+            PriceCollar {
+                reference_price: Decimal::ONE,
+                max_deviation_bps: Decimal::new(500, 0),
+            },
+        );
+        assert_eq!(result, Err(MatchError::PriceOutsideCollar));
+    }
+
+    #[test]
+    fn price_collar_rejects_invalid_configuration() {
+        let result = validate_price_collar(
+            LimitIntent {
+                side: Side::Sell,
+                limit_price: Decimal::ONE,
+                quantity: Decimal::ONE,
+                time_in_force: TimeInForce::Gtc,
+            },
+            PriceCollar {
+                reference_price: Decimal::ZERO,
+                max_deviation_bps: Decimal::new(100, 0),
+            },
+        );
+        assert_eq!(result, Err(MatchError::InvalidPriceCollar));
     }
 }
