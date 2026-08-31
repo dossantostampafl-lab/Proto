@@ -1,19 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import datetime
 
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from .calibration import (
-    CalibrationObservation,
-    brier_score,
-    calibration_error,
-    log_loss,
-    reliability_curve,
-)
+from services.quant.calibration import calibration_report
+
 from .circuit_surface import router as circuit_router
 from .event_surface import router as event_router
 from .lifecycle import router as lifecycle_router
@@ -55,21 +49,29 @@ class ReplayRequest(BaseModel):
 
 @router.post("/research/calibration")
 def calibration(request: CalibrationRequest) -> dict[str, object]:
-    observations = [
-        CalibrationObservation(probability=item.probability, outcome=item.outcome)
-        for item in request.observations
-    ]
-    curve = reliability_curve(observations, request.bins)
+    report = calibration_report(
+        [(item.probability, item.outcome) for item in request.observations],
+        bin_count=request.bins,
+    )
     metrics.increment("calibration_requests")
     return {
-        "count": len(observations),
-        "brier_score": round(brier_score(observations), 12),
-        "log_loss": round(log_loss(observations), 12),
-        "expected_calibration_error": round(
-            calibration_error(observations, request.bins),
-            12,
-        ),
-        "reliability_curve": [asdict(bucket) for bucket in curve],
+        "count": report.count,
+        "brier_score": round(report.brier_score, 12),
+        "log_loss": round(report.log_loss, 12),
+        "expected_calibration_error": round(report.expected_calibration_error, 12),
+        "maximum_calibration_error": round(report.maximum_calibration_error, 12),
+        "reliability_curve": [
+            {
+                "lower_bound": bucket.lower,
+                "upper_bound": bucket.upper,
+                "count": bucket.count,
+                "mean_prediction": bucket.mean_probability,
+                "observed_frequency": bucket.observed_frequency,
+                "absolute_gap": bucket.calibration_error,
+            }
+            for bucket in report.bins
+            if bucket.count > 0
+        ],
     }
 
 
