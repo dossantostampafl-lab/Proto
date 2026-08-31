@@ -142,14 +142,12 @@ pub fn estimate_fill(input: &FillModelInput) -> Result<FillEstimate, FillModelEr
     let latency_penalty = one / (one + Decimal::from(input.latency_ms) / thousand);
     let spread_penalty = one / (one + input.spread_bps / hundred);
 
-    let probability = (
-        queue_penalty
-            * volume_ratio
-            * intensity_score
-            * latency_penalty
-            * spread_penalty
-            * (Decimal::new(7, 1) + Decimal::new(3, 1) * hawkes_score)
-    )
+    let probability = (queue_penalty
+        * volume_ratio
+        * intensity_score
+        * latency_penalty
+        * spread_penalty
+        * (Decimal::new(7, 1) + Decimal::new(3, 1) * hawkes_score))
         .clamp(Decimal::ZERO, one);
 
     let expected_fill_quantity = input.order_size * probability;
