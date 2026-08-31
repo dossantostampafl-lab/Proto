@@ -25,6 +25,7 @@ from .replay import HistoricalReplay, ReplayFrame
 from .research_persistence import persist_quant_lineage
 from .safety_surface import router as safety_router
 from .surface import router as surface_router
+from .validation_surface import router as validation_router
 from .websockets import hub
 
 router = APIRouter(tags=["research"])
@@ -34,6 +35,7 @@ router.include_router(safety_router)
 router.include_router(circuit_router)
 router.include_router(event_router)
 router.include_router(live_router)
+router.include_router(validation_router)
 
 
 class CalibrationPoint(BaseModel):
