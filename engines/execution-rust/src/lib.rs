@@ -1,3 +1,5 @@
+pub mod matching;
+
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
@@ -113,8 +115,6 @@ impl SimulatedOrder {
         } else {
             OrderState::PartiallyFilled
         };
-        // Validate and commit the lifecycle transition before changing fill accounting.
-        // This keeps the operation atomic when a fill arrives in an invalid state.
         self.transition(next)?;
         self.filled_quantity += quantity;
         Ok(())
