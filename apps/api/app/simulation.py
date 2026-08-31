@@ -40,6 +40,13 @@ class RiskEngine:
             if projected_gross_exposure > 0.0
             else 0.0
         )
+        if request.order.side == Side.BUY:
+            executable_book_notional = request.snapshot.ask * request.snapshot.ask_size
+        else:
+            executable_book_notional = request.snapshot.bid * request.snapshot.bid_size
+        max_book_supported_notional = (
+            executable_book_notional * request.limits.max_order_to_book_ratio
+        )
 
         if not request.server_execution_permitted:
             return False, "simulation mode does not permit execution"
@@ -49,6 +56,10 @@ class RiskEngine:
             return False, "max order notional exceeded"
         if request.current_drawdown >= request.limits.max_drawdown and not risk_reducing:
             return False, "max drawdown exceeded"
+        if request.snapshot.volatility > request.limits.max_volatility and not risk_reducing:
+            return False, "max volatility exceeded"
+        if order_notional > max_book_supported_notional:
+            return False, "insufficient top-of-book liquidity"
         if projected_position_notional > request.limits.max_position_notional:
             return False, "max position notional exceeded"
         if projected_gross_exposure > request.limits.max_gross_exposure:
