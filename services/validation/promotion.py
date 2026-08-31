@@ -87,6 +87,8 @@ class PromotionGateEvidence:
     def __post_init__(self) -> None:
         if not self.experiment_id.strip():
             raise ValueError("experiment_id must not be blank")
+        if self.candidate_kind not in ("CONTROL", "ALPHA_CANDIDATE"):
+            raise ValueError("candidate_kind must be CONTROL or ALPHA_CANDIDATE")
         if self.oos_sample_count < 0:
             raise ValueError("oos_sample_count must be non-negative")
         if self.validation_fold_count < 0:
@@ -248,7 +250,11 @@ def _candidate_checks(
             evidence.probability_of_backtest_overfitting,
             policy.max_probability_of_backtest_overfitting,
         ),
-        _maximum_check("max_drawdown", evidence.max_drawdown, policy.max_drawdown),
+        _maximum_check(
+            "max_drawdown",
+            evidence.max_drawdown,
+            policy.max_drawdown,
+        ),
         _maximum_check(
             "monte_carlo_probability_of_loss",
             evidence.monte_carlo_probability_of_loss,
