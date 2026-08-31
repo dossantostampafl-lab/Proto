@@ -14,9 +14,9 @@ from services.replay import ReplaySession
 from .contracts import OrderBookSnapshot
 from .live import (
     _COINBASE_PUBLIC_WS,
+    PublicFeedTimeoutError,
     _receive_with_timeout,
     _validate_public_endpoint,
-    PublicFeedTimeoutError,
 )
 from .public_feed_parser import MAX_PUBLIC_FRAME_BYTES, SUPPORTED_PUBLIC_PRODUCTS
 from .public_l2 import PublicL2Book, PublicL2IntegrityError
