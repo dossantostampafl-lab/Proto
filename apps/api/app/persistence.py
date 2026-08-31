@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, Integer, String, select, text
@@ -8,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .models import Fill, SimulationOrder
+from .portfolio import PaperPortfolio
+from .portfolio_recovery import recover_paper_portfolio
 from .schema_registry import canonical_metadata
 
 
@@ -43,6 +46,14 @@ class SimulationFillRecord(Base):
         }
 
 
+_recovery_target: PaperPortfolio | None = None
+
+
+def register_portfolio_recovery_target(portfolio: PaperPortfolio) -> None:
+    global _recovery_target
+    _recovery_target = portfolio
+
+
 def build_engine(database_url: str) -> AsyncEngine:
     return create_async_engine(database_url, pool_pre_ping=True)
 
@@ -51,6 +62,10 @@ async def init_database(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await connection.run_sync(canonical_metadata.create_all)
+
+    if _recovery_target is not None:
+        journal = AsyncSqlFillJournal(engine)
+        await recover_paper_portfolio(_recovery_target, journal.iter_chronological())
 
 
 async def database_ready(engine: AsyncEngine) -> bool:
@@ -102,3 +117,14 @@ class AsyncSqlFillJournal:
                 .limit(safe_limit)
             )
             return [record.as_dict() for record in result.all()]
+
+    async def iter_chronological(self) -> AsyncIterator[dict[str, object]]:
+        async with self.session_factory() as session:
+            stream = await session.stream_scalars(
+                select(SimulationFillRecord).order_by(
+                    SimulationFillRecord.filled_at.asc(),
+                    SimulationFillRecord.id.asc(),
+                )
+            )
+            async for record in stream:
+                yield record.as_dict()

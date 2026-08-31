@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from .models import RuntimeState
-from .persistence import AsyncSqlFillJournal, build_engine
+from .persistence import (
+    AsyncSqlFillJournal,
+    build_engine,
+    register_portfolio_recovery_target,
+)
 from .portfolio import PaperPortfolio
 from .replay import ReplaySession
 from .settings import settings
@@ -14,6 +18,7 @@ persistent_journal = (
 runtime = RuntimeState()
 simulator = PaperSimulator()
 portfolio = PaperPortfolio()
+register_portfolio_recovery_target(portfolio)
 replay_session = ReplaySession()
 
 
