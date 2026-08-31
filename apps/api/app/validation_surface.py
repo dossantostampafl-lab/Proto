@@ -25,7 +25,10 @@ from services.validation.experiments import stable_fingerprint
 
 from .app_state import persistence_engine
 from .metrics_state import metrics
-from .research_persistence import persist_research_experiment
+from .research_persistence import (
+    persist_model_promotion_decision,
+    persist_research_experiment,
+)
 
 router = APIRouter(prefix="/research/validation", tags=["research", "validation"])
 
@@ -192,7 +195,7 @@ class ExperimentValidationRequest(BaseModel):
 
 
 class PromotionEvidenceRequest(BaseModel):
-    experiment_id: str = Field(min_length=1, max_length=128)
+    experiment_id: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     candidate_kind: Literal["CONTROL", "ALPHA_CANDIDATE"]
     oos_sample_count: int = Field(ge=0)
     validation_fold_count: int = Field(ge=0)
@@ -239,6 +242,11 @@ class PromotionEvidenceRequest(BaseModel):
         default=None,
         allow_inf_nan=False,
     )
+
+    @field_validator("experiment_id")
+    @classmethod
+    def normalize_experiment_id(cls, value: str) -> str:
+        return value.lower()
 
 
 class PromotionPolicyRequest(BaseModel):
@@ -391,7 +399,7 @@ def pbo_endpoint(request: PboRequest) -> dict[str, object]:
 
 
 @router.post("/promotion/evaluate")
-def promotion_evaluate_endpoint(
+async def promotion_evaluate_endpoint(
     request: PromotionEvaluationRequest,
 ) -> dict[str, object]:
     try:
@@ -410,18 +418,44 @@ def promotion_evaluate_endpoint(
     else:
         metrics.increment("model_promotion_research_only")
 
-    return {
+    decision_payload: dict[str, object] = {
         "experiment_id": decision.experiment_id,
         "status": decision.status,
         "promotion_eligible": decision.promotion_eligible,
         "checks": _json_safe(decision.checks),
         "failed_checks": list(decision.failed_checks),
         "decision_fingerprint": decision.decision_fingerprint,
-        "policy": request.policy.model_dump(mode="json"),
         "paper_trading_only": decision.paper_trading_only,
         "live_execution_eligible": decision.live_execution_eligible,
         "financial_connectivity": decision.financial_connectivity,
         "real_money_execution": decision.real_money_execution,
+    }
+    persistence_payload: dict[str, object] = {
+        "record_type": "model_promotion_decision",
+        "experiment_id": decision.experiment_id,
+        "evidence": request.evidence.model_dump(mode="json"),
+        "policy": request.policy.model_dump(mode="json"),
+        "decision": decision_payload,
+    }
+    try:
+        promotion_record_id, persisted = await persist_model_promotion_decision(
+            persistence_engine,
+            experiment_id=decision.experiment_id,
+            decision_fingerprint=decision.decision_fingerprint,
+            payload=persistence_payload,
+        )
+    except RuntimeError as error:
+        metrics.increment("model_promotion_collision")
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    if persisted:
+        metrics.increment("model_promotion_persisted")
+
+    return {
+        **decision_payload,
+        "policy": request.policy.model_dump(mode="json"),
+        "promotion_record_id": promotion_record_id,
+        "persisted": persisted,
     }
 
 
