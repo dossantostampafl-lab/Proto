@@ -20,13 +20,28 @@ type Position = {
   fees: number;
 };
 
+type ExecutionCosts = {
+  fees: number;
+  slippage: number;
+  total: number;
+};
+
 type Portfolio = {
   mode: string;
   positions: Position[];
+  open_position_count: number;
+  gross_exposure: number;
+  net_exposure: number;
+  max_asset_concentration: number;
+  exposure_by_asset: Record<string, number>;
   total_realized_pnl: number;
   total_unrealized_pnl: number;
   total_pnl_after_fees: number;
   total_fees: number;
+  realized_pnl_high_watermark: number;
+  realized_drawdown: number;
+  turnover_notional: number;
+  execution_costs: ExecutionCosts;
 };
 
 type FillEntry = {
@@ -200,6 +215,16 @@ function App() {
       if (!cancelled) setStreamOnline(openChannels.size === STREAM_CHANNEL_COUNT);
     }
 
+    async function fetchOptional<T>(path: string): Promise<T | null> {
+      try {
+        const response = await fetch(`${API_BASE}${path}`);
+        if (!response.ok) return null;
+        return (await response.json()) as T;
+      } catch {
+        return null;
+      }
+    }
+
     async function refresh() {
       try {
         const responses = await Promise.all([
@@ -207,34 +232,23 @@ function App() {
           fetch(`${API_BASE}/v1/portfolio`),
           fetch(`${API_BASE}/v1/fills?limit=8`),
           fetch(`${API_BASE}/replay/status`),
-          fetch(`${API_BASE}/market-lifecycle`),
-          fetch(`${API_BASE}/analytics/greeks/btc-threshold`),
-          fetch(`${API_BASE}/hawkes/BTC`),
-          fetch(`${API_BASE}/analytics/expiry-map`),
         ]);
 
         if (responses.some((response) => !response.ok)) {
-          throw new Error("API returned a non-success response");
+          throw new Error("Core API returned a non-success response");
         }
 
-        const [
-          healthBody,
-          portfolioBody,
-          fillsBody,
-          replayBody,
-          lifecycleBody,
-          greeksBody,
-          hawkesBody,
-          expiryBody,
-        ] = await Promise.all([
+        const [healthBody, portfolioBody, fillsBody, replayBody] = await Promise.all([
           responses[0].json() as Promise<Health>,
           responses[1].json() as Promise<Portfolio>,
           responses[2].json() as Promise<FillJournal>,
           responses[3].json() as Promise<ReplayStatus>,
-          responses[4].json() as Promise<LifecycleResponse>,
-          responses[5].json() as Promise<SyntheticGreeks>,
-          responses[6].json() as Promise<HawkesState>,
-          responses[7].json() as Promise<ExpiryMap>,
+        ]);
+        const [lifecycleBody, greeksBody, hawkesBody, expiryBody] = await Promise.all([
+          fetchOptional<LifecycleResponse>("/market-lifecycle"),
+          fetchOptional<SyntheticGreeks>("/analytics/greeks/btc-threshold"),
+          fetchOptional<HawkesState>("/hawkes/BTC"),
+          fetchOptional<ExpiryMap>("/analytics/expiry-map"),
         ]);
 
         if (!cancelled) {
@@ -374,7 +388,7 @@ function App() {
   const metrics = [
     {
       label: "Mode",
-      value: health?.mode ?? "SIMULATION",
+      value: health?.mode ?? "WAITING",
       note: "Real execution disabled",
     },
     {
@@ -631,10 +645,16 @@ function App() {
           <h2>P&amp;L and exposure</h2>
         </div>
         <div className="summaryMetrics">
-          <span>Realized <b>{formatNumber(portfolio?.total_realized_pnl ?? 0)}</b></span>
-          <span>Unrealized <b>{formatNumber(portfolio?.total_unrealized_pnl ?? 0)}</b></span>
-          <span>Fees <b>{formatNumber(portfolio?.total_fees ?? 0)}</b></span>
-          <span>Net <b>{formatNumber(portfolio?.total_pnl_after_fees ?? 0)}</b></span>
+          <span>Realized <b>{portfolio ? formatNumber(portfolio.total_realized_pnl) : "—"}</b></span>
+          <span>Unrealized <b>{portfolio ? formatNumber(portfolio.total_unrealized_pnl) : "—"}</b></span>
+          <span>Fees <b>{portfolio ? formatNumber(portfolio.total_fees) : "—"}</b></span>
+          <span>Net P&amp;L <b>{portfolio ? formatNumber(portfolio.total_pnl_after_fees) : "—"}</b></span>
+          <span>Gross exposure <b>{portfolio ? formatNumber(portfolio.gross_exposure) : "—"}</b></span>
+          <span>Net exposure <b>{portfolio ? formatNumber(portfolio.net_exposure) : "—"}</b></span>
+          <span>Concentration <b>{portfolio ? formatPercent(portfolio.max_asset_concentration) : "—"}</b></span>
+          <span>Drawdown <b>{portfolio ? formatNumber(portfolio.realized_drawdown) : "—"}</b></span>
+          <span>Turnover <b>{portfolio ? formatNumber(portfolio.turnover_notional) : "—"}</b></span>
+          <span>Slippage cost <b>{portfolio ? formatNumber(portfolio.execution_costs.slippage) : "—"}</b></span>
         </div>
       </section>
 
@@ -642,7 +662,7 @@ function App() {
         <article className="dataPanel">
           <div className="panelTitle">
             <p className="eyebrow">POSITIONS</p>
-            <span>{portfolio?.positions.length ?? 0} open/known</span>
+            <span>{portfolio ? `${portfolio.open_position_count} open` : "WAITING"}</span>
           </div>
           <div className="tableWrap">
             <table>
@@ -676,7 +696,7 @@ function App() {
         <article className="dataPanel">
           <div className="panelTitle">
             <p className="eyebrow">FILL JOURNAL</p>
-            <span>Latest {journal?.count ?? 0}</span>
+            <span>{journal ? `Latest ${journal.count}` : "WAITING"}</span>
           </div>
           <div className="fillList">
             {(journal?.fills ?? []).map((fill) => (
