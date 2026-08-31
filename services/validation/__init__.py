@@ -7,6 +7,10 @@ from .core import (
     validation_report,
 )
 from .cpcv import combinatorial_purged_cv_splits
+from .data_snooping import (
+    SuperiorPredictiveAbilityReport,
+    superior_predictive_ability,
+)
 from .l2_baselines import (
     BASELINE_STRATEGIES,
     L2BaselineCampaignConfig,
@@ -83,6 +87,7 @@ __all__ = [
     "PurgedFold",
     "RegimePerformance",
     "RegimeRobustnessReport",
+    "SuperiorPredictiveAbilityReport",
     "ValidationReport",
     "apply_signal_returns",
     "available_l2_baselines",
@@ -105,6 +110,7 @@ __all__ = [
     "regime_robustness",
     "run_l2_baseline",
     "run_l2_baseline_campaign",
+    "superior_predictive_ability",
     "timestamp_shuffle",
     "validation_report",
 ]
