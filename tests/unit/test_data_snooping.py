@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from services.validation.data_snooping import superior_predictive_ability
