@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import insert
+from sqlalchemy import insert, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.quant.pipeline import QuantPipelineResult
@@ -17,11 +18,33 @@ def _record_id(correlation_id: str, suffix: str) -> str:
     return f"{correlation_id[:48]}:{suffix[:15]}"
 
 
+async def _lineage_complete(
+    engine: AsyncEngine,
+    correlation_id: str,
+    rows: list[tuple[str, str, dict[str, object]]],
+) -> bool:
+    async with engine.connect() as connection:
+        for table_name, suffix, _ in rows:
+            table = CANONICAL_TABLES[table_name]
+            record_id = _record_id(correlation_id, suffix)
+            existing = await connection.execute(
+                select(table.c.id).where(table.c.id == record_id)
+            )
+            if existing.scalar_one_or_none() is None:
+                return False
+    return True
+
+
 async def persist_quant_lineage(
     engine: AsyncEngine | None,
     result: QuantPipelineResult,
 ) -> bool:
-    """Persist one complete research lineage atomically when storage is enabled."""
+    """Persist one complete research lineage atomically when storage is enabled.
+
+    Deterministic correlation IDs make replay retries idempotent. A concurrent or
+    repeated write that collides with an already-complete lineage is treated as a
+    successful idempotent replay; partial or unrelated integrity failures surface.
+    """
     if engine is None:
         return False
 
@@ -141,15 +164,20 @@ async def persist_quant_lineage(
         )
     )
 
-    async with engine.begin() as connection:
-        for table_name, suffix, payload in rows:
-            table = CANONICAL_TABLES[table_name]
-            await connection.execute(
-                insert(table).values(
-                    id=_record_id(correlation_id, suffix),
-                    created_at=created_at,
-                    correlation_id=correlation_id,
-                    payload=payload,
+    try:
+        async with engine.begin() as connection:
+            for table_name, suffix, payload in rows:
+                table = CANONICAL_TABLES[table_name]
+                await connection.execute(
+                    insert(table).values(
+                        id=_record_id(correlation_id, suffix),
+                        created_at=created_at,
+                        correlation_id=correlation_id,
+                        payload=payload,
+                    )
                 )
-            )
+    except IntegrityError:
+        if await _lineage_complete(engine, correlation_id, rows):
+            return True
+        raise
     return True

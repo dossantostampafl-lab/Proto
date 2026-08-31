@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
 from apps.api.app.persistence import build_engine, init_database
@@ -71,23 +71,80 @@ async def test_quant_lineage_persists_all_required_research_records() -> None:
 
 
 @pytest.mark.asyncio
-async def test_quant_lineage_transaction_rolls_back_on_duplicate_correlation() -> None:
+async def test_quant_lineage_duplicate_correlation_is_idempotent() -> None:
     engine = build_engine("sqlite+aiosqlite:///:memory:")
     try:
         await init_database(engine)
         result = _result()
         assert await persist_quant_lineage(engine, result) is True
+        assert await persist_quant_lineage(engine, result) is True
+
+        async with engine.connect() as connection:
+            for table_name in (
+                "model_predictions",
+                "fair_values",
+                "edges",
+                "model_metrics",
+                "calibration_metrics",
+                "hawkes_states",
+                "audit_events",
+            ):
+                table = CANONICAL_TABLES[table_name]
+                rows = (
+                    await connection.execute(
+                        select(table).where(table.c.correlation_id == result.correlation_id)
+                    )
+                ).mappings().all()
+                assert len(rows) == 1, table_name
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_quant_lineage_partial_collision_still_rolls_back_atomically() -> None:
+    engine = build_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        await init_database(engine)
+        result = _result()
+        prediction_table = CANONICAL_TABLES["model_predictions"]
+        async with engine.begin() as connection:
+            await connection.execute(
+                insert(prediction_table).values(
+                    id="quant-lineage-test:prediction",
+                    created_at=datetime.now(UTC),
+                    correlation_id=result.correlation_id,
+                    payload={"event": "partial-conflict"},
+                )
+            )
 
         with pytest.raises(IntegrityError):
             await persist_quant_lineage(engine, result)
 
         async with engine.connect() as connection:
-            table = CANONICAL_TABLES["model_predictions"]
-            rows = (
+            prediction_rows = (
                 await connection.execute(
-                    select(table).where(table.c.correlation_id == result.correlation_id)
+                    select(prediction_table).where(
+                        prediction_table.c.correlation_id == result.correlation_id
+                    )
                 )
             ).mappings().all()
-            assert len(rows) == 1
+            assert len(prediction_rows) == 1
+            assert prediction_rows[0]["payload"] == {"event": "partial-conflict"}
+
+            for table_name in (
+                "fair_values",
+                "edges",
+                "model_metrics",
+                "calibration_metrics",
+                "hawkes_states",
+                "audit_events",
+            ):
+                table = CANONICAL_TABLES[table_name]
+                rows = (
+                    await connection.execute(
+                        select(table).where(table.c.correlation_id == result.correlation_id)
+                    )
+                ).mappings().all()
+                assert rows == [], table_name
     finally:
         await engine.dispose()
