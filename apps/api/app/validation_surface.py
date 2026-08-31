@@ -10,7 +10,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from services.validation import (
     ParameterPoint,
+    PromotionGateEvidence,
+    PromotionGatePolicy,
     deflated_sharpe_ratio,
+    evaluate_promotion_gate,
     monte_carlo_block_bootstrap,
     parameter_stability,
     probability_of_backtest_overfitting,
@@ -188,6 +191,122 @@ class ExperimentValidationRequest(BaseModel):
     validation: ValidationRequest
 
 
+class PromotionEvidenceRequest(BaseModel):
+    experiment_id: str = Field(min_length=1, max_length=128)
+    candidate_kind: Literal["CONTROL", "ALPHA_CANDIDATE"]
+    oos_sample_count: int = Field(ge=0)
+    validation_fold_count: int = Field(ge=0)
+    cumulative_return: float = Field(allow_inf_nan=False)
+    sharpe: float = Field(allow_inf_nan=False)
+    max_drawdown: float = Field(ge=0.0, allow_inf_nan=False)
+    positive_fold_fraction: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    robustness_score: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    deflated_sharpe_ratio: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    probability_of_backtest_overfitting: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    monte_carlo_probability_of_loss: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    regime_robustness_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    parameter_stability_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    delay_control_sharpe: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+    )
+    shuffle_control_sharpe: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+    )
+
+
+class PromotionPolicyRequest(BaseModel):
+    min_oos_samples: int = Field(default=250, gt=0)
+    min_validation_folds: int = Field(default=5, gt=0)
+    min_cumulative_return: float = Field(default=0.0, allow_inf_nan=False)
+    min_sharpe: float = Field(default=0.25, allow_inf_nan=False)
+    min_positive_fold_fraction: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    min_robustness_score: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    min_deflated_sharpe_ratio: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    max_probability_of_backtest_overfitting: float = Field(
+        default=0.20,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    max_drawdown: float = Field(
+        default=0.20,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    max_monte_carlo_probability_of_loss: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    min_regime_robustness_score: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    min_parameter_stability_score: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    max_negative_control_sharpe_ratio: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+
+
+class PromotionEvaluationRequest(BaseModel):
+    evidence: PromotionEvidenceRequest
+    policy: PromotionPolicyRequest = Field(default_factory=PromotionPolicyRequest)
+
+
 def run_validation_report(request: ValidationRequest) -> dict[str, object]:
     returns = tuple(request.returns)
     try:
@@ -268,6 +387,41 @@ def pbo_endpoint(request: PboRequest) -> dict[str, object]:
         "strategy_count": len(request.strategy_returns),
         "financial_connectivity": False,
         "real_money_execution": False,
+    }
+
+
+@router.post("/promotion/evaluate")
+def promotion_evaluate_endpoint(
+    request: PromotionEvaluationRequest,
+) -> dict[str, object]:
+    try:
+        evidence = PromotionGateEvidence(**request.evidence.model_dump())
+        policy = PromotionGatePolicy(**request.policy.model_dump())
+        decision = evaluate_promotion_gate(evidence, policy=policy)
+    except ValueError as error:
+        metrics.increment("model_promotion_rejected")
+        raise _unprocessable(error) from error
+
+    metrics.increment("model_promotion_requests")
+    if decision.status == "PAPER_TRADING_ELIGIBLE":
+        metrics.increment("model_promotion_paper_trading_eligible")
+    elif decision.status == "CONTROL_ONLY":
+        metrics.increment("model_promotion_control_only")
+    else:
+        metrics.increment("model_promotion_research_only")
+
+    return {
+        "experiment_id": decision.experiment_id,
+        "status": decision.status,
+        "promotion_eligible": decision.promotion_eligible,
+        "checks": _json_safe(decision.checks),
+        "failed_checks": list(decision.failed_checks),
+        "decision_fingerprint": decision.decision_fingerprint,
+        "policy": request.policy.model_dump(mode="json"),
+        "paper_trading_only": decision.paper_trading_only,
+        "live_execution_eligible": decision.live_execution_eligible,
+        "financial_connectivity": decision.financial_connectivity,
+        "real_money_execution": decision.real_money_execution,
     }
 
 
