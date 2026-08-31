@@ -42,7 +42,7 @@ class Side(StrEnum):
 
 
 class MarketSnapshot(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
 
     symbol: Literal["BTC", "ETH", "SOL"]
     market_id: str = Field(default="research-market", min_length=1, max_length=120)
@@ -63,6 +63,8 @@ class MarketSnapshot(BaseModel):
 
 
 class SimulationOrder(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     id: UUID = Field(default_factory=uuid4)
     market_id: str = Field(min_length=1, max_length=120)
     asset: Asset
@@ -73,6 +75,8 @@ class SimulationOrder(BaseModel):
 
 
 class Fill(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     order_id: UUID
     market_id: str = Field(min_length=1, max_length=120)
     asset: Asset
@@ -85,12 +89,16 @@ class Fill(BaseModel):
 
 
 class RiskLimits(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     max_order_notional: float = Field(default=10_000, gt=0)
     max_position_notional: float = Field(default=25_000, gt=0)
     max_slippage_bps: float = Field(default=75, ge=0)
 
 
 class SimulationRequest(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     order: SimulationOrder
     snapshot: MarketSnapshot
     current_position_notional: float = Field(default=0, ge=0)
@@ -112,6 +120,8 @@ class SimulationResult(BaseModel):
 
 
 class MarkPrice(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     asset: Asset
     price: float = Field(gt=0)
 
