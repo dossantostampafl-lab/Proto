@@ -6,6 +6,7 @@ from .core import (
     purged_walk_forward_splits,
     validation_report,
 )
+from .cpcv import combinatorial_purged_cv_splits
 from .overfitting import (
     deflated_sharpe_ratio,
     expected_max_sharpe_under_null,
@@ -37,6 +38,7 @@ __all__ = [
     "ValidationReport",
     "apply_signal_returns",
     "block_bootstrap_path",
+    "combinatorial_purged_cv_splits",
     "deflated_sharpe_ratio",
     "delay_signal",
     "expected_max_sharpe_under_null",
