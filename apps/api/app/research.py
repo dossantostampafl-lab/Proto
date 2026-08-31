@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from services.quant.calibration import calibration_report
-from services.quant.pipeline import QuantPipelineInput, run_quant_pipeline
+from services.quant.pipeline import (
+    CalibrationSample,
+    QuantPipelineInput,
+    run_quant_pipeline,
+)
 
 from .app_state import persistence_engine, portfolio
 from .circuit_surface import router as circuit_router
@@ -51,6 +55,49 @@ class ReplayRequest(BaseModel):
     frames: list[ReplayPoint] = Field(min_length=1)
 
 
+class QuantReplayCalibrationObservation(BaseModel):
+    observed_at: datetime
+    probability: float = Field(ge=0.0, le=1.0)
+    outcome: int = Field(ge=0, le=1)
+
+
+class QuantReplayRequest(BaseModel):
+    frames: list[QuantPipelineInput] = Field(min_length=1)
+    calibration_observations: list[QuantReplayCalibrationObservation] = Field(
+        default_factory=list
+    )
+
+
+def _validate_quant_replay_clock(request: QuantReplayRequest) -> None:
+    frame_times = [frame.observed_at for frame in request.frames]
+    if frame_times != sorted(frame_times):
+        raise HTTPException(
+            status_code=422,
+            detail="quant replay frames must be ordered by observed_at",
+        )
+    for observation in request.calibration_observations:
+        if observation.observed_at.tzinfo is None or observation.observed_at.utcoffset() is None:
+            raise HTTPException(
+                status_code=422,
+                detail="calibration observation timestamps must be timezone-aware",
+            )
+
+
+def _past_calibration_samples(
+    request: QuantReplayRequest,
+    *,
+    observed_at: datetime,
+) -> tuple[CalibrationSample, ...]:
+    return tuple(
+        CalibrationSample(
+            probability=observation.probability,
+            outcome=observation.outcome,
+        )
+        for observation in request.calibration_observations
+        if observation.observed_at < observed_at
+    )
+
+
 @router.post("/research/calibration")
 def calibration(request: CalibrationRequest) -> dict[str, object]:
     with OperationLatencyTimer(metrics, "calibration"):
@@ -91,6 +138,48 @@ async def quant_pipeline(request: QuantPipelineInput) -> dict[str, object]:
     return {
         **result.model_dump(mode="json"),
         "persisted": persisted,
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
+
+
+@router.post("/research/quant/replay")
+async def quant_replay(request: QuantReplayRequest) -> dict[str, object]:
+    _validate_quant_replay_clock(request)
+    results: list[dict[str, object]] = []
+    persisted_count = 0
+
+    with OperationLatencyTimer(metrics, "quant_replay"):
+        for frame in request.frames:
+            replay_input = frame.model_copy(
+                update={
+                    "calibration_samples": _past_calibration_samples(
+                        request,
+                        observed_at=frame.observed_at,
+                    )
+                }
+            )
+            result = run_quant_pipeline(replay_input)
+            persisted = await persist_quant_lineage(persistence_engine, result)
+            if persisted:
+                persisted_count += 1
+            results.append(
+                {
+                    **result.model_dump(mode="json"),
+                    "persisted": persisted,
+                }
+            )
+
+    metrics.increment("quant_replay_requests")
+    metrics.increment("quant_replay_frames", len(results))
+    if persisted_count:
+        metrics.increment("quant_replay_persisted", persisted_count)
+    return {
+        "mode": "HISTORICAL_REPLAY",
+        "processed_frames": len(results),
+        "persisted_frames": persisted_count,
+        "frames": results,
+        "calibration_policy": "STRICTLY_PAST_OBSERVATIONS_ONLY",
         "financial_connectivity": False,
         "real_money_execution": False,
     }
