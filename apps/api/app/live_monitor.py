@@ -12,7 +12,6 @@ from services.market_data import (
     DataQualityIssue,
     DataQualityMonitor,
     LiveTickJournal,
-    LiveTickJournalError,
     MarketTick,
     PersistedLiveTickPage,
     PublicMarketDataAdapter,
@@ -22,6 +21,7 @@ from services.market_data import (
 
 from .event_state import event_runtime
 from .live_payloads import age_seconds, market_payload, orderbook_payload, source_to_server_delta_ms
+from .live_persistence_coordinator import LivePersistenceCoordinator
 from .live_sequence import LiveSequenceState
 from .metrics_state import metrics
 from .models import SystemMode
@@ -42,8 +42,10 @@ class LiveCryptoMonitor:
     ) -> None:
         self._adapter = adapter or CoinbasePublicMarketDataAdapter()
         self._quality = DataQualityMonitor(stale_after_seconds=_STALE_AFTER_SECONDS)
-        self._journal = journal
-        self._persistence_required = persistence_required
+        self._persistence = LivePersistenceCoordinator(
+            journal,
+            required=persistence_required,
+        )
         self._task: asyncio.Task[None] | None = None
         self._latest: dict[str, MarketTick] = {}
         self._history: dict[str, deque[MarketTick]] = defaultdict(
@@ -54,12 +56,6 @@ class LiveCryptoMonitor:
         self._symbol_connection_generation: dict[str, int] = {}
         self._connection_generation = self._adapter.health().connection_generation
         self._last_error: str | None = None
-        self._persisted_current_connection = 0
-        self._persistence_idempotent_current_connection = 0
-        self._persistence_write_failures_current_connection = 0
-        self._persistence_read_failures = 0
-        self._last_persistence_write_error: str | None = None
-        self._last_persistence_read_error: str | None = None
 
     @property
     def running(self) -> bool:
@@ -75,10 +71,7 @@ class LiveCryptoMonitor:
         *,
         required: bool,
     ) -> None:
-        self._journal = journal
-        self._persistence_required = required
-        self._last_persistence_write_error = None
-        self._last_persistence_read_error = None
+        self._persistence.configure(journal, required=required)
 
     async def start(self) -> None:
         if self.running:
@@ -140,40 +133,7 @@ class LiveCryptoMonitor:
         }
 
     def persistence_status(self) -> dict[str, object]:
-        journal_status = dict(self._journal.status()) if self._journal is not None else {}
-        backend_write_healthy = bool(journal_status.get("write_healthy", True))
-        backend_read_healthy = bool(journal_status.get("read_healthy", True))
-        configured = self._journal is not None
-        healthy = bool(
-            not self._persistence_required
-            or (
-                configured
-                and backend_write_healthy
-                and self._last_persistence_write_error is None
-            )
-        )
-        return {
-            "configured": configured,
-            "required": self._persistence_required,
-            "healthy": healthy,
-            "write_healthy": healthy,
-            "read_healthy": (
-                backend_read_healthy and self._last_persistence_read_error is None
-            ),
-            "persisted_current_connection": self._persisted_current_connection,
-            "idempotent_hits_current_connection": (
-                self._persistence_idempotent_current_connection
-            ),
-            "write_failures_current_connection": (
-                self._persistence_write_failures_current_connection
-            ),
-            "read_failures": self._persistence_read_failures,
-            "last_write_error": self._last_persistence_write_error,
-            "last_read_error": self._last_persistence_read_error,
-            "journal": journal_status,
-            "financial_connectivity": False,
-            "real_money_execution": False,
-        }
+        return self._persistence.status()
 
     def status(self) -> dict[str, object]:
         feed_health = self.source_health()
@@ -254,23 +214,13 @@ class LiveCryptoMonitor:
         normalized_symbol = symbol.strip().upper()
         if normalized_symbol not in self._adapter.symbols:
             raise ValueError("symbol is outside the configured live allowlist")
-        if self._journal is None:
-            return None
-        try:
-            page = await self._journal.list_page(
-                symbol=normalized_symbol,
-                limit=limit,
-                cursor=cursor,
-                start_at=start_at,
-                end_at=end_at,
-            )
-        except LiveTickJournalError as error:
-            self._persistence_read_failures += 1
-            self._last_persistence_read_error = type(error.__cause__ or error).__name__
-            metrics.increment("live_market_persistence_read_failures")
-            raise
-        self._last_persistence_read_error = None
-        return page
+        return await self._persistence.history_page(
+            symbol=normalized_symbol,
+            limit=limit,
+            cursor=cursor,
+            start_at=start_at,
+            end_at=end_at,
+        )
 
     async def persisted_history(
         self,
@@ -293,52 +243,13 @@ class LiveCryptoMonitor:
         self._received_at.clear()
         self._sequence.reset()
         self._symbol_connection_generation.clear()
-        self._persisted_current_connection = 0
-        self._persistence_idempotent_current_connection = 0
-        self._persistence_write_failures_current_connection = 0
-        self._last_persistence_write_error = None
+        self._persistence.reset_connection()
         metrics.increment("live_market_connection_generation_changes")
 
     def _record_sequence_rejection(self, symbol: str, reason: str) -> None:
         self._sequence.record_rejection(symbol, reason)
         metrics.increment("live_market_sequence_rejections")
         metrics.increment(f"live_market_sequence_{reason}_rejections")
-
-    async def _persist_before_accept(
-        self,
-        tick: MarketTick,
-        *,
-        received_at: datetime,
-        connection_generation: int,
-    ) -> bool:
-        if self._journal is None:
-            if not self._persistence_required:
-                return True
-            self._persistence_write_failures_current_connection += 1
-            self._last_persistence_write_error = "JOURNAL_NOT_CONFIGURED"
-            metrics.increment("live_market_persistence_write_failures")
-            return False
-
-        try:
-            inserted = await self._journal.append(
-                tick,
-                received_at=received_at,
-                connection_generation=connection_generation,
-            )
-        except LiveTickJournalError as error:
-            self._persistence_write_failures_current_connection += 1
-            self._last_persistence_write_error = type(error.__cause__ or error).__name__
-            metrics.increment("live_market_persistence_write_failures")
-            return not self._persistence_required
-
-        self._last_persistence_write_error = None
-        if inserted:
-            self._persisted_current_connection += 1
-            metrics.increment("live_market_persisted_ticks")
-        else:
-            self._persistence_idempotent_current_connection += 1
-            metrics.increment("live_market_persistence_idempotent_hits")
-        return True
 
     async def ingest_tick(self, tick: MarketTick) -> bool:
         if tick.symbol not in self._adapter.symbols:
@@ -368,7 +279,7 @@ class LiveCryptoMonitor:
                 return False
 
         received_at = datetime.now(UTC)
-        if not await self._persist_before_accept(
+        if not await self._persistence.persist_before_accept(
             tick,
             received_at=received_at,
             connection_generation=health.connection_generation,
