@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from apps.api.app import live_persistence as _live_persistence
 from apps.api.app.live_database import LiveBase
+from apps.api.app.persistence import Base
+from apps.api.app.schema_registry import canonical_metadata
 
 config = context.config
 
@@ -21,7 +23,7 @@ _database_url = os.environ.get("DATABASE_URL")
 if _database_url:
     config.set_main_option("sqlalchemy.url", _database_url.replace("%", "%%"))
 
-target_metadata = LiveBase.metadata
+target_metadata = [LiveBase.metadata, Base.metadata, canonical_metadata]
 
 
 def run_migrations_offline() -> None:
