@@ -23,6 +23,12 @@ from .core import (
     OrderBookMetrics,
     compute_orderbook_metrics,
 )
+from .l2_corpus_replay import (
+    PublicL2CorpusRecord,
+    PublicL2CorpusReplay,
+    PublicL2ReplaySnapshot,
+    load_public_l2_corpus,
+)
 from .l2_corpus_storage import (
     PublicL2CorpusError,
     PublicL2CorpusManifest,
@@ -90,12 +96,15 @@ __all__ = [
     "PublicL2Book",
     "PublicL2CorpusError",
     "PublicL2CorpusManifest",
+    "PublicL2CorpusRecord",
+    "PublicL2CorpusReplay",
     "PublicL2CorpusSink",
     "PublicL2CorpusWriter",
     "PublicL2DatasetProvenance",
     "PublicL2Event",
     "PublicL2Frame",
     "PublicL2IntegrityError",
+    "PublicL2ReplaySnapshot",
     "PublicL2StreamHealth",
     "PublicL2Update",
     "PublicMarketDataAdapter",
@@ -104,6 +113,7 @@ __all__ = [
     "compute_orderbook_metrics",
     "evaluate_live_coverage",
     "live_readiness_failures",
+    "load_public_l2_corpus",
     "parse_public_l2_message",
     "parse_public_ticker_message",
     "verify_public_l2_corpus",
