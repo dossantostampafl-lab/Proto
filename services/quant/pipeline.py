@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import uuid4
+from hashlib import sha256
+from math import isfinite
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.analytics.greeks import SyntheticGreeks, calculate_synthetic_greeks
 from services.hawkes.core import ExponentialHawkesEngine, HawkesEstimate
@@ -44,6 +45,20 @@ class QuantPipelineInput(BaseModel):
     hawkes_alpha: float = Field(default=0.1, ge=0.0)
     hawkes_beta: float = Field(default=1.0, gt=0.0)
     expiry_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_replay_clock(self) -> QuantPipelineInput:
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ValueError("observed_at must be timezone-aware")
+        if self.expiry_at is not None and (
+            self.expiry_at.tzinfo is None or self.expiry_at.utcoffset() is None
+        ):
+            raise ValueError("expiry_at must be timezone-aware")
+        if self.hawkes_alpha >= self.hawkes_beta:
+            raise ValueError("hawkes_alpha/hawkes_beta must define a stable process")
+        if any(not isfinite(event_time) for event_time in self.event_times):
+            raise ValueError("event_times must contain only finite values")
+        return self
 
 
 class TimeExposure(BaseModel):
@@ -107,10 +122,6 @@ def _calibrated_probability(
 def _time_exposure(observed_at: datetime, expiry_at: datetime | None) -> TimeExposure:
     if expiry_at is None:
         return TimeExposure(time_to_expiry_seconds=None, expiry_pressure=0.0)
-    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
-        raise ValueError("observed_at must be timezone-aware when expiry_at is supplied")
-    if expiry_at.tzinfo is None or expiry_at.utcoffset() is None:
-        raise ValueError("expiry_at must be timezone-aware")
 
     remaining = max((expiry_at - observed_at).total_seconds(), 0.0)
     pressure = 1.0 / (1.0 + remaining / 3_600.0)
@@ -118,6 +129,16 @@ def _time_exposure(observed_at: datetime, expiry_at: datetime | None) -> TimeExp
         time_to_expiry_seconds=remaining,
         expiry_pressure=pressure,
     )
+
+
+def _correlation_id(data: QuantPipelineInput, override: str | None) -> str:
+    if override is not None:
+        normalized = override.strip()
+        if not normalized or len(normalized) > 64:
+            raise ValueError("correlation_id must contain 1 to 64 characters")
+        return normalized
+    canonical = data.model_dump_json(exclude_none=False)
+    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def run_quant_pipeline(
@@ -195,10 +216,11 @@ def run_quant_pipeline(
         alpha=data.hawkes_alpha,
         beta=data.hawkes_beta,
     )
+    observed_timestamp = data.observed_at.timestamp()
     for event_time in sorted(data.event_times):
-        if event_time <= data.observed_at.timestamp():
+        if event_time <= observed_timestamp:
             hawkes_engine.record(event_time)
-    hawkes = hawkes_engine.estimate(timestamp=data.observed_at.timestamp())
+    hawkes = hawkes_engine.estimate(timestamp=observed_timestamp)
 
     greeks = calculate_synthetic_greeks(
         market_probability=data.market_probability,
@@ -207,7 +229,7 @@ def run_quant_pipeline(
     )
 
     return QuantPipelineResult(
-        correlation_id=correlation_id or str(uuid4()),
+        correlation_id=_correlation_id(data, correlation_id),
         market_id=data.market_id,
         symbol=data.symbol.upper(),
         observed_at=data.observed_at,
