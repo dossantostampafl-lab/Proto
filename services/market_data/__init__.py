@@ -23,6 +23,14 @@ from .core import (
     OrderBookMetrics,
     compute_orderbook_metrics,
 )
+from .l2_corpus_storage import (
+    PublicL2CorpusError,
+    PublicL2CorpusManifest,
+    PublicL2CorpusSink,
+    PublicL2CorpusWriter,
+    PublicL2DatasetProvenance,
+    verify_public_l2_corpus,
+)
 from .live import CoinbasePublicMarketDataAdapter, PublicFeedTimeoutError
 from .live_contracts import PublicFeedHealth, PublicMarketDataAdapter
 from .live_status import evaluate_live_coverage, live_readiness_failures
@@ -80,6 +88,11 @@ __all__ = [
     "PublicFeedHealth",
     "PublicFeedTimeoutError",
     "PublicL2Book",
+    "PublicL2CorpusError",
+    "PublicL2CorpusManifest",
+    "PublicL2CorpusSink",
+    "PublicL2CorpusWriter",
+    "PublicL2DatasetProvenance",
     "PublicL2Event",
     "PublicL2Frame",
     "PublicL2IntegrityError",
@@ -93,4 +106,5 @@ __all__ = [
     "live_readiness_failures",
     "parse_public_l2_message",
     "parse_public_ticker_message",
+    "verify_public_l2_corpus",
 ]
