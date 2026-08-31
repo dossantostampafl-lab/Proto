@@ -6,6 +6,7 @@ from .core import (
     purged_walk_forward_splits,
     validation_report,
 )
+from .cpcv import combinatorial_purged_cv_splits
 from .overfitting import (
     deflated_sharpe_ratio,
     expected_max_sharpe_under_null,
@@ -35,6 +36,7 @@ __all__ = [
     "RegimeRobustnessReport",
     "ValidationReport",
     "block_bootstrap_path",
+    "combinatorial_purged_cv_splits",
     "deflated_sharpe_ratio",
     "expected_max_sharpe_under_null",
     "monte_carlo_block_bootstrap",
