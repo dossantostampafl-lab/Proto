@@ -55,6 +55,34 @@ def test_simulated_fill_updates_portfolio_and_journal() -> None:
     assert fills["fills"][0]["market_id"] == "btc-usd-paper"
 
 
+def test_duplicate_simulated_order_is_rejected_without_double_accounting() -> None:
+    payload = _buy_payload()
+    payload["order"]["id"] = "11111111-1111-4111-8111-111111111111"
+
+    first = client.post("/v1/simulate", json=payload)
+    second = client.post("/v1/simulate", json=payload)
+
+    assert first.status_code == 200
+    assert first.json()["accepted"] is True
+    assert second.status_code == 200
+    assert second.json() == {
+        "mode": "SIMULATION",
+        "accepted": False,
+        "reason": "duplicate simulated order",
+        "fill": None,
+    }
+
+    portfolio = client.get("/v1/portfolio").json()
+    fills = client.get("/v1/fills").json()
+    metrics = client.get("/metrics").json()["counters"]
+
+    assert portfolio["positions"][0]["quantity"] == 0.01
+    assert fills["count"] == 1
+    assert metrics["simulation_accepted"] == 1
+    assert metrics["simulation_duplicate_orders"] == 1
+    assert metrics["simulation_rejected"] == 1
+
+
 def test_mark_to_market_calculates_unrealized_pnl() -> None:
     client.post("/v1/simulate", json=_buy_payload())
 
