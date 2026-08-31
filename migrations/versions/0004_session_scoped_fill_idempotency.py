@@ -17,26 +17,24 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "simulation_fills_order_id_key",
-        "simulation_fills",
-        type_="unique",
-    )
-    op.create_unique_constraint(
-        "uq_simulation_fills_session_order",
-        "simulation_fills",
-        ["session_id", "order_id"],
-    )
+    with op.batch_alter_table("simulation_fills") as batch_op:
+        batch_op.drop_constraint(
+            "uq_simulation_fills_order_id",
+            type_="unique",
+        )
+        batch_op.create_unique_constraint(
+            "uq_simulation_fills_session_order",
+            ["session_id", "order_id"],
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "uq_simulation_fills_session_order",
-        "simulation_fills",
-        type_="unique",
-    )
-    op.create_unique_constraint(
-        "simulation_fills_order_id_key",
-        "simulation_fills",
-        ["order_id"],
-    )
+    with op.batch_alter_table("simulation_fills") as batch_op:
+        batch_op.drop_constraint(
+            "uq_simulation_fills_session_order",
+            type_="unique",
+        )
+        batch_op.create_unique_constraint(
+            "uq_simulation_fills_order_id",
+            ["order_id"],
+        )
