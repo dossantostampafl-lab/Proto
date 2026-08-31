@@ -2,7 +2,6 @@ from pathlib import Path
 
 from services.market_data.public_feed_parser import parse_public_ticker_message
 
-
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "public_feeds"
 
 
