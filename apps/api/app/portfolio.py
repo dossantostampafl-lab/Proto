@@ -107,10 +107,8 @@ class PaperPortfolio:
 
     def snapshot(self, marks: dict[Asset, float] | None = None) -> dict[str, object]:
         marks = marks or {}
-        positions = [
-            position.as_dict(marks.get(position.asset))
-            for position in sorted(self._positions.values(), key=lambda item: item.asset.value)
-        ]
+        ordered_positions = sorted(self._positions.values(), key=lambda item: item.asset.value)
+        positions = [position.as_dict(marks.get(position.asset)) for position in ordered_positions]
         total_realized_pnl = sum(item.realized_pnl for item in self._positions.values())
         total_unrealized_pnl = sum(
             (marks[item.asset] - item.average_price) * item.quantity
@@ -118,9 +116,32 @@ class PaperPortfolio:
             if item.asset in marks
         )
         total_fees = sum(item.fees for item in self._positions.values())
+
+        exposure_by_asset: dict[str, float] = {}
+        net_exposure = 0.0
+        for position in ordered_positions:
+            if position.quantity == 0.0:
+                continue
+            price = marks.get(position.asset, position.average_price)
+            signed_exposure = position.quantity * price
+            exposure_by_asset[position.asset.value] = abs(signed_exposure)
+            net_exposure += signed_exposure
+
+        gross_exposure = sum(exposure_by_asset.values())
+        max_asset_concentration = (
+            max(exposure_by_asset.values()) / gross_exposure if gross_exposure > 0.0 else 0.0
+        )
+
         return {
             "mode": "SIMULATION",
             "positions": positions,
+            "open_position_count": len(exposure_by_asset),
+            "gross_exposure": round(gross_exposure, 10),
+            "net_exposure": round(net_exposure, 10),
+            "max_asset_concentration": round(max_asset_concentration, 10),
+            "exposure_by_asset": {
+                asset: round(value, 10) for asset, value in sorted(exposure_by_asset.items())
+            },
             "total_realized_pnl": round(total_realized_pnl, 10),
             "total_unrealized_pnl": round(total_unrealized_pnl, 10),
             "total_pnl_after_fees": round(
