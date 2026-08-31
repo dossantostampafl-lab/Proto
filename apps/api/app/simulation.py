@@ -154,13 +154,16 @@ class PaperSimulator:
             return False, "market snapshot timestamp is in the future"
         return True, "accepted"
 
-    def _price_on_grid(self, raw_price: float | Decimal, side: Side) -> Decimal:
+    def _price_on_grid_decimal(self, raw_price: float | Decimal, side: Side) -> Decimal:
         tick_size = _decimal(self.config.tick_size)
         price = raw_price if isinstance(raw_price, Decimal) else _decimal(raw_price)
         ticks = price / tick_size
         rounding = ROUND_CEILING if side == Side.BUY else ROUND_FLOOR
         grid_ticks = ticks.to_integral_value(rounding=rounding)
         return grid_ticks * tick_size
+
+    def _price_on_grid(self, raw_price: float | Decimal, side: Side) -> float:
+        return float(self._price_on_grid_decimal(raw_price, side))
 
     def _depth_impact_bps(self, *, order_quantity: float, available_quantity: float) -> float:
         if available_quantity <= 0.0:
@@ -217,7 +220,7 @@ class PaperSimulator:
         raw_fill_price = executable_price_decimal * (
             Decimal("1") + direction * slippage_decimal / _BPS
         )
-        fill_price = self._price_on_grid(raw_fill_price, order.side)
+        fill_price = self._price_on_grid_decimal(raw_fill_price, order.side)
         quantity = _decimal(order.quantity)
         notional = quantity * fill_price
         fee = notional * _decimal(self.config.fee_bps) / _BPS
