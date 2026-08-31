@@ -44,6 +44,17 @@ class MarketDataPipelineResult:
     duplicate: bool
 
 
+@dataclass(frozen=True, slots=True)
+class MarketDataPipelineSnapshot:
+    accepted: int
+    duplicates: int
+    quality_rejections: int
+    publish_failures: int
+    published: int
+    tracked_event_ids: int
+    tracked_markets: int
+
+
 class MarketDataPipeline:
     """Source -> normalization -> quality -> features -> event bus pipeline.
 
@@ -71,6 +82,11 @@ class MarketDataPipeline:
             lambda: deque(maxlen=self._history_limit)
         )
         self._seen_event_ids: set[str] = set()
+        self._accepted = 0
+        self._duplicates = 0
+        self._quality_rejections = 0
+        self._publish_failures = 0
+        self._published = 0
 
     @staticmethod
     def event_id(tick: MarketTick) -> str:
@@ -102,6 +118,7 @@ class MarketDataPipeline:
 
         quality = self._quality.evaluate(tick, now=received)
         if duplicate:
+            self._duplicates += 1
             return MarketDataPipelineResult(
                 event=NormalizedMarketEvent(
                     event_id=identifier,
@@ -118,6 +135,7 @@ class MarketDataPipeline:
                 duplicate=True,
             )
         if not quality.valid:
+            self._quality_rejections += 1
             raise ValueError(
                 "market data quality rejection: "
                 + ",".join(issue.value for issue in quality.issues)
@@ -139,21 +157,27 @@ class MarketDataPipeline:
 
         published_message_id: str | None = None
         if self._event_runtime is not None:
-            published_message_id = await self._event_runtime.publish(
-                self._stream,
-                {
-                    "event_id": event.event_id,
-                    "source": event.source,
-                    "symbol": event.symbol,
-                    "occurred_at": event.occurred_at.isoformat(),
-                    "received_at": event.received_at.isoformat(),
-                    "sequence": str(event.sequence),
-                    "event": event.model_dump_json(),
-                    "feature": feature.model_dump_json(),
-                },
-            )
+            try:
+                published_message_id = await self._event_runtime.publish(
+                    self._stream,
+                    {
+                        "event_id": event.event_id,
+                        "source": event.source,
+                        "symbol": event.symbol,
+                        "occurred_at": event.occurred_at.isoformat(),
+                        "received_at": event.received_at.isoformat(),
+                        "sequence": str(event.sequence),
+                        "event": event.model_dump_json(),
+                        "feature": feature.model_dump_json(),
+                    },
+                )
+            except Exception:
+                self._publish_failures += 1
+                raise
+            self._published += 1
 
         self._seen_event_ids.add(identifier)
+        self._accepted += 1
         return MarketDataPipelineResult(
             event=event,
             quality=quality,
@@ -162,7 +186,23 @@ class MarketDataPipeline:
             duplicate=False,
         )
 
+    def snapshot(self) -> MarketDataPipelineSnapshot:
+        return MarketDataPipelineSnapshot(
+            accepted=self._accepted,
+            duplicates=self._duplicates,
+            quality_rejections=self._quality_rejections,
+            publish_failures=self._publish_failures,
+            published=self._published,
+            tracked_event_ids=len(self._seen_event_ids),
+            tracked_markets=len(self._history),
+        )
+
     def reset(self) -> None:
         self._quality.reset()
         self._history.clear()
         self._seen_event_ids.clear()
+        self._accepted = 0
+        self._duplicates = 0
+        self._quality_rejections = 0
+        self._publish_failures = 0
+        self._published = 0
