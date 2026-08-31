@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from apps.api.app.persistence import build_engine, init_database
 from apps.api.app.research_persistence import persist_quant_lineage
@@ -77,7 +78,7 @@ async def test_quant_lineage_transaction_rolls_back_on_duplicate_correlation() -
         result = _result()
         assert await persist_quant_lineage(engine, result) is True
 
-        with pytest.raises(Exception):
+        with pytest.raises(IntegrityError):
             await persist_quant_lineage(engine, result)
 
         async with engine.connect() as connection:
