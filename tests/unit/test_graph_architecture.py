@@ -31,6 +31,12 @@ def test_analytics_surface_does_not_import_api_main() -> None:
     assert "apps.api.app.main" not in imports
 
 
+def test_api_main_delegates_reconciliation_boundary() -> None:
+    imports = _imports(API_APP / "main.py")
+    assert "services.events.reconciliation" not in imports
+    assert ".reconciliation_service" in imports
+
+
 def test_analytics_surface_uses_canonical_portfolio_state() -> None:
     assert surface.portfolio is app_state.portfolio
 
