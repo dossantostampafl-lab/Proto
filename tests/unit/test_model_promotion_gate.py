@@ -98,7 +98,9 @@ def test_negative_controls_must_degrade_candidate_signal() -> None:
     assert decision.status == "RESEARCH_ONLY"
     assert "delay_control_sharpe" in decision.failed_checks
     assert "shuffle_control_sharpe" in decision.failed_checks
-    delay = next(item for item in decision.checks if item.name == "delay_control_sharpe")
+    delay = next(
+        item for item in decision.checks if item.name == "delay_control_sharpe"
+    )
     assert "candidate_sharpe * 0.75" in delay.requirement
 
 
@@ -151,6 +153,9 @@ def test_decision_fingerprint_is_deterministic() -> None:
 
 
 def test_invalid_evidence_is_rejected_before_gate_evaluation() -> None:
+    with pytest.raises(ValueError, match="candidate_kind"):
+        _passing_evidence(candidate_kind="UNKNOWN")
+
     with pytest.raises(ValueError, match="required promotion evidence must be finite"):
         _passing_evidence(sharpe=float("nan"))
 
