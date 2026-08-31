@@ -5,13 +5,9 @@ from apps.api.app.persistence import AsyncSqlFillJournal, build_engine, init_dat
 from apps.api.app.schema_registry import CANONICAL_TABLE_NAMES
 
 
-async def test_async_fill_journal_persists_and_deduplicates_order() -> None:
-    engine = build_engine("sqlite+aiosqlite:///:memory:")
-    await init_database(engine)
-    journal = AsyncSqlFillJournal(engine)
-
+async def _paper_order_and_fill(market_id: str = "btc-usd-paper"):
     order = SimulationOrder(
-        market_id="btc-usd-paper",
+        market_id=market_id,
         asset=Asset.BTC,
         side=Side.BUY,
         quantity=0.01,
@@ -27,16 +23,51 @@ async def test_async_fill_journal_persists_and_deduplicates_order() -> None:
         fee=0.12,
         slippage_bps=3.1,
     )
+    return order, fill
 
-    await journal.append(order, fill)
-    await journal.append(order, fill)
+
+async def test_async_fill_journal_persists_and_deduplicates_order() -> None:
+    engine = build_engine("sqlite+aiosqlite:///:memory:")
+    await init_database(engine)
+    journal = AsyncSqlFillJournal(engine)
+
+    order, fill = await _paper_order_and_fill()
+
+    assert await journal.append(order, fill) is True
+    assert await journal.append(order, fill) is False
     records = await journal.list(limit=10)
 
     assert len(records) == 1
     assert records[0]["order_id"] == str(order.id)
+    assert records[0]["session_id"]
     assert records[0]["market_id"] == "btc-usd-paper"
     assert records[0]["asset"] == "BTC"
     assert records[0]["side"] == "BUY"
+
+    await engine.dispose()
+
+
+async def test_new_simulation_session_hides_prior_session_from_active_recovery() -> None:
+    engine = build_engine("sqlite+aiosqlite:///:memory:")
+    await init_database(engine)
+    journal = AsyncSqlFillJournal(engine)
+
+    first_order, first_fill = await _paper_order_and_fill("first-session")
+    assert await journal.append(first_order, first_fill) is True
+    first_records = await journal.list(limit=10)
+    assert len(first_records) == 1
+    first_session = first_records[0]["session_id"]
+
+    second_session = await journal.start_new_session()
+    assert second_session != first_session
+    assert await journal.list(limit=10) == []
+
+    second_order, second_fill = await _paper_order_and_fill("second-session")
+    assert await journal.append(second_order, second_fill) is True
+    second_records = await journal.list(limit=10)
+    assert len(second_records) == 1
+    assert second_records[0]["session_id"] == second_session
+    assert second_records[0]["market_id"] == "second-session"
 
     await engine.dispose()
 
@@ -52,5 +83,6 @@ async def test_init_database_creates_canonical_research_tables() -> None:
 
     assert set(CANONICAL_TABLE_NAMES).issubset(table_names)
     assert "simulation_fills" in table_names
+    assert "simulation_sessions" in table_names
 
     await engine.dispose()
