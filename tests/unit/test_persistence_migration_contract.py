@@ -4,7 +4,10 @@ import importlib.util
 from pathlib import Path
 
 from apps.api.app.persistence import SimulationFillRecord, SimulationSessionRecord
-from apps.api.app.schema_registry import CANONICAL_TABLE_NAMES
+from apps.api.app.schema_registry import (
+    BASE_CANONICAL_TABLE_NAMES,
+    CANONICAL_TABLE_NAMES,
+)
 
 
 def _load_migration_module(name: str):
@@ -19,8 +22,18 @@ def _load_migration_module(name: str):
 
 def test_canonical_migration_covers_registry_tables() -> None:
     migration = _load_migration_module("0002_canonical_persistence")
-    assert tuple(migration.CANONICAL_TABLE_NAMES) == CANONICAL_TABLE_NAMES
+    assert tuple(migration.CANONICAL_TABLE_NAMES) == BASE_CANONICAL_TABLE_NAMES
     assert migration.down_revision == "0001_live_market_ticks"
+
+
+def test_research_experiment_migration_extends_registry() -> None:
+    migration = _load_migration_module("0005_research_experiments")
+    assert migration.down_revision == "0004_session_scoped_fill_idempotency"
+    assert migration.TABLE_NAME == "research_experiments"
+    assert CANONICAL_TABLE_NAMES == (
+        *BASE_CANONICAL_TABLE_NAMES,
+        migration.TABLE_NAME,
+    )
 
 
 def test_simulation_fill_migration_matches_runtime_model_columns() -> None:

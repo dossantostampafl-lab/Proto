@@ -6,7 +6,7 @@ from sqlalchemy import JSON, Column, DateTime, MetaData, String, Table
 
 canonical_metadata = MetaData()
 
-CANONICAL_TABLE_NAMES = (
+BASE_CANONICAL_TABLE_NAMES = (
     "markets",
     "market_ticks",
     "orderbook_snapshots",
@@ -30,6 +30,8 @@ CANONICAL_TABLE_NAMES = (
     "system_events",
     "audit_events",
 )
+
+CANONICAL_TABLE_NAMES = (*BASE_CANONICAL_TABLE_NAMES, "research_experiments")
 
 
 def _timestamp() -> datetime:
