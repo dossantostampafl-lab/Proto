@@ -26,6 +26,16 @@ class RiskEngine:
         )
         projected_quantity = request.current_position_quantity + signed_order_quantity
         projected_position_notional = abs(projected_quantity) * request.order.limit_price
+        other_asset_exposure = max(
+            request.current_gross_exposure - request.current_asset_exposure,
+            0.0,
+        )
+        projected_gross_exposure = other_asset_exposure + projected_position_notional
+        projected_concentration = (
+            projected_position_notional / projected_gross_exposure
+            if projected_gross_exposure > 0.0
+            else 0.0
+        )
 
         if not request.server_execution_permitted:
             return False, "simulation mode does not permit execution"
@@ -35,6 +45,10 @@ class RiskEngine:
             return False, "max order notional exceeded"
         if projected_position_notional > request.limits.max_position_notional:
             return False, "max position notional exceeded"
+        if projected_gross_exposure > request.limits.max_gross_exposure:
+            return False, "max gross exposure exceeded"
+        if projected_concentration > request.limits.max_asset_concentration:
+            return False, "max asset concentration exceeded"
         if estimated_slippage_bps > request.limits.max_slippage_bps:
             return False, "max slippage exceeded"
         return True, "accepted"
