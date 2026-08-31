@@ -17,6 +17,12 @@ class RuntimeMetrics:
     http_latency_ms_total: float = 0.0
     http_by_path: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     http_by_status: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    operation_latency_ms_total: dict[str, float] = field(
+        default_factory=lambda: defaultdict(float)
+    )
+    operation_latency_samples: dict[str, int] = field(
+        default_factory=lambda: defaultdict(int)
+    )
     _lock: Lock = field(default_factory=Lock, repr=False)
 
     def increment(self, name: str, amount: int = 1) -> None:
@@ -27,6 +33,14 @@ class RuntimeMetrics:
         with self._lock:
             self.latency_ms_total += max(value, 0.0)
             self.latency_samples += 1
+
+    def observe_operation_latency_ms(self, operation: str, value: float) -> None:
+        normalized = operation.strip()
+        if not normalized:
+            raise ValueError("operation name must not be empty")
+        with self._lock:
+            self.operation_latency_ms_total[normalized] += max(value, 0.0)
+            self.operation_latency_samples[normalized] += 1
 
     def record_http(self, *, path: str, status_code: int, latency_ms: float) -> None:
         with self._lock:
@@ -47,6 +61,17 @@ class RuntimeMetrics:
                 if self.http_request_count
                 else 0.0
             )
+            operation_latency = {
+                operation: {
+                    "average_ms": round(
+                        self.operation_latency_ms_total[operation] / samples,
+                        6,
+                    ),
+                    "samples": samples,
+                }
+                for operation, samples in sorted(self.operation_latency_samples.items())
+                if samples
+            }
             return {
                 "counters": dict(sorted(self.counters.items())),
                 "average_simulation_latency_ms": round(average_simulation_latency_ms, 6),
@@ -58,6 +83,7 @@ class RuntimeMetrics:
                 "http_by_status": {
                     str(status): count for status, count in sorted(self.http_by_status.items())
                 },
+                "operation_latency": operation_latency,
             }
 
     def reset(self) -> None:
@@ -70,6 +96,8 @@ class RuntimeMetrics:
             self.http_latency_ms_total = 0.0
             self.http_by_path.clear()
             self.http_by_status.clear()
+            self.operation_latency_ms_total.clear()
+            self.operation_latency_samples.clear()
 
 
 class LatencyTimer:
@@ -84,6 +112,21 @@ class LatencyTimer:
     def __exit__(self, *_: object) -> None:
         elapsed_ms = (perf_counter() - self._started_at) * 1_000.0
         self._metrics.observe_latency_ms(elapsed_ms)
+
+
+class OperationLatencyTimer:
+    def __init__(self, metrics: RuntimeMetrics, operation: str) -> None:
+        self._metrics = metrics
+        self._operation = operation
+        self._started_at = 0.0
+
+    def __enter__(self) -> OperationLatencyTimer:
+        self._started_at = perf_counter()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        elapsed_ms = (perf_counter() - self._started_at) * 1_000.0
+        self._metrics.observe_operation_latency_ms(self._operation, elapsed_ms)
 
 
 def access_log(
