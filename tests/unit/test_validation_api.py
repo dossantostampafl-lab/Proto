@@ -6,7 +6,20 @@ client = TestClient(app)
 
 
 def test_validation_report_exposes_research_metrics_and_safety_invariants() -> None:
-    returns = [0.01, -0.004, 0.012, 0.003, -0.002, 0.009, 0.006, -0.003, 0.008, 0.004, -0.001, 0.007]
+    returns = [
+        0.01,
+        -0.004,
+        0.012,
+        0.003,
+        -0.002,
+        0.009,
+        0.006,
+        -0.003,
+        0.008,
+        0.004,
+        -0.001,
+        0.007,
+    ]
     response = client.post(
         "/research/validation/report",
         json={
@@ -43,7 +56,16 @@ def test_validation_report_serializes_infinite_ratio_metrics_as_null() -> None:
     response = client.post(
         "/research/validation/report",
         json={
-            "returns": [0.01, 0.02, 0.015, 0.012, 0.011, 0.009, 0.013, 0.014],
+            "returns": [
+                0.01,
+                0.02,
+                0.015,
+                0.012,
+                0.011,
+                0.009,
+                0.013,
+                0.014,
+            ],
             "train_size": 4,
             "test_size": 2,
             "monte_carlo_simulations": 20,
