@@ -8,7 +8,7 @@ from services.market_data.core import compute_orderbook_metrics
 from services.quant.core import compute_edge
 
 from .settings import settings
-from .surface import _MARKETS, _estimate, _tick
+from .surface import _MARKETS, _estimate, _require_synthetic_research, _tick
 
 router = APIRouter(tags=["lifecycle"])
 
@@ -20,6 +20,7 @@ _EXPIRY_MINUTES = {
 
 
 def _row(market_id: str) -> dict[str, object]:
+    _require_synthetic_research()
     market = _MARKETS[market_id]
     tick = _tick(market)
     orderbook = compute_orderbook_metrics(tick)
