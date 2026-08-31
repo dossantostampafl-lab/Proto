@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from math import isfinite
 
 
 class ReconciliationIssue(StrEnum):
@@ -26,6 +27,9 @@ def reconcile(
     persisted_event_count: int,
     tolerance: float = 1e-9,
 ) -> ReconciliationResult:
+    if not isfinite(tolerance) or tolerance < 0.0:
+        raise ValueError("tolerance must be finite and non-negative")
+
     issues: list[ReconciliationIssue] = []
 
     if not fill_order_ids.issubset(order_ids):
@@ -35,6 +39,9 @@ def reconcile(
     for asset in assets:
         expected = expected_positions.get(asset, 0.0)
         actual = actual_positions.get(asset, 0.0)
+        if not isfinite(expected) or not isfinite(actual):
+            issues.append(ReconciliationIssue.POSITION_MISMATCH)
+            break
         if abs(expected - actual) > tolerance:
             issues.append(ReconciliationIssue.POSITION_MISMATCH)
             break
