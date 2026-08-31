@@ -78,8 +78,9 @@ class PositionLedger:
 
         signed_fill = fill.quantity if fill.side is FillSide.BUY else -fill.quantity
         current = self.quantity
+        same_direction = current != 0 and (current > 0) == (signed_fill > 0)
 
-        if current == 0 or current.copy_sign(Decimal("1")) == signed_fill.copy_sign(Decimal("1")):
+        if current == 0 or same_direction:
             total_quantity = abs(current) + fill.quantity
             weighted_cost = abs(current) * self.average_price + fill.quantity * fill.price
             self.average_price = weighted_cost / total_quantity
