@@ -1,6 +1,6 @@
 # Release readiness
 
-This document is the consolidated release-readiness snapshot for Proto. It describes software readiness, not evidence of financial profitability.
+This document is the consolidated release-readiness snapshot for Proto. It describes **software research readiness**, not evidence of financial profitability.
 
 ## Safety boundary
 
@@ -10,7 +10,7 @@ Release candidates must preserve all of the following:
 - no wallets, custody, deposits or withdrawals;
 - no real-money order routing;
 - public live market functionality remains read-only;
-- prediction-market research remains isolated from wagering/gambling services;
+- prediction-market research remains isolated from wagering/gambling execution services;
 - API/UI safety surfaces continue to report real-money execution as disabled.
 
 ## Core pipeline status
@@ -19,143 +19,141 @@ Release candidates must preserve all of the following:
 
 Implemented:
 
-- canonical normalized `MarketTick`;
-- sequence/timestamp/data-quality checks;
-- stale-feed detection;
-- feed-health states and risk permission degradation;
-- order-book imbalance and microprice;
-- temporal order-flow imbalance;
-- liquidity/depth/spread-derived features.
+- canonical normalized market ticks and sequencing checks;
+- source/receive timestamp and stale-feed controls;
+- HEALTHY/DEGRADED/STALE/DARK/RECOVERING feed-health ladder;
+- clean-update probation before restoring healthy risk state;
+- imbalance, microprice, temporal OFI and normalized OFI;
+- VPIN/toxicity;
+- spread/depth/liquidity features;
+- frozen offline public-wire golden fixture with provenance.
 
 ### Quant research
 
 Implemented:
 
-- raw probability estimate;
-- calibration and fair probability;
-- confidence/uncertainty;
+- raw/calibrated/fair probability;
+- confidence and uncertainty;
 - fee/spread/slippage/latency/liquidity-aware edge;
 - expected value;
 - Hawkes state;
-- synthetic Greeks;
-- time-to-expiry exposure;
-- hierarchical multi-timeframe trend/setup context;
-- candidate decision that keeps probability estimation separate from trend vetoes.
+- synthetic Greeks and time exposure;
+- hierarchical HTF/MTF/LTF trend, setup and trigger context;
+- trend veto remains separate from probability estimation.
 
 ### Risk
 
 Implemented:
 
-- fail-closed reconciliation state;
+- fail-closed reconciliation readiness;
+- non-finite-state rejection;
 - working-order reservations;
-- cumulative batch risk checks;
-- position/notional/exposure limits;
-- correlated/cluster exposure controls;
-- liquidity/volatility/concentration/drawdown controls;
-- kill-switch boundary;
-- exact monetary arithmetic in Rust risk paths.
+- cumulative atomic batch risk;
+- position/notional/gross/correlated exposure controls;
+- liquidity, volatility, concentration and drawdown controls;
+- execution price collar;
+- kill switch;
+- exact Rust monetary arithmetic.
 
 ### Execution simulation
 
 Implemented:
 
-- order lifecycle;
-- deterministic fill estimator;
-- queue/flow/latency/spread-aware fill probability;
-- GTC/IOC/FOK semantics;
-- marketable limits;
-- partial fills;
-- FOK all-or-none behavior;
-- resting-book execution price semantics;
+- deterministic order lifecycle and fill estimation;
+- GTC/IOC/FOK, marketable limits and partial fills;
+- resting-book price semantics;
+- L2 queue-position/depletion model;
+- explicit latency and fee friction;
+- adverse side-aware tick-grid rounding;
+- Decimal fill-grid/notional/fee arithmetic on the active Python simulator path;
+- depth/participation-sensitive market impact;
 - no live order submission.
 
-### Replay
+### Replay and persistence
 
 Implemented:
 
 - deterministic caller-provided replay clock;
-- explicit event phase ordering;
+- ordered event phases and monotonic stream sequencing;
 - anti-lookahead visibility boundary;
-- per-stream monotonic sequence validation;
-- duplicate-event protection;
-- deterministic session fingerprint;
-- API replay controls.
+- duplicate-event protection and deterministic fingerprint;
+- API replay wired to the deterministic replay core;
+- historical simulation validates snapshots against replay time rather than wall-clock time;
+- replay start/restart/seek isolate in-memory portfolio state;
+- replay start/restart/seek rotate persistent SQL journal sessions before timeline mutation;
+- persistence-isolation failures are fail-closed.
 
 ### Portfolio and P&L
 
 Implemented:
 
-- exact `Decimal` position ledger;
-- long/short accounting;
-- weighted average entry;
-- partial close and position flips;
-- realized/unrealized P&L;
-- fees/net realized P&L;
-- deterministic fill rebuild;
-- position reconciliation.
+- active `Decimal` position ledger;
+- long/short, average entry, partial close and flips;
+- realized/unrealized/net P&L and fees;
+- turnover/exposure accounting;
+- deterministic fill rebuild and reconciliation.
 
 ### Statistical validation
 
 Implemented:
 
-- purged walk-forward splits;
-- embargo;
-- Sharpe/Sortino/max drawdown/hit rate/profit factor;
-- fold consistency/robustness summary;
+- purged walk-forward and embargo;
+- CPCV;
+- Sharpe, Sortino, drawdown, hit rate and profit factor;
 - Deflated Sharpe Ratio;
 - CSCV Probability of Backtest Overfitting;
 - deterministic block-bootstrap Monte Carlo;
-- regime robustness;
-- parameter stability/plateau diagnostics;
-- research API endpoints;
-- API-backed Validation Lab that starts empty and never displays fabricated performance metrics.
+- regime robustness and parameter stability;
+- delay-injection and timestamp-shuffle negative controls;
+- research API surfaces and API-backed Validation Lab with no fabricated metrics.
 
 ## Observability and operations
 
 Implemented:
 
-- request IDs and access logging;
+- request IDs/access logs;
 - health/readiness endpoints;
-- runtime and operation latency metrics;
-- Prometheus surfaces;
-- WebSocket health/capacity metrics;
-- portfolio exposure/P&L gauges;
-- explicit zero financial-connectivity metrics on the read-only live surface;
-- PostgreSQL-backed optional journal and reconciliation paths;
-- live-release contract gates in CI.
+- latency/runtime/portfolio metrics;
+- Prometheus/WebSocket observability;
+- explicit zero financial-connectivity metrics on live read-only surfaces;
+- PostgreSQL optional journal/recovery/reconciliation paths;
+- live-release contract gates.
 
-## Required quality gates
+## Required release gauntlet
 
-Every merge to a release candidate must keep these green:
+A research release candidate requires all of these to pass on the same current head/base state:
 
-- Python ruff;
-- Python pytest;
+- Python Ruff;
+- complete Python pytest suite;
+- targeted mutation-safety gate;
 - Rust fmt;
 - Rust clippy with warnings denied;
 - Rust workspace tests;
-- web TypeScript typecheck;
-- web production build;
-- live-release contract checks;
-- Python dependency audit;
-- Rust dependency audit;
-- web dependency audit;
+- Web TypeScript typecheck;
+- Web production build;
+- live-release/recovery contract gates;
+- Python/Rust/Web dependency security audits;
 - Graphify architecture workflow.
+
+## Benchmark adoption status
+
+The approved high-value benchmark backlog is complete for the current research scope. The benchmark matrix contains no remaining `ADOPT` items. Remaining `DEFER` entries are non-RC research extensions; `REJECT` entries are intentional safety/licensing exclusions.
 
 ## Remaining empirical work before claiming validated alpha
 
-These items do not block a software research RC, but they block any claim that a strategy has durable financial edge:
+These items do not block a software research RC, but they block any claim of durable financial edge:
 
 1. run the Validation Engine on sufficiently large historical/replay datasets;
 2. record out-of-sample results by asset, horizon and regime;
-3. compare multiple candidate strategies with PBO and DSR;
-4. run delay, cost and execution-sensitivity experiments;
+3. compare multiple candidate strategies with PBO/DSR/CPCV;
+4. run delay, cost, queue and impact sensitivity experiments;
 5. inspect Monte Carlo tail drawdowns and probability of loss;
 6. require broad parameter plateaus rather than isolated optima;
-7. accumulate paper-trading evidence under realistic feed degradation and fill assumptions;
-8. version datasets, features, model parameters and validation outputs for reproducibility.
+7. accumulate paper-trading evidence under realistic feed degradation and fills;
+8. version datasets, features, parameters and validation outputs for reproducibility.
 
 ## RC decision rule
 
-Proto may be called a **software research release candidate** when the current `main` passes the complete CI, Security and Graphify gates with the documented safety invariants intact.
+Proto may be called a **software research release candidate** only when the current `main` passes the complete CI, Security and Graphify gauntlet with all documented safety invariants intact.
 
-Proto must not be described as a profitable or financially validated trading strategy solely because those software gates pass. Strategy validation is a separate empirical gate governed by the Validation Engine and recorded datasets.
+Passing the software gauntlet is not a profitability claim. Strategy/alpha validation remains a separate empirical gate.
