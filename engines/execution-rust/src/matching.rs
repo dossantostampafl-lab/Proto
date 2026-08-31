@@ -55,10 +55,7 @@ pub enum MatchError {
     CrossedBook,
 }
 
-pub fn match_limit(
-    intent: LimitIntent,
-    book: TopOfBook,
-) -> Result<MatchOutcome, MatchError> {
+pub fn match_limit(intent: LimitIntent, book: TopOfBook) -> Result<MatchOutcome, MatchError> {
     if intent.limit_price <= Decimal::ZERO
         || intent.quantity <= Decimal::ZERO
         || book.bid <= Decimal::ZERO
@@ -73,16 +70,8 @@ pub fn match_limit(
     }
 
     let (marketable, available, execution_price) = match intent.side {
-        Side::Buy => (
-            intent.limit_price >= book.ask,
-            book.ask_size,
-            book.ask,
-        ),
-        Side::Sell => (
-            intent.limit_price <= book.bid,
-            book.bid_size,
-            book.bid,
-        ),
+        Side::Buy => (intent.limit_price >= book.ask, book.ask_size, book.ask),
+        Side::Sell => (intent.limit_price <= book.bid, book.bid_size, book.bid),
     };
 
     if !marketable {
@@ -115,8 +104,6 @@ pub fn match_limit(
     let remaining = intent.quantity - filled;
     let state = if filled == intent.quantity {
         MatchState::Filled
-    } else if intent.time_in_force == TimeInForce::Gtc {
-        MatchState::PartiallyFilled
     } else {
         MatchState::PartiallyFilled
     };
