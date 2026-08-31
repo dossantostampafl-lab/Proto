@@ -37,6 +37,32 @@ async def _entries():
         }
 
 
+def _eth_order_and_fill() -> tuple[SimulationOrder, Fill]:
+    order_id = uuid4()
+    filled_at = datetime.now(UTC)
+    order = SimulationOrder(
+        id=order_id,
+        market_id="eth-paper",
+        asset=Asset.ETH,
+        side=Side.BUY,
+        quantity=3.0,
+        limit_price=200.0,
+        created_at=filled_at,
+    )
+    fill = Fill(
+        order_id=order_id,
+        market_id=order.market_id,
+        asset=order.asset,
+        side=order.side,
+        filled_quantity=3.0,
+        fill_price=200.0,
+        fee=1.2,
+        slippage_bps=1.5,
+        filled_at=filled_at,
+    )
+    return order, fill
+
+
 @pytest.mark.asyncio
 async def test_recover_paper_portfolio_replays_chronologically() -> None:
     portfolio = PaperPortfolio()
@@ -61,28 +87,7 @@ async def test_init_database_restores_registered_portfolio_from_durable_fills() 
     try:
         await init_database(engine)
         journal = AsyncSqlFillJournal(engine)
-        order_id = uuid4()
-        filled_at = datetime.now(UTC)
-        order = SimulationOrder(
-            id=order_id,
-            market_id="eth-paper",
-            asset=Asset.ETH,
-            side=Side.BUY,
-            quantity=3.0,
-            limit_price=200.0,
-            created_at=filled_at,
-        )
-        fill = Fill(
-            order_id=order_id,
-            market_id=order.market_id,
-            asset=order.asset,
-            side=order.side,
-            filled_quantity=3.0,
-            fill_price=200.0,
-            fee=1.2,
-            slippage_bps=1.5,
-            filled_at=filled_at,
-        )
+        order, fill = _eth_order_and_fill()
         await journal.append(order, fill)
 
         target.reset()
@@ -94,6 +99,30 @@ async def test_init_database_restores_registered_portfolio_from_durable_fills() 
         assert position["asset"] == "ETH"
         assert position["quantity"] == 3.0
         assert position["average_price"] == 200.0
+    finally:
+        register_portfolio_recovery_target(app_state.portfolio)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_new_session_prevents_prior_fills_from_reappearing_after_restart() -> None:
+    engine = build_engine("sqlite+aiosqlite:///:memory:")
+    target = PaperPortfolio()
+    register_portfolio_recovery_target(target)
+    try:
+        await init_database(engine)
+        journal = AsyncSqlFillJournal(engine)
+        order, fill = _eth_order_and_fill()
+        await journal.append(order, fill)
+        await init_database(engine)
+        assert target.snapshot()["positions"][0]["quantity"] == 3.0
+
+        await journal.start_new_session()
+        target.reset()
+        await init_database(engine)
+
+        assert target.snapshot()["positions"] == []
+        assert await journal.list(limit=10) == []
     finally:
         register_portfolio_recovery_target(app_state.portfolio)
         await engine.dispose()
