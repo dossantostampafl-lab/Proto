@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from math import isfinite
+from math import ceil, floor, isfinite
 
 from .models import Fill, Side, SimulationRequest, SimulationResult
 
@@ -11,6 +11,9 @@ from .models import Fill, Side, SimulationRequest, SimulationResult
 class SimulationConfig:
     fee_bps: float = 2.0
     base_slippage_bps: float = 3.0
+    latency_ms: float = 25.0
+    latency_slippage_bps_per_100ms: float = 0.5
+    tick_size: float = 0.01
     max_snapshot_age_seconds: float = 10.0
     max_future_skew_seconds: float = 1.0
 
@@ -18,6 +21,9 @@ class SimulationConfig:
         values = {
             "fee_bps": self.fee_bps,
             "base_slippage_bps": self.base_slippage_bps,
+            "latency_ms": self.latency_ms,
+            "latency_slippage_bps_per_100ms": self.latency_slippage_bps_per_100ms,
+            "tick_size": self.tick_size,
             "max_snapshot_age_seconds": self.max_snapshot_age_seconds,
             "max_future_skew_seconds": self.max_future_skew_seconds,
         }
@@ -28,6 +34,12 @@ class SimulationConfig:
             raise ValueError("fee_bps must be non-negative")
         if self.base_slippage_bps < 0:
             raise ValueError("base_slippage_bps must be non-negative")
+        if self.latency_ms < 0:
+            raise ValueError("latency_ms must be non-negative")
+        if self.latency_slippage_bps_per_100ms < 0:
+            raise ValueError("latency_slippage_bps_per_100ms must be non-negative")
+        if self.tick_size <= 0:
+            raise ValueError("tick_size must be positive")
         if self.max_snapshot_age_seconds <= 0:
             raise ValueError("max_snapshot_age_seconds must be positive")
         if self.max_future_skew_seconds < 0:
@@ -110,6 +122,11 @@ class PaperSimulator:
             return False, "market snapshot timestamp is in the future"
         return True, "accepted"
 
+    def _price_on_grid(self, raw_price: float, side: Side) -> float:
+        ticks = raw_price / self.config.tick_size
+        grid_ticks = ceil(ticks - 1e-12) if side == Side.BUY else floor(ticks + 1e-12)
+        return grid_ticks * self.config.tick_size
+
     def simulate(self, request: SimulationRequest) -> SimulationResult:
         snapshot_time_valid, snapshot_time_reason = self._validate_snapshot_time(request)
         if not snapshot_time_valid:
@@ -125,13 +142,21 @@ class PaperSimulator:
             return SimulationResult(accepted=False, reason="sell limit above bid")
 
         spread_bps = ((snapshot.ask - snapshot.bid) / executable_price) * 10_000
-        slippage_bps = self.config.base_slippage_bps + max(spread_bps * 0.10, 0)
+        latency_slippage_bps = (
+            self.config.latency_slippage_bps_per_100ms * self.config.latency_ms / 100.0
+        )
+        slippage_bps = (
+            self.config.base_slippage_bps
+            + max(spread_bps * 0.10, 0)
+            + latency_slippage_bps
+        )
         accepted, reason = self.risk.validate(request, slippage_bps)
         if not accepted:
             return SimulationResult(accepted=False, reason=reason)
 
         direction = 1 if order.side == Side.BUY else -1
-        fill_price = executable_price * (1 + direction * slippage_bps / 10_000)
+        raw_fill_price = executable_price * (1 + direction * slippage_bps / 10_000)
+        fill_price = self._price_on_grid(raw_fill_price, order.side)
         notional = order.quantity * fill_price
         fee = notional * self.config.fee_bps / 10_000
         fill = Fill(
