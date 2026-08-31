@@ -164,8 +164,9 @@ class MarketDataPipeline:
             tick=tick,
         )
         key = (event.source, event.symbol)
-        history = self._history[key]
-        feature = build_feature_frame([*history, tick], window=self._feature_window)
+        history = self._history.get(key)
+        history_sample = list(history) if history is not None else []
+        feature = build_feature_frame([*history_sample, tick], window=self._feature_window)
 
         published_message_id: str | None = None
         if self._event_runtime is not None:
@@ -191,7 +192,8 @@ class MarketDataPipeline:
         committed_quality = self._quality.evaluate(tick, now=received, commit=True)
         if not committed_quality.valid:
             raise RuntimeError("data quality state changed during atomic publish")
-        history.append(tick)
+        committed_history = self._history[key]
+        committed_history.append(tick)
         self._remember_event_id(identifier)
         self._accepted += 1
         return MarketDataPipelineResult(
