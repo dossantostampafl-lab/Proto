@@ -30,6 +30,11 @@ def upgrade() -> None:
         "simulation_sessions",
         ["active"],
     )
+    op.create_index(
+        "ix_simulation_sessions_created_at",
+        "simulation_sessions",
+        ["created_at"],
+    )
     op.add_column(
         "simulation_fills",
         sa.Column(
@@ -49,5 +54,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_simulation_fills_session_id", table_name="simulation_fills")
     op.drop_column("simulation_fills", "session_id")
+    op.drop_index("ix_simulation_sessions_created_at", table_name="simulation_sessions")
     op.drop_index("ix_simulation_sessions_active", table_name="simulation_sessions")
     op.drop_table("simulation_sessions")
