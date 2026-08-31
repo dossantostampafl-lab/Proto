@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from services.quant.calibration import calibration_report
 from services.quant.pipeline import QuantPipelineInput, run_quant_pipeline
 
-from .app_state import persistence_engine
+from .app_state import persistence_engine, portfolio
 from .circuit_surface import router as circuit_router
 from .event_surface import router as event_router
 from .lifecycle import router as lifecycle_router
@@ -128,7 +128,32 @@ def replay(request: ReplayRequest) -> dict[str, object]:
 
 @router.get("/research/metrics")
 def runtime_metrics() -> dict[str, object]:
-    return {**metrics.snapshot(), "websocket": hub.snapshot()}
+    return {
+        **metrics.snapshot(),
+        "websocket": hub.snapshot(),
+        "portfolio": portfolio.snapshot(),
+    }
+
+
+def _portfolio_gauges() -> dict[str, float]:
+    snapshot = portfolio.snapshot()
+    execution_costs = snapshot.get("execution_costs", {})
+    slippage = (
+        float(execution_costs.get("slippage", 0.0))
+        if isinstance(execution_costs, dict)
+        else 0.0
+    )
+    return {
+        "portfolio_gross_exposure": float(snapshot.get("gross_exposure", 0.0)),
+        "portfolio_net_exposure": float(snapshot.get("net_exposure", 0.0)),
+        "portfolio_total_pnl_after_fees": float(snapshot.get("total_pnl_after_fees", 0.0)),
+        "portfolio_realized_drawdown": float(snapshot.get("realized_drawdown", 0.0)),
+        "portfolio_max_asset_concentration": float(
+            snapshot.get("max_asset_concentration", 0.0)
+        ),
+        "portfolio_turnover_notional": float(snapshot.get("turnover_notional", 0.0)),
+        "portfolio_slippage_cost": slippage,
+    }
 
 
 @router.get("/metrics/prometheus", response_class=PlainTextResponse)
@@ -168,6 +193,13 @@ def prometheus_metrics() -> str:
         "# TYPE proto_ws_oversized_messages_total counter",
         f"proto_ws_oversized_messages_total {websocket['oversized_messages']}",
     ]
+    for name, value in _portfolio_gauges().items():
+        lines.extend(
+            [
+                f"# TYPE proto_{name} gauge",
+                f"proto_{name} {value}",
+            ]
+        )
     for channel, value in websocket["connections"].items():
         lines.append(f'proto_ws_connections_by_channel{{channel="{channel}"}} {value}')
     for name, value in sorted(counters.items()):
