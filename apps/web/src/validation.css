@@ -1,0 +1,186 @@
+.validationShell {
+  max-width: 1400px;
+  margin: 0 auto 48px;
+  padding: 28px;
+  border: 1px solid #1c2a3b;
+  border-radius: 18px;
+  background: #08101c;
+  color: #e8eef7;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.validationHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 28px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.validationHeader h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(1.4rem, 3vw, 2rem);
+}
+
+.validationHeader p,
+.validationRunBox p,
+.validationBoundary {
+  color: #7e8a9c;
+}
+
+.validationEyebrow {
+  margin: 0;
+  color: #71a7ff;
+  font: 600 0.72rem/1.3 "IBM Plex Mono", "JetBrains Mono", monospace;
+  letter-spacing: 0.1em;
+}
+
+.validationStatus {
+  white-space: nowrap;
+  border: 1px solid #26364b;
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: #9fb0c6;
+  font: 600 0.72rem/1 "IBM Plex Mono", monospace;
+}
+
+.validationInputGrid,
+.validationDetailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 18px;
+}
+
+.validationInputGrid label {
+  display: grid;
+  gap: 8px;
+  color: #aebbd0;
+  font-size: 0.85rem;
+}
+
+.validationInputGrid textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid #26364b;
+  border-radius: 12px;
+  padding: 14px;
+  background: #050811;
+  color: #e8eef7;
+  font: 0.84rem/1.5 "JetBrains Mono", "IBM Plex Mono", monospace;
+}
+
+.validationInputGrid textarea:focus {
+  outline: 1px solid #71a7ff;
+  border-color: #71a7ff;
+}
+
+.validationRunBox,
+.validationDetailGrid article,
+.validationMetrics article {
+  border: 1px solid #182538;
+  border-radius: 14px;
+  background: #0b1320;
+}
+
+.validationRunBox {
+  padding: 18px;
+}
+
+.validationRunBox button {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 11px 14px;
+  background: #dbe8ff;
+  color: #07111f;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.validationRunBox button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.validationError {
+  margin: 16px 0 0;
+  border: 1px solid #5d2b32;
+  border-radius: 10px;
+  padding: 11px 13px;
+  color: #f5a0a5;
+  background: #1a0d12;
+}
+
+.validationMetrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.validationMetrics article {
+  padding: 14px;
+}
+
+.validationMetrics span {
+  display: block;
+  margin-bottom: 8px;
+  color: #7e8a9c;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.validationMetrics b {
+  font: 600 1.1rem/1.2 "IBM Plex Mono", monospace;
+}
+
+.validationDetailGrid {
+  margin-top: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.validationDetailGrid article {
+  padding: 18px;
+}
+
+.validationDetailGrid dl {
+  margin: 14px 0 0;
+}
+
+.validationDetailGrid dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  border-bottom: 1px solid #182538;
+}
+
+.validationDetailGrid dt {
+  color: #7e8a9c;
+}
+
+.validationDetailGrid dd {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.validationBoundary {
+  margin: 14px 0 0;
+  font: 0.72rem/1.4 "IBM Plex Mono", monospace;
+}
+
+@media (max-width: 900px) {
+  .validationMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .validationInputGrid,
+  .validationDetailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .validationHeader {
+    flex-direction: column;
+  }
+}
