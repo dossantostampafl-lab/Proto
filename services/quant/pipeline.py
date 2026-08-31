@@ -17,7 +17,7 @@ from .expected_value import ExpectedValueResult, calculate_expected_value
 class CalibrationSample(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    probability: float = Field(ge=0.0, le=1.0)
+    probability: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
     outcome: int = Field(ge=0, le=1)
 
 
@@ -27,23 +27,23 @@ class QuantPipelineInput(BaseModel):
     market_id: str = Field(min_length=1, max_length=120)
     symbol: str = Field(min_length=1, max_length=32)
     observed_at: datetime
-    market_probability: float = Field(ge=0.0, le=1.0)
-    volatility: float = Field(ge=0.0)
-    imbalance: float = Field(ge=-1.0, le=1.0)
-    liquidity_score: float = Field(default=1.0, ge=0.0, le=1.0)
-    fees: float = Field(default=0.001, ge=0.0)
-    slippage: float = Field(default=0.001, ge=0.0)
-    spread_cost: float = Field(default=0.0, ge=0.0)
-    hedge_cost: float = Field(default=0.0, ge=0.0)
-    latency_penalty: float = Field(default=0.0005, ge=0.0)
-    minimum_edge: float = Field(default=0.01, ge=0.0)
+    market_probability: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    volatility: float = Field(ge=0.0, allow_inf_nan=False)
+    imbalance: float = Field(ge=-1.0, le=1.0, allow_inf_nan=False)
+    liquidity_score: float = Field(default=1.0, ge=0.0, le=1.0, allow_inf_nan=False)
+    fees: float = Field(default=0.001, ge=0.0, allow_inf_nan=False)
+    slippage: float = Field(default=0.001, ge=0.0, allow_inf_nan=False)
+    spread_cost: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    hedge_cost: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    latency_penalty: float = Field(default=0.0005, ge=0.0, allow_inf_nan=False)
+    minimum_edge: float = Field(default=0.01, ge=0.0, allow_inf_nan=False)
     calibration_samples: tuple[CalibrationSample, ...] = ()
     calibration_bins: int = Field(default=10, ge=2, le=100)
-    calibration_prior_strength: float = Field(default=5.0, gt=0.0)
+    calibration_prior_strength: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
     event_times: tuple[float, ...] = ()
-    hawkes_mu: float = Field(default=0.2, ge=0.0)
-    hawkes_alpha: float = Field(default=0.1, ge=0.0)
-    hawkes_beta: float = Field(default=1.0, gt=0.0)
+    hawkes_mu: float = Field(default=0.2, ge=0.0, allow_inf_nan=False)
+    hawkes_alpha: float = Field(default=0.1, ge=0.0, allow_inf_nan=False)
+    hawkes_beta: float = Field(default=1.0, gt=0.0, allow_inf_nan=False)
     expiry_at: datetime | None = None
 
     @model_validator(mode="after")
@@ -64,8 +64,8 @@ class QuantPipelineInput(BaseModel):
 class TimeExposure(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    time_to_expiry_seconds: float | None
-    expiry_pressure: float
+    time_to_expiry_seconds: float | None = Field(default=None, allow_inf_nan=False)
+    expiry_pressure: float = Field(allow_inf_nan=False)
 
 
 class QuantPipelineResult(BaseModel):
@@ -75,11 +75,11 @@ class QuantPipelineResult(BaseModel):
     market_id: str
     symbol: str
     observed_at: datetime
-    raw_probability: float = Field(ge=0.0, le=1.0)
-    calibrated_probability: float = Field(ge=0.0, le=1.0)
-    fair_probability: float = Field(ge=0.0, le=1.0)
-    confidence: float = Field(ge=0.0, le=1.0)
-    uncertainty: float = Field(ge=0.0, le=1.0)
+    raw_probability: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    calibrated_probability: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    fair_probability: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    confidence: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    uncertainty: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
     calibration_report: CalibrationReport | None
     edge: EdgeBreakdown
     expected_value: ExpectedValueResult
