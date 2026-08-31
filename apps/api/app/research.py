@@ -7,7 +7,9 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from services.quant.calibration import calibration_report
+from services.quant.pipeline import QuantPipelineInput, run_quant_pipeline
 
+from .app_state import persistence_engine
 from .circuit_surface import router as circuit_router
 from .event_surface import router as event_router
 from .lifecycle import router as lifecycle_router
@@ -16,6 +18,7 @@ from .metrics_state import metrics
 from .models import MarketSnapshot
 from .observability import OperationLatencyTimer
 from .replay import HistoricalReplay, ReplayFrame
+from .research_persistence import persist_quant_lineage
 from .safety_surface import router as safety_router
 from .surface import router as surface_router
 from .websockets import hub
@@ -74,6 +77,22 @@ def calibration(request: CalibrationRequest) -> dict[str, object]:
             for bucket in report.bins
             if bucket.count > 0
         ],
+    }
+
+
+@router.post("/research/quant/pipeline")
+async def quant_pipeline(request: QuantPipelineInput) -> dict[str, object]:
+    with OperationLatencyTimer(metrics, "quant_pipeline"):
+        result = run_quant_pipeline(request)
+        persisted = await persist_quant_lineage(persistence_engine, result)
+    metrics.increment("quant_pipeline_requests")
+    if persisted:
+        metrics.increment("quant_pipeline_persisted")
+    return {
+        **result.model_dump(mode="json"),
+        "persisted": persisted,
+        "financial_connectivity": False,
+        "real_money_execution": False,
     }
 
 
