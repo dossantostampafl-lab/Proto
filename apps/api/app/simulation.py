@@ -40,6 +40,15 @@ class RiskEngine:
             if projected_gross_exposure > 0.0
             else 0.0
         )
+        if request.order.side == Side.BUY:
+            executable_price = request.snapshot.ask
+            executable_book_notional = executable_price * request.snapshot.ask_size
+        else:
+            executable_price = request.snapshot.bid
+            executable_book_notional = executable_price * request.snapshot.bid_size
+        executable_order_notional = request.order.quantity * executable_price
+        allowed_book_ratio = 1.0 if risk_reducing else request.limits.max_order_to_book_ratio
+        max_book_supported_notional = executable_book_notional * allowed_book_ratio
 
         if not request.server_execution_permitted:
             return False, "simulation mode does not permit execution"
@@ -55,6 +64,10 @@ class RiskEngine:
             return False, "max gross exposure exceeded"
         if projected_concentration > request.limits.max_asset_concentration:
             return False, "max asset concentration exceeded"
+        if request.snapshot.volatility > request.limits.max_volatility and not risk_reducing:
+            return False, "max volatility exceeded"
+        if executable_order_notional > max_book_supported_notional:
+            return False, "insufficient top-of-book liquidity"
         if estimated_slippage_bps > request.limits.max_slippage_bps:
             return False, "max slippage exceeded"
         return True, "accepted"

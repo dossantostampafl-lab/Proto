@@ -36,6 +36,8 @@ def _request() -> SimulationRequest:
             max_gross_exposure=1_000_000.0,
             max_asset_concentration=1.0,
             max_drawdown=1_000_000.0,
+            max_volatility=10.0,
+            max_order_to_book_ratio=1.0,
         ),
     )
 
@@ -58,6 +60,11 @@ def test_authoritative_policy_caps_client_risk_limits() -> None:
         == settings.simulation_max_asset_concentration
     )
     assert effective.limits.max_drawdown == settings.max_daily_drawdown
+    assert effective.limits.max_volatility == settings.simulation_max_volatility
+    assert (
+        effective.limits.max_order_to_book_ratio
+        == settings.simulation_max_order_to_book_ratio
+    )
 
 
 def test_authoritative_policy_uses_canonical_position_when_client_underreports() -> None:
@@ -104,6 +111,8 @@ def test_authoritative_policy_preserves_stricter_client_limits() -> None:
                 max_gross_exposure=50_000.0,
                 max_asset_concentration=0.60,
                 max_drawdown=2_500.0,
+                max_volatility=0.8,
+                max_order_to_book_ratio=0.25,
             )
         }
     )

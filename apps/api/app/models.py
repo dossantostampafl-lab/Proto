@@ -97,6 +97,8 @@ class RiskLimits(BaseModel):
     max_gross_exposure: float = Field(default=75_000, gt=0)
     max_asset_concentration: float = Field(default=1.0, gt=0, le=1.0)
     max_drawdown: float = Field(default=5_000, gt=0)
+    max_volatility: float = Field(default=1.5, gt=0)
+    max_order_to_book_ratio: float = Field(default=1.0, gt=0, le=1.0)
 
 
 class SimulationRequest(BaseModel):

@@ -50,6 +50,17 @@ class Settings(BaseSettings):
         le=1.0,
         allow_inf_nan=False,
     )
+    simulation_max_volatility: float = Field(
+        default=1.5,
+        gt=0.0,
+        allow_inf_nan=False,
+    )
+    simulation_max_order_to_book_ratio: float = Field(
+        default=0.50,
+        gt=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
 
     @field_validator("system_mode")
     @classmethod

@@ -55,6 +55,14 @@ def authoritative_simulation_request(
             settings.simulation_max_asset_concentration,
         ),
         max_drawdown=min(requested_limits.max_drawdown, settings.max_daily_drawdown),
+        max_volatility=min(
+            requested_limits.max_volatility,
+            settings.simulation_max_volatility,
+        ),
+        max_order_to_book_ratio=min(
+            requested_limits.max_order_to_book_ratio,
+            settings.simulation_max_order_to_book_ratio,
+        ),
     )
     return request.model_copy(
         update={
