@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, Integer, String, select, text
@@ -102,3 +103,14 @@ class AsyncSqlFillJournal:
                 .limit(safe_limit)
             )
             return [record.as_dict() for record in result.all()]
+
+    async def iter_chronological(self) -> AsyncIterator[dict[str, object]]:
+        async with self.session_factory() as session:
+            stream = await session.stream_scalars(
+                select(SimulationFillRecord).order_by(
+                    SimulationFillRecord.filled_at.asc(),
+                    SimulationFillRecord.id.asc(),
+                )
+            )
+            async for record in stream:
+                yield record.as_dict()
