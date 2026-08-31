@@ -34,6 +34,15 @@ from .overfitting import (
     probability_of_backtest_overfitting,
 )
 from .perturbation import apply_signal_returns, delay_signal, timestamp_shuffle
+from .promotion import (
+    CandidateKind,
+    PromotionCheck,
+    PromotionGateDecision,
+    PromotionGateEvidence,
+    PromotionGatePolicy,
+    PromotionStatus,
+    evaluate_promotion_gate,
+)
 from .resampling import (
     MonteCarloSummary,
     block_bootstrap_path,
@@ -50,6 +59,7 @@ from .stability import (
 
 __all__ = [
     "BASELINE_STRATEGIES",
+    "CandidateKind",
     "L2BaselineCampaignConfig",
     "L2BaselineCampaignResult",
     "L2BaselineExperimentEvidence",
@@ -63,6 +73,11 @@ __all__ = [
     "ParameterPoint",
     "ParameterStabilityReport",
     "PerformanceMetrics",
+    "PromotionCheck",
+    "PromotionGateDecision",
+    "PromotionGateEvidence",
+    "PromotionGatePolicy",
+    "PromotionStatus",
     "PurgedFold",
     "RegimePerformance",
     "RegimeRobustnessReport",
@@ -75,6 +90,7 @@ __all__ = [
     "combinatorial_purged_cv_splits",
     "deflated_sharpe_ratio",
     "delay_signal",
+    "evaluate_promotion_gate",
     "evidence_manifest_fingerprint",
     "evidence_payload_fingerprint",
     "expected_max_sharpe_under_null",
