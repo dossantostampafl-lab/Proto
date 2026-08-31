@@ -42,6 +42,7 @@ class PaperPortfolio:
         self._max_journal_entries = max_journal_entries
         self._turnover_notional = 0.0
         self._slippage_cost = 0.0
+        self._realized_pnl_high_watermark = 0.0
 
     def reset(self) -> None:
         self._positions.clear()
@@ -49,9 +50,22 @@ class PaperPortfolio:
         self._seen_order_ids.clear()
         self._turnover_notional = 0.0
         self._slippage_cost = 0.0
+        self._realized_pnl_high_watermark = 0.0
 
     def has_order(self, order_id: object) -> bool:
         return str(order_id) in self._seen_order_ids
+
+    def _realized_pnl_after_fees(self) -> float:
+        return sum(
+            position.realized_pnl - position.fees
+            for position in self._positions.values()
+        )
+
+    def _update_realized_high_watermark(self) -> None:
+        self._realized_pnl_high_watermark = max(
+            self._realized_pnl_high_watermark,
+            self._realized_pnl_after_fees(),
+        )
 
     def apply_fill(self, order: SimulationOrder, fill: Fill) -> bool:
         order_id = str(fill.order_id)
@@ -89,6 +103,7 @@ class PaperPortfolio:
         position.quantity = new_quantity
         self._seen_order_ids.add(order_id)
         self._append_journal(order, fill)
+        self._update_realized_high_watermark()
         return True
 
     def _append_journal(self, order: SimulationOrder, fill: Fill) -> None:
@@ -125,6 +140,11 @@ class PaperPortfolio:
         )
         total_fees = sum(item.fees for item in self._positions.values())
         total_execution_cost = total_fees + self._slippage_cost
+        realized_pnl_after_fees = total_realized_pnl - total_fees
+        realized_drawdown = max(
+            self._realized_pnl_high_watermark - realized_pnl_after_fees,
+            0.0,
+        )
 
         exposure_by_asset: dict[str, float] = {}
         net_exposure = 0.0
@@ -158,6 +178,8 @@ class PaperPortfolio:
                 10,
             ),
             "total_fees": round(total_fees, 10),
+            "realized_pnl_high_watermark": round(self._realized_pnl_high_watermark, 10),
+            "realized_drawdown": round(realized_drawdown, 10),
             "turnover_notional": round(self._turnover_notional, 10),
             "execution_costs": {
                 "fees": round(total_fees, 10),
