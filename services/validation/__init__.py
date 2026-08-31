@@ -7,6 +7,20 @@ from .core import (
     validation_report,
 )
 from .cpcv import combinatorial_purged_cv_splits
+from .l2_baselines import (
+    BASELINE_STRATEGIES,
+    L2BaselineCampaignConfig,
+    L2BaselineCampaignResult,
+    L2BaselineReturnSample,
+    L2BaselineRun,
+    L2BaselineSpec,
+    L2BaselineValidation,
+    L2MarketReturnSample,
+    available_l2_baselines,
+    build_l2_market_returns,
+    run_l2_baseline,
+    run_l2_baseline_campaign,
+)
 from .overfitting import (
     deflated_sharpe_ratio,
     expected_max_sharpe_under_null,
@@ -28,6 +42,14 @@ from .stability import (
 )
 
 __all__ = [
+    "BASELINE_STRATEGIES",
+    "L2BaselineCampaignConfig",
+    "L2BaselineCampaignResult",
+    "L2BaselineReturnSample",
+    "L2BaselineRun",
+    "L2BaselineSpec",
+    "L2BaselineValidation",
+    "L2MarketReturnSample",
     "MonteCarloSummary",
     "ParameterPoint",
     "ParameterStabilityReport",
@@ -37,7 +59,9 @@ __all__ = [
     "RegimeRobustnessReport",
     "ValidationReport",
     "apply_signal_returns",
+    "available_l2_baselines",
     "block_bootstrap_path",
+    "build_l2_market_returns",
     "combinatorial_purged_cv_splits",
     "deflated_sharpe_ratio",
     "delay_signal",
@@ -48,6 +72,8 @@ __all__ = [
     "probability_of_backtest_overfitting",
     "purged_walk_forward_splits",
     "regime_robustness",
+    "run_l2_baseline",
+    "run_l2_baseline_campaign",
     "timestamp_shuffle",
     "validation_report",
 ]
