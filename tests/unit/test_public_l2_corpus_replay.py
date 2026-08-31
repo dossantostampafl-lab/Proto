@@ -80,7 +80,7 @@ def _build_corpus(path: Path) -> None:
             11,
             "2026-08-31T21:00:11Z",
             event_type="update",
-            bid="61001.00",
+            bid="61000.25",
             ask="61000.50",
         ),
         connection_generation=1,
@@ -100,7 +100,7 @@ def _build_corpus(path: Path) -> None:
             101,
             "2026-08-31T21:00:21Z",
             event_type="update",
-            bid="62001.00",
+            bid="62000.25",
             ask="62000.50",
         ),
         connection_generation=2,
@@ -134,9 +134,9 @@ def test_replay_resets_book_between_connection_generations(tmp_path: Path) -> No
     assert len(first) == 4
     assert [item.connection_generation for item in first] == [1, 1, 2, 2]
     assert first[0].snapshot.bids[0].price == 61000.0
-    assert first[1].snapshot.bids[0].price == 61001.0
+    assert first[1].snapshot.bids[0].price == 61000.25
     assert first[2].snapshot.bids[0].price == 62000.0
-    assert first[3].snapshot.bids[0].price == 62001.0
+    assert first[3].snapshot.bids[0].price == 62000.25
     assert all(level.price >= 62000.0 for level in first[2].snapshot.bids)
 
 
