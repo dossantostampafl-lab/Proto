@@ -359,7 +359,7 @@ class PublicL2Book:
                 }
                 canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
                 event_id = sha256(
-                    f"{frame.sequence}:{index}:{canonical}".encode("utf-8")
+                    f"{frame.sequence}:{index}:{canonical}".encode()
                 ).hexdigest()
                 replay_sequence = frame.sequence * MAX_EVENTS_PER_FRAME + index
                 events.append(
@@ -381,4 +381,4 @@ class PublicL2Book:
             sort_keys=True,
             separators=(",", ":"),
         )
-        return sha256(canonical.encode("utf-8")).hexdigest()
+        return sha256(canonical.encode()).hexdigest()
