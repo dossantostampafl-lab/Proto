@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from .models import RiskLimits, SimulationRequest
+
+
+def authoritative_simulation_request(
+    request: SimulationRequest,
+    portfolio_snapshot: dict[str, object],
+    *,
+    max_order_notional: float,
+    max_position_notional: float,
+    max_slippage_bps: float,
+) -> SimulationRequest:
+    """Apply server-side simulation risk authority without blocking stricter client limits."""
+
+    mid_price = (request.snapshot.bid + request.snapshot.ask) / 2.0
+    canonical_position_notional = 0.0
+    positions = portfolio_snapshot.get("positions", [])
+    if isinstance(positions, list):
+        for position in positions:
+            if not isinstance(position, dict):
+                continue
+            if str(position.get("asset")) != request.order.asset.value:
+                continue
+            quantity = float(position.get("quantity", 0.0))
+            canonical_position_notional = abs(quantity) * mid_price
+            break
+
+    requested_limits = request.limits
+    effective_limits = RiskLimits(
+        max_order_notional=min(requested_limits.max_order_notional, max_order_notional),
+        max_position_notional=min(
+            requested_limits.max_position_notional,
+            max_position_notional,
+        ),
+        max_slippage_bps=min(requested_limits.max_slippage_bps, max_slippage_bps),
+    )
+    return request.model_copy(
+        update={
+            "current_position_notional": max(
+                request.current_position_notional,
+                canonical_position_notional,
+            ),
+            "limits": effective_limits,
+        }
+    )
+
+
+__all__ = ["authoritative_simulation_request"]

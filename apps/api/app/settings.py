@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     max_position: float = 10.0
     max_notional: float = 100_000.0
     max_daily_drawdown: float = 5_000.0
+    simulation_max_order_notional: float = Field(default=10_000.0, gt=0)
+    simulation_max_position_notional: float = Field(default=25_000.0, gt=0)
+    simulation_max_slippage_bps: float = Field(default=75.0, ge=0)
 
     @field_validator("system_mode")
     @classmethod
