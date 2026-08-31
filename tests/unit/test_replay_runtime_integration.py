@@ -1,7 +1,14 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from apps.api.app.models import Asset, Fill, MarketSnapshot, Side, SimulationOrder, SimulationRequest
+from apps.api.app.models import (
+    Asset,
+    Fill,
+    MarketSnapshot,
+    Side,
+    SimulationOrder,
+    SimulationRequest,
+)
 from apps.api.app.portfolio import PaperPortfolio
 from apps.api.app.replay import ReplayFrameInput, ReplaySession, ReplayStartRequest
 from apps.api.app.simulation import PaperSimulator
