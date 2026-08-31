@@ -85,7 +85,11 @@ impl RiskManager {
     pub fn evaluate(&self, request: &RiskRequest) -> RiskDecision {
         let mut reasons = Vec::new();
         let projected_position = request.current_position + request.order_size;
-        let risk_reducing = projected_position.abs() < request.current_position.abs();
+        // Only a same-side close can use the risk-reducing path. An order that
+        // crosses through zero creates new opposite-side exposure and must pass
+        // the full alpha/liquidity/open-position gates.
+        let risk_reducing = request.current_position * request.order_size < Decimal::ZERO
+            && request.order_size.abs() <= request.current_position.abs();
         let projected_market_exposure = if risk_reducing {
             (request.current_market_exposure - request.order_notional.abs()).max(Decimal::ZERO)
         } else {
@@ -275,6 +279,31 @@ mod tests {
         assert!(matches!(
             manager().evaluate(&candidate),
             RiskDecision::Rejected(reasons) if reasons.contains(&RejectionReason::LatencyTooHigh)
+        ));
+    }
+
+    #[test]
+    fn cross_zero_order_is_not_treated_as_risk_reducing() {
+        let mut rm = manager();
+        rm.limits.max_order_size = Decimal::new(5, 0);
+        rm.limits.max_market_exposure = Decimal::new(200_000, 0);
+        let mut candidate = request();
+        candidate.current_position = Decimal::new(2, 0);
+        candidate.order_size = Decimal::new(-3, 0);
+        candidate.order_notional = Decimal::new(30_000, 0);
+        candidate.current_market_exposure = Decimal::new(20_000, 0);
+        candidate.current_asset_exposure = Decimal::new(20_000, 0);
+        candidate.current_total_exposure = Decimal::new(100_000, 0);
+        candidate.net_edge = Decimal::ZERO;
+        candidate.confidence = Decimal::ZERO;
+        candidate.liquidity_score = Decimal::ZERO;
+
+        assert!(matches!(
+            rm.evaluate(&candidate),
+            RiskDecision::Rejected(reasons)
+                if reasons.contains(&RejectionReason::EdgeTooSmall)
+                    && reasons.contains(&RejectionReason::ConfidenceTooLow)
+                    && reasons.contains(&RejectionReason::LiquidityTooLow)
         ));
     }
 }
