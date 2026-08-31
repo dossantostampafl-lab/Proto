@@ -40,11 +40,15 @@ class PaperPortfolio:
         self._journal: list[dict[str, object]] = []
         self._seen_order_ids: set[str] = set()
         self._max_journal_entries = max_journal_entries
+        self._turnover_notional = 0.0
+        self._slippage_cost = 0.0
 
     def reset(self) -> None:
         self._positions.clear()
         self._journal.clear()
         self._seen_order_ids.clear()
+        self._turnover_notional = 0.0
+        self._slippage_cost = 0.0
 
     def has_order(self, order_id: object) -> bool:
         return str(order_id) in self._seen_order_ids
@@ -53,6 +57,10 @@ class PaperPortfolio:
         order_id = str(fill.order_id)
         if order_id in self._seen_order_ids:
             return False
+
+        fill_notional = fill.filled_quantity * fill.fill_price
+        self._turnover_notional += fill_notional
+        self._slippage_cost += fill_notional * fill.slippage_bps / 10_000.0
 
         position = self._positions.setdefault(order.asset, Position(asset=order.asset))
         position.fees += fill.fee
@@ -116,6 +124,7 @@ class PaperPortfolio:
             if item.asset in marks
         )
         total_fees = sum(item.fees for item in self._positions.values())
+        total_execution_cost = total_fees + self._slippage_cost
 
         exposure_by_asset: dict[str, float] = {}
         net_exposure = 0.0
@@ -149,4 +158,10 @@ class PaperPortfolio:
                 10,
             ),
             "total_fees": round(total_fees, 10),
+            "turnover_notional": round(self._turnover_notional, 10),
+            "execution_costs": {
+                "fees": round(total_fees, 10),
+                "slippage": round(self._slippage_cost, 10),
+                "total": round(total_execution_cost, 10),
+            },
         }
