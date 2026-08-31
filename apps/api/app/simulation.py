@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from math import isfinite
 
 from .models import Fill, Side, SimulationRequest, SimulationResult
 
@@ -12,6 +13,25 @@ class SimulationConfig:
     base_slippage_bps: float = 3.0
     max_snapshot_age_seconds: float = 10.0
     max_future_skew_seconds: float = 1.0
+
+    def __post_init__(self) -> None:
+        values = {
+            "fee_bps": self.fee_bps,
+            "base_slippage_bps": self.base_slippage_bps,
+            "max_snapshot_age_seconds": self.max_snapshot_age_seconds,
+            "max_future_skew_seconds": self.max_future_skew_seconds,
+        }
+        for name, value in values.items():
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
+        if self.fee_bps < 0:
+            raise ValueError("fee_bps must be non-negative")
+        if self.base_slippage_bps < 0:
+            raise ValueError("base_slippage_bps must be non-negative")
+        if self.max_snapshot_age_seconds <= 0:
+            raise ValueError("max_snapshot_age_seconds must be positive")
+        if self.max_future_skew_seconds < 0:
+            raise ValueError("max_future_skew_seconds must be non-negative")
 
 
 class RiskEngine:
