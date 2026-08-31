@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from services.market_data import LiveTickJournal, LiveTickJournalError, MarketTick, PersistedLiveTickPage
+from services.market_data import (
+    LiveTickJournal,
+    LiveTickJournalError,
+    MarketTick,
+    PersistedLiveTickPage,
+)
 
 from .metrics_state import metrics
 
