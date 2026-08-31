@@ -81,3 +81,34 @@ def test_reconciliation_detects_cross_state_divergence() -> None:
         ReconciliationIssue.POSITION_MISMATCH,
         ReconciliationIssue.JOURNAL_MISMATCH,
     }
+
+
+@pytest.mark.parametrize("corrupt_value", [float("nan"), float("inf"), float("-inf")])
+def test_reconciliation_fails_closed_on_nonfinite_position_state(
+    corrupt_value: float,
+) -> None:
+    result = reconcile(
+        order_ids={"order-1"},
+        fill_order_ids={"order-1"},
+        expected_positions={"BTC": corrupt_value},
+        actual_positions={"BTC": 1.0},
+        journal_event_count=1,
+        persisted_event_count=1,
+    )
+
+    assert result.consistent is False
+    assert result.issues == (ReconciliationIssue.POSITION_MISMATCH,)
+
+
+def test_reconciliation_rejects_nonfinite_or_negative_tolerance() -> None:
+    for tolerance in (float("nan"), float("inf"), -1.0):
+        with pytest.raises(ValueError, match="tolerance must be finite and non-negative"):
+            reconcile(
+                order_ids=set(),
+                fill_order_ids=set(),
+                expected_positions={},
+                actual_positions={},
+                journal_event_count=0,
+                persisted_event_count=0,
+                tolerance=tolerance,
+            )
