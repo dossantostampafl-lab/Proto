@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import RiskLimits, SimulationRequest
+from .risk_state import simulation_execution_allowed
 
 
 def authoritative_simulation_request(
@@ -40,6 +41,7 @@ def authoritative_simulation_request(
             "current_position_notional": canonical_position_notional,
             "current_position_quantity": canonical_position_quantity,
             "limits": effective_limits,
+            "server_execution_permitted": simulation_execution_allowed(),
         }
     )
 

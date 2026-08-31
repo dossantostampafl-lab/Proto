@@ -27,6 +27,8 @@ class RiskEngine:
         projected_quantity = request.current_position_quantity + signed_order_quantity
         projected_position_notional = abs(projected_quantity) * request.order.limit_price
 
+        if not request.server_execution_permitted:
+            return False, "simulation mode does not permit execution"
         if request.order.market_id != request.snapshot.market_id:
             return False, "market mismatch"
         if order_notional > request.limits.max_order_notional:

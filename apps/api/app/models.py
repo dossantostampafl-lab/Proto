@@ -104,6 +104,7 @@ class SimulationRequest(BaseModel):
     current_position_notional: float = Field(default=0, ge=0)
     current_position_quantity: float = 0.0
     limits: RiskLimits = Field(default_factory=RiskLimits)
+    server_execution_permitted: bool = True
 
     @model_validator(mode="after")
     def validate_asset_symbol(self) -> SimulationRequest:

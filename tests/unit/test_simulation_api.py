@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
+from apps.api.app.app_state import runtime
 from apps.api.app.main import app
+from apps.api.app.models import SystemMode
 
 client = TestClient(app)
 
@@ -110,3 +112,29 @@ def test_kill_switch_halts_only_simulated_execution() -> None:
     assert body["accepted"] is False
     assert body["reason"] == "simulation halted"
     assert client.get("/risk").json()["real_money_execution"] is False
+
+
+def test_replay_mode_cannot_mutate_simulated_portfolio() -> None:
+    runtime.mode = SystemMode.HISTORICAL_REPLAY
+    runtime.running = True
+
+    response = client.post("/v1/simulate", json=_buy_payload())
+
+    assert response.status_code == 200
+    assert response.json()["accepted"] is False
+    assert response.json()["reason"] == "simulation mode does not permit execution"
+    assert client.get("/v1/fills").json()["count"] == 0
+    assert client.get("/v1/portfolio").json()["positions"] == []
+
+
+def test_live_monitoring_mode_cannot_mutate_simulated_portfolio() -> None:
+    runtime.mode = SystemMode.LIVE_MONITORING
+    runtime.running = True
+
+    response = client.post("/v1/simulate", json=_buy_payload())
+
+    assert response.status_code == 200
+    assert response.json()["accepted"] is False
+    assert response.json()["reason"] == "simulation mode does not permit execution"
+    assert client.get("/v1/fills").json()["count"] == 0
+    assert client.get("/v1/portfolio").json()["positions"] == []
