@@ -154,9 +154,10 @@ class PaperSimulator:
             return False, "market snapshot timestamp is in the future"
         return True, "accepted"
 
-    def _price_on_grid(self, raw_price: Decimal, side: Side) -> Decimal:
+    def _price_on_grid(self, raw_price: float | Decimal, side: Side) -> Decimal:
         tick_size = _decimal(self.config.tick_size)
-        ticks = raw_price / tick_size
+        price = raw_price if isinstance(raw_price, Decimal) else _decimal(raw_price)
+        ticks = price / tick_size
         rounding = ROUND_CEILING if side == Side.BUY else ROUND_FLOOR
         grid_ticks = ticks.to_integral_value(rounding=rounding)
         return grid_ticks * tick_size
