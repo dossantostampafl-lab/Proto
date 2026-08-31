@@ -4,7 +4,6 @@ import pytest
 
 from services.validation import effective_number_of_trials
 
-
 BASE = (0.01, -0.005, 0.012, -0.002, 0.009, -0.004)
 
 
