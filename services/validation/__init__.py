@@ -21,6 +21,13 @@ from .l2_baselines import (
     run_l2_baseline,
     run_l2_baseline_campaign,
 )
+from .l2_evidence import (
+    L2BaselineExperimentEvidence,
+    L2BaselineResearchDecision,
+    build_l2_baseline_experiment_evidence,
+    evidence_manifest_fingerprint,
+    evidence_payload_fingerprint,
+)
 from .overfitting import (
     deflated_sharpe_ratio,
     expected_max_sharpe_under_null,
@@ -45,6 +52,8 @@ __all__ = [
     "BASELINE_STRATEGIES",
     "L2BaselineCampaignConfig",
     "L2BaselineCampaignResult",
+    "L2BaselineExperimentEvidence",
+    "L2BaselineResearchDecision",
     "L2BaselineReturnSample",
     "L2BaselineRun",
     "L2BaselineSpec",
@@ -61,10 +70,13 @@ __all__ = [
     "apply_signal_returns",
     "available_l2_baselines",
     "block_bootstrap_path",
+    "build_l2_baseline_experiment_evidence",
     "build_l2_market_returns",
     "combinatorial_purged_cv_splits",
     "deflated_sharpe_ratio",
     "delay_signal",
+    "evidence_manifest_fingerprint",
+    "evidence_payload_fingerprint",
     "expected_max_sharpe_under_null",
     "monte_carlo_block_bootstrap",
     "parameter_stability",

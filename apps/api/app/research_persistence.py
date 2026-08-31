@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import insert, select
@@ -7,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.quant.pipeline import QuantPipelineResult
+from services.validation.l2_evidence import L2BaselineExperimentEvidence
 
 from .schema_registry import CANONICAL_TABLES
 
@@ -223,3 +225,25 @@ async def persist_research_experiment(
             "experiment identity collision: persisted payload differs"
         ) from error
     return True
+
+
+async def persist_l2_baseline_evidence(
+    engine: AsyncEngine | None,
+    evidence: Sequence[L2BaselineExperimentEvidence],
+) -> int:
+    """Persist deterministic baseline controls through the Experiment Registry."""
+
+    experiment_ids = [item.experiment_id for item in evidence]
+    if len(set(experiment_ids)) != len(experiment_ids):
+        raise ValueError("L2 baseline evidence contains duplicate experiment identities")
+
+    persisted_count = 0
+    for item in evidence:
+        persisted = await persist_research_experiment(
+            engine,
+            experiment_id=item.experiment_id,
+            payload=item.payload,
+        )
+        if persisted:
+            persisted_count += 1
+    return persisted_count
