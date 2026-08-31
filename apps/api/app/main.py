@@ -367,6 +367,20 @@ def _replay_failure(error: RuntimeError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(error))
 
 
+async def _rotate_replay_persistence() -> None:
+    if persistent_journal is None:
+        return
+    try:
+        await persistent_journal.start_new_session()
+    except Exception as error:
+        metrics.increment("replay_persistence_rotation_failures")
+        logger.exception("replay persistence session rotation failed")
+        raise HTTPException(
+            status_code=503,
+            detail="replay persistence unavailable",
+        ) from error
+
+
 @app.get("/replay/status")
 def replay_status() -> dict[str, object]:
     return {"mode": SystemMode.HISTORICAL_REPLAY, **replay_session.status()}
@@ -376,6 +390,15 @@ def replay_status() -> dict[str, object]:
 async def replay_start(request: ReplayStartRequest) -> dict[str, object]:
     if runtime.kill_switch != KillSwitchState.ARMED:
         raise HTTPException(status_code=409, detail="kill switch is not armed")
+
+    ReplaySessionProbe = type(replay_session)
+    probe = ReplaySessionProbe()
+    try:
+        probe.start(request)
+    except (RuntimeError, ValueError) as error:
+        raise _replay_failure(RuntimeError(str(error))) from error
+
+    await _rotate_replay_persistence()
     status = replay_session.start(request)
     runtime.mode = SystemMode.HISTORICAL_REPLAY
     runtime.running = True
@@ -463,10 +486,11 @@ async def replay_step() -> dict[str, object]:
 async def replay_restart() -> dict[str, object]:
     if runtime.kill_switch != KillSwitchState.ARMED:
         raise HTTPException(status_code=409, detail="kill switch is not armed")
-    try:
-        status = replay_session.restart()
-    except RuntimeError as error:
-        raise _replay_failure(error) from error
+    if not replay_session.active:
+        raise _replay_failure(RuntimeError("replay session has not been started"))
+
+    await _rotate_replay_persistence()
+    status = replay_session.restart()
     runtime.mode = SystemMode.HISTORICAL_REPLAY
     runtime.running = True
     metrics.increment("replay_session_restarts")
@@ -476,10 +500,14 @@ async def replay_restart() -> dict[str, object]:
 
 @app.post("/replay/seek")
 async def replay_seek(request: ReplaySeekRequest) -> dict[str, object]:
-    try:
-        status = replay_session.seek(request.cursor)
-    except RuntimeError as error:
-        raise _replay_failure(error) from error
+    replay_state = replay_session.status()
+    if not replay_state["active"]:
+        raise _replay_failure(RuntimeError("replay session has not been started"))
+    if request.cursor > int(replay_state["total_frames"]):
+        raise _replay_failure(RuntimeError("replay cursor exceeds total frames"))
+
+    await _rotate_replay_persistence()
+    status = replay_session.seek(request.cursor)
     runtime.running = False
     await hub.broadcast("analytics", {"type": "replay", "data": status})
     return {"mode": runtime.mode, **status}
