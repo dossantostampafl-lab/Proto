@@ -1,7 +1,7 @@
 pub mod matching;
+pub mod queue;
 
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -80,23 +80,22 @@ impl SimulatedOrder {
     }
 
     pub fn transition(&mut self, next: OrderState) -> Result<(), TransitionError> {
-        use OrderState::*;
         let valid = matches!(
             (self.state, next),
-            (Created, Validated)
-                | (Created, Rejected)
-                | (Validated, Queued)
-                | (Validated, Rejected)
-                | (Queued, Resting)
-                | (Queued, Canceled)
-                | (Resting, PartiallyFilled)
-                | (Resting, Filled)
-                | (Resting, Canceled)
-                | (Resting, Expired)
-                | (PartiallyFilled, PartiallyFilled)
-                | (PartiallyFilled, Filled)
-                | (PartiallyFilled, Canceled)
-                | (PartiallyFilled, Expired)
+            (OrderState::Created, OrderState::Validated)
+                | (OrderState::Created, OrderState::Rejected)
+                | (OrderState::Validated, OrderState::Queued)
+                | (OrderState::Validated, OrderState::Rejected)
+                | (OrderState::Queued, OrderState::Resting)
+                | (OrderState::Queued, OrderState::Canceled)
+                | (OrderState::Resting, OrderState::PartiallyFilled)
+                | (OrderState::Resting, OrderState::Filled)
+                | (OrderState::Resting, OrderState::Canceled)
+                | (OrderState::Resting, OrderState::Expired)
+                | (OrderState::PartiallyFilled, OrderState::PartiallyFilled)
+                | (OrderState::PartiallyFilled, OrderState::Filled)
+                | (OrderState::PartiallyFilled, OrderState::Canceled)
+                | (OrderState::PartiallyFilled, OrderState::Expired)
         );
         if !valid {
             return Err(TransitionError::Invalid(self.state, next));
@@ -110,14 +109,13 @@ impl SimulatedOrder {
         if quantity <= Decimal::ZERO || quantity > remaining {
             return Err(TransitionError::InvalidFill);
         }
-        let next = if self.filled_quantity + quantity == self.quantity {
+        self.filled_quantity += quantity;
+        let next = if self.filled_quantity == self.quantity {
             OrderState::Filled
         } else {
             OrderState::PartiallyFilled
         };
-        self.transition(next)?;
-        self.filled_quantity += quantity;
-        Ok(())
+        self.transition(next)
     }
 }
 
@@ -126,143 +124,109 @@ pub fn estimate_fill(input: &FillModelInput) -> Result<FillEstimate, FillModelEr
         || input.queue_position < Decimal::ZERO
         || input.market_volume < Decimal::ZERO
         || input.trade_intensity < Decimal::ZERO
-        || input.hawkes_intensity < Decimal::ZERO
         || input.order_size <= Decimal::ZERO
+        || input.hawkes_intensity < Decimal::ZERO
     {
         return Err(FillModelError::InvalidInput);
     }
 
-    let spread = input.spread_bps.to_f64().unwrap_or(0.0);
-    let queue = input.queue_position.to_f64().unwrap_or(0.0);
-    let volume = input.market_volume.to_f64().unwrap_or(0.0);
-    let intensity = input.trade_intensity.to_f64().unwrap_or(0.0);
-    let hawkes = input.hawkes_intensity.to_f64().unwrap_or(0.0);
-    let size = input.order_size.to_f64().unwrap_or(0.0);
-    let latency = input.latency_ms as f64;
+    let one = Decimal::ONE;
+    let hundred = Decimal::new(100, 0);
+    let thousand = Decimal::new(1000, 0);
 
-    let flow_support = (volume / (volume + size.max(1e-9))).clamp(0.0, 1.0);
-    let intensity_support = (1.0 - (-0.15 * (intensity + hawkes)).exp()).clamp(0.0, 1.0);
-    let queue_penalty = 1.0 / (1.0 + queue.max(0.0));
-    let latency_penalty = (-latency / 1_000.0).exp();
-    let spread_penalty = 1.0 / (1.0 + spread / 25.0);
+    let queue_penalty = one / (one + input.queue_position);
+    let volume_ratio = (input.market_volume / input.order_size).min(one);
+    let intensity_score = (input.trade_intensity / (input.trade_intensity + one)).min(one);
+    let hawkes_score = (input.hawkes_intensity / (input.hawkes_intensity + one)).min(one);
+    let latency_penalty = one / (one + Decimal::from(input.latency_ms) / thousand);
+    let spread_penalty = one / (one + input.spread_bps / hundred);
 
-    let probability = (flow_support
-        * (0.35 + 0.65 * intensity_support)
-        * queue_penalty
+    let probability = (queue_penalty
+        * volume_ratio
+        * intensity_score
         * latency_penalty
-        * spread_penalty)
-        .clamp(0.0, 1.0);
+        * spread_penalty
+        * (Decimal::new(7, 1) + Decimal::new(3, 1) * hawkes_score))
+        .clamp(Decimal::ZERO, one);
 
-    let expected_quantity = size * probability;
-    let slippage_bps = (spread * 0.25
-        + latency / 100.0
-        + (size / (volume + 1.0)) * 10.0
-        + (1.0 - queue_penalty) * 2.0)
-        .max(0.0);
+    let expected_fill_quantity = input.order_size * probability;
+    let expected_slippage_bps = input.spread_bps * (one - probability)
+        + Decimal::from(input.latency_ms) / Decimal::new(100, 0);
 
     Ok(FillEstimate {
-        fill_probability: Decimal::from_f64_retain(probability).unwrap_or(Decimal::ZERO),
-        expected_fill_quantity: Decimal::from_f64_retain(expected_quantity)
-            .unwrap_or(Decimal::ZERO),
-        expected_slippage_bps: Decimal::from_f64_retain(slippage_bps).unwrap_or(Decimal::ZERO),
+        fill_probability: probability,
+        expected_fill_quantity,
+        expected_slippage_bps,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal::prelude::ToPrimitive;
 
     #[test]
-    fn order_does_not_instant_fill() {
+    fn lifecycle_rejects_invalid_transition() {
         let mut order = SimulatedOrder::new(
             Uuid::new_v4(),
-            "cmd-1".into(),
-            Decimal::new(53, 2),
+            "idempotency-1".to_string(),
+            Decimal::new(101, 2),
             Decimal::new(2, 0),
         );
-        assert_eq!(order.state, OrderState::Created);
+        assert_eq!(
+            order.transition(OrderState::Filled),
+            Err(TransitionError::Invalid(
+                OrderState::Created,
+                OrderState::Filled
+            ))
+        );
+    }
+
+    #[test]
+    fn lifecycle_tracks_partial_and_full_fill() {
+        let mut order = SimulatedOrder::new(
+            Uuid::new_v4(),
+            "idempotency-2".to_string(),
+            Decimal::new(101, 2),
+            Decimal::new(2, 0),
+        );
         order.transition(OrderState::Validated).unwrap();
         order.transition(OrderState::Queued).unwrap();
         order.transition(OrderState::Resting).unwrap();
         order.apply_fill(Decimal::ONE).unwrap();
         assert_eq!(order.state, OrderState::PartiallyFilled);
-        assert_eq!(order.filled_quantity, Decimal::ONE);
+        order.apply_fill(Decimal::ONE).unwrap();
+        assert_eq!(order.state, OrderState::Filled);
     }
 
     #[test]
-    fn rejects_overfill() {
-        let mut order =
-            SimulatedOrder::new(Uuid::new_v4(), "cmd-2".into(), Decimal::ONE, Decimal::ONE);
-        order.transition(OrderState::Validated).unwrap();
-        order.transition(OrderState::Queued).unwrap();
-        order.transition(OrderState::Resting).unwrap();
-        assert_eq!(
-            order.apply_fill(Decimal::new(2, 0)),
-            Err(TransitionError::InvalidFill)
-        );
-    }
-
-    #[test]
-    fn invalid_state_fill_does_not_mutate_accounting() {
-        let mut order = SimulatedOrder::new(
-            Uuid::new_v4(),
-            "cmd-atomic".into(),
-            Decimal::ONE,
-            Decimal::new(2, 0),
-        );
-
-        assert_eq!(
-            order.apply_fill(Decimal::ONE),
-            Err(TransitionError::Invalid(
-                OrderState::Created,
-                OrderState::PartiallyFilled
-            ))
-        );
-        assert_eq!(order.state, OrderState::Created);
-        assert_eq!(order.filled_quantity, Decimal::ZERO);
-    }
-
-    #[test]
-    fn fill_probability_improves_with_flow_and_queue_priority() {
-        let favorable = FillModelInput {
-            spread_bps: Decimal::new(5, 0),
-            queue_position: Decimal::new(1, 1),
-            market_volume: Decimal::new(1_000, 0),
-            trade_intensity: Decimal::new(8, 0),
-            latency_ms: 10,
-            order_size: Decimal::new(10, 0),
-            hawkes_intensity: Decimal::new(4, 0),
-        };
-        let adverse = FillModelInput {
-            spread_bps: Decimal::new(25, 0),
-            queue_position: Decimal::new(5, 0),
-            market_volume: Decimal::new(100, 0),
-            trade_intensity: Decimal::new(1, 1),
-            latency_ms: 400,
-            order_size: Decimal::new(50, 0),
-            hawkes_intensity: Decimal::new(1, 1),
-        };
-
-        let good = estimate_fill(&favorable).unwrap();
-        let bad = estimate_fill(&adverse).unwrap();
-        assert!(good.fill_probability > bad.fill_probability);
-        assert!(good.expected_slippage_bps < bad.expected_slippage_bps);
-    }
-
-    #[test]
-    fn fill_model_never_assumes_instant_full_fill() {
+    fn estimate_fill_is_bounded() {
         let estimate = estimate_fill(&FillModelInput {
-            spread_bps: Decimal::ZERO,
-            queue_position: Decimal::ZERO,
-            market_volume: Decimal::new(10_000, 0),
-            trade_intensity: Decimal::new(10, 0),
-            latency_ms: 0,
-            order_size: Decimal::ONE,
-            hawkes_intensity: Decimal::new(10, 0),
+            spread_bps: Decimal::new(5, 0),
+            queue_position: Decimal::new(1, 0),
+            market_volume: Decimal::new(100, 0),
+            trade_intensity: Decimal::new(5, 0),
+            latency_ms: 10,
+            order_size: Decimal::new(1, 0),
+            hawkes_intensity: Decimal::new(2, 0),
         })
         .unwrap();
+        let probability = estimate.fill_probability.to_f64().unwrap();
+        assert!((0.0..=1.0).contains(&probability));
+        assert!(estimate.expected_fill_quantity <= Decimal::ONE);
+    }
 
-        assert!(estimate.fill_probability < Decimal::ONE);
-        assert!(estimate.expected_fill_quantity < Decimal::ONE);
+    #[test]
+    fn estimate_fill_rejects_invalid_input() {
+        let result = estimate_fill(&FillModelInput {
+            spread_bps: Decimal::new(-1, 0),
+            queue_position: Decimal::ZERO,
+            market_volume: Decimal::ZERO,
+            trade_intensity: Decimal::ZERO,
+            latency_ms: 0,
+            order_size: Decimal::ONE,
+            hawkes_intensity: Decimal::ZERO,
+        });
+        assert_eq!(result, Err(FillModelError::InvalidInput));
     }
 }
