@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
+from math import isfinite
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, model_validator
 
@@ -17,6 +20,18 @@ from services.validation import (
 from .metrics_state import metrics
 
 router = APIRouter(prefix="/research/validation", tags=["research", "validation"])
+
+
+def _json_safe(value: object) -> object:
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, float) and not isfinite(value):
+        return None
+    return value
 
 
 class ParameterPointRequest(BaseModel):
@@ -45,12 +60,26 @@ class ValidationRequest(BaseModel):
             raise ValueError("regimes must have the same length as returns")
         if self.monte_carlo_block_size > len(self.returns):
             raise ValueError("monte_carlo_block_size must not exceed returns length")
+        if self.parameter_points is not None and len(self.parameter_points) < 3:
+            raise ValueError("parameter_points requires at least three points")
         return self
 
 
 class PboRequest(BaseModel):
     strategy_returns: list[list[float]] = Field(min_length=2)
     segments: int = Field(default=8, ge=4)
+
+    @model_validator(mode="after")
+    def validate_matrix(self) -> PboRequest:
+        if self.segments % 2 != 0:
+            raise ValueError("segments must be even")
+        lengths = {len(values) for values in self.strategy_returns}
+        if len(lengths) != 1 or not lengths or 0 in lengths:
+            raise ValueError("strategy return series must have equal non-zero length")
+        sample_count = next(iter(lengths))
+        if sample_count < self.segments or sample_count % self.segments != 0:
+            raise ValueError("sample count must be divisible by segments")
+        return self
 
 
 @router.post("/report")
@@ -71,7 +100,6 @@ def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
         block_size=request.monte_carlo_block_size,
         seed=request.monte_carlo_seed,
     )
-
     regime_report = (
         regime_robustness(returns, tuple(request.regimes))
         if request.regimes is not None
@@ -92,16 +120,16 @@ def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
     metrics.increment("validation_report_requests")
     return {
         "fold_count": len(folds),
-        "performance": report.metrics.__dict__,
+        "performance": _json_safe(report.metrics),
         "positive_fold_fraction": report.positive_fold_fraction,
         "worst_fold_return": report.worst_fold_return,
         "median_fold_return": report.median_fold_return,
         "robustness_score": report.robustness_score,
         "deflated_sharpe_ratio": deflated_sharpe_ratio(returns, trials=request.trials),
-        "monte_carlo": monte_carlo.__dict__,
-        "regime": regime_report.__dict__ if regime_report is not None else None,
+        "monte_carlo": _json_safe(monte_carlo),
+        "regime": _json_safe(regime_report) if regime_report is not None else None,
         "parameter_stability": (
-            stability_report.__dict__ if stability_report is not None else None
+            _json_safe(stability_report) if stability_report is not None else None
         ),
         "financial_connectivity": False,
         "real_money_execution": False,
