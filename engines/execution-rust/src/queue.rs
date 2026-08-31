@@ -80,9 +80,7 @@ impl QueueOrder {
         if event.traded_quantity < Decimal::ZERO || event.canceled_quantity < Decimal::ZERO {
             return Err(QueueModelError::InvalidEvent);
         }
-        if config.cancellation_credit < Decimal::ZERO
-            || config.cancellation_credit > Decimal::ONE
-        {
+        if config.cancellation_credit < Decimal::ZERO || config.cancellation_credit > Decimal::ONE {
             return Err(QueueModelError::InvalidConfig);
         }
 
