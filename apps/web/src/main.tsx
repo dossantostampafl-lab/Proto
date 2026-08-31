@@ -160,6 +160,7 @@ type StreamEnvelope<T> = {
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 const REPLAY_SPEEDS: ReplaySpeed[] = ["1x", "5x", "10x", "50x", "100x", "MAX"];
+const STREAM_CHANNEL_COUNT = 5;
 
 function formatNumber(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", {
@@ -192,7 +193,12 @@ function App() {
     let cancelled = false;
     let refreshTimer: number | undefined;
     let reconnectTimer: number | undefined;
-    const sockets = new Set<WebSocket>();
+    const sockets = new Map<string, WebSocket>();
+    const openChannels = new Set<string>();
+
+    function syncStreamOnline() {
+      if (!cancelled) setStreamOnline(openChannels.size === STREAM_CHANNEL_COUNT);
+    }
 
     async function refresh() {
       try {
@@ -252,10 +258,20 @@ function App() {
     }
 
     function openSocket(channel: string, onMessage: (message: StreamEnvelope<unknown>) => void) {
+      const existing = sockets.get(channel);
+      if (
+        existing &&
+        (existing.readyState === WebSocket.CONNECTING || existing.readyState === WebSocket.OPEN)
+      ) {
+        return;
+      }
+
       const socket = new WebSocket(`${WS_BASE}/ws/${channel}`);
-      sockets.add(socket);
+      sockets.set(channel, socket);
       socket.onopen = () => {
-        if (!cancelled) setStreamOnline(true);
+        if (sockets.get(channel) !== socket) return;
+        openChannels.add(channel);
+        syncStreamOnline();
       };
       socket.onmessage = (event) => {
         try {
@@ -265,11 +281,15 @@ function App() {
         }
       };
       socket.onerror = () => {
-        if (!cancelled) setStreamOnline(false);
+        // Force a close so the channel-specific reconnect loop can replace this socket.
+        openChannels.delete(channel);
+        syncStreamOnline();
+        socket.close();
       };
       socket.onclose = () => {
-        sockets.delete(socket);
-        if (!cancelled) setStreamOnline(false);
+        if (sockets.get(channel) === socket) sockets.delete(channel);
+        openChannels.delete(channel);
+        syncStreamOnline();
       };
     }
 
@@ -309,15 +329,16 @@ function App() {
     connectStreams();
     refreshTimer = window.setInterval(() => void refresh(), 30_000);
     reconnectTimer = window.setInterval(() => {
-      if (!cancelled && sockets.size === 0) connectStreams();
+      if (!cancelled) connectStreams();
     }, 5_000);
 
     return () => {
       cancelled = true;
       if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
       if (reconnectTimer !== undefined) window.clearInterval(reconnectTimer);
-      for (const socket of sockets) socket.close();
+      for (const socket of sockets.values()) socket.close();
       sockets.clear();
+      openChannels.clear();
     };
   }, []);
 
@@ -364,7 +385,7 @@ function App() {
     {
       label: "Stream",
       value: streamOnline ? "STREAMING" : "RECONCILING",
-      note: streamOnline ? "WebSocket updates" : "REST fallback active",
+      note: streamOnline ? "All WebSocket channels online" : "REST fallback / channel recovery active",
     },
     {
       label: "Replay",
