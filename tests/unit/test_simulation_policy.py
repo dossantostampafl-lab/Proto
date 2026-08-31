@@ -6,6 +6,7 @@ from apps.api.app.models import (
     SimulationOrder,
     SimulationRequest,
 )
+from apps.api.app.settings import settings
 from apps.api.app.simulation_policy import authoritative_simulation_request
 
 
@@ -25,10 +26,14 @@ def _request() -> SimulationRequest:
             ask=60_010.0,
         ),
         current_position_notional=1.0,
+        current_gross_exposure=1.0,
+        current_asset_exposure=1.0,
         limits=RiskLimits(
             max_order_notional=1_000_000.0,
             max_position_notional=1_000_000.0,
             max_slippage_bps=1_000.0,
+            max_gross_exposure=1_000_000.0,
+            max_asset_concentration=1.0,
         ),
     )
 
@@ -45,12 +50,21 @@ def test_authoritative_policy_caps_client_risk_limits() -> None:
     assert effective.limits.max_order_notional == 10_000.0
     assert effective.limits.max_position_notional == 25_000.0
     assert effective.limits.max_slippage_bps == 75.0
+    assert effective.limits.max_gross_exposure == settings.simulation_max_gross_exposure
+    assert (
+        effective.limits.max_asset_concentration
+        == settings.simulation_max_asset_concentration
+    )
 
 
 def test_authoritative_policy_uses_canonical_position_when_client_underreports() -> None:
     effective = authoritative_simulation_request(
         _request(),
-        {"positions": [{"asset": "BTC", "quantity": 0.3}]},
+        {
+            "positions": [{"asset": "BTC", "quantity": 0.3}],
+            "gross_exposure": 42_000.0,
+            "exposure_by_asset": {"BTC": 18_000.0, "ETH": 24_000.0},
+        },
         max_order_notional=10_000.0,
         max_position_notional=25_000.0,
         max_slippage_bps=75.0,
@@ -58,6 +72,8 @@ def test_authoritative_policy_uses_canonical_position_when_client_underreports()
 
     expected_notional = 0.3 * ((60_000.0 + 60_010.0) / 2.0)
     assert effective.current_position_notional == expected_notional
+    assert effective.current_gross_exposure == 42_000.0
+    assert effective.current_asset_exposure == 18_000.0
 
 
 def test_authoritative_policy_preserves_stricter_client_limits() -> None:
@@ -67,6 +83,8 @@ def test_authoritative_policy_preserves_stricter_client_limits() -> None:
                 max_order_notional=5_000.0,
                 max_position_notional=12_000.0,
                 max_slippage_bps=20.0,
+                max_gross_exposure=50_000.0,
+                max_asset_concentration=0.60,
             )
         }
     )
