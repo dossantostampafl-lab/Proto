@@ -232,7 +232,7 @@ async def simulate(request: SimulationRequest) -> SimulationResult:
     if result.accepted and result.fill is not None:
         if persistent_journal is not None:
             try:
-                await persistent_journal.append(effective_request.order, result.fill)
+                inserted = await persistent_journal.append(effective_request.order, result.fill)
             except Exception:
                 metrics.increment("simulation_persistence_failures")
                 metrics.increment("simulation_rejected")
@@ -241,8 +241,23 @@ async def simulate(request: SimulationRequest) -> SimulationResult:
                     accepted=False,
                     reason="simulation persistence unavailable",
                 )
+            if not inserted:
+                metrics.increment("simulation_duplicate_orders")
+                metrics.increment("simulation_rejected")
+                return SimulationResult(
+                    accepted=False,
+                    reason="duplicate simulated order",
+                )
 
-        portfolio.apply_fill(effective_request.order, result.fill)
+        applied = portfolio.apply_fill(effective_request.order, result.fill)
+        if not applied:
+            metrics.increment("simulation_duplicate_orders")
+            metrics.increment("simulation_rejected")
+            return SimulationResult(
+                accepted=False,
+                reason="duplicate simulated order",
+            )
+
         metrics.increment("simulation_accepted")
         fill_event = {
             **result.fill.model_dump(mode="json"),
