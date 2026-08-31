@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from hashlib import sha256
-import json
 from math import isfinite
 
 
