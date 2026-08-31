@@ -4,7 +4,14 @@ from apps.api.app.models import Asset, Fill, Side, SimulationOrder
 from apps.api.app.portfolio import PaperPortfolio
 
 
-def _fill(*, side: Side, quantity: float, price: float, fee: float, slippage_bps: float) -> tuple[SimulationOrder, Fill]:
+def _fill(
+    *,
+    side: Side,
+    quantity: float,
+    price: float,
+    fee: float,
+    slippage_bps: float,
+) -> tuple[SimulationOrder, Fill]:
     order_id = uuid4()
     order = SimulationOrder(
         id=order_id,
