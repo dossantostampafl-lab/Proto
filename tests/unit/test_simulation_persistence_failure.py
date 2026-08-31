@@ -48,7 +48,8 @@ async def test_persistence_failure_does_not_mutate_paper_portfolio(monkeypatch) 
     assert result.fill is None
     assert result.reason == "simulation persistence unavailable"
     assert main.portfolio.snapshot()["positions"] == []
-    snapshot = main.metrics.snapshot()
-    assert snapshot["counters"]["simulation_persistence_failures"] == 1
-    assert snapshot["counters"]["simulation_accepted"] == 0
-    assert snapshot["counters"]["simulation_rejected"] == 1
+    counters = main.metrics.snapshot()["counters"]
+    assert isinstance(counters, dict)
+    assert counters["simulation_persistence_failures"] == 1
+    assert counters.get("simulation_accepted", 0) == 0
+    assert counters["simulation_rejected"] == 1
