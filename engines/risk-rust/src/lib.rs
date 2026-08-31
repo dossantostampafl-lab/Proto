@@ -1,3 +1,5 @@
+pub mod hardening;
+
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -105,6 +107,11 @@ impl RiskManager {
         } else {
             request.current_total_exposure + request.order_notional.abs()
         };
+        let projected_correlated_exposure = if risk_reducing {
+            (request.correlated_exposure - request.order_notional.abs()).max(Decimal::ZERO)
+        } else {
+            request.correlated_exposure + request.order_notional.abs()
+        };
 
         if self.kill_switch != KillSwitchState::Armed {
             reasons.push(RejectionReason::KillSwitch);
@@ -127,7 +134,7 @@ impl RiskManager {
         if projected_total_exposure > self.limits.max_total_exposure {
             reasons.push(RejectionReason::TotalExposureLimit);
         }
-        if request.correlated_exposure.abs() > self.limits.max_correlated_exposure {
+        if projected_correlated_exposure > self.limits.max_correlated_exposure {
             reasons.push(RejectionReason::CorrelatedExposureLimit);
         }
         if !risk_reducing && request.open_positions >= self.limits.max_open_positions {
@@ -304,6 +311,20 @@ mod tests {
                 if reasons.contains(&RejectionReason::EdgeTooSmall)
                     && reasons.contains(&RejectionReason::ConfidenceTooLow)
                     && reasons.contains(&RejectionReason::LiquidityTooLow)
+        ));
+    }
+
+    #[test]
+    fn correlated_limit_includes_candidate_order_notional() {
+        let mut rm = manager();
+        rm.limits.max_correlated_exposure = Decimal::new(90_000, 0);
+        let mut candidate = request();
+        candidate.correlated_exposure = Decimal::new(50_000, 0);
+        candidate.order_notional = Decimal::new(50_000, 0);
+        assert!(matches!(
+            rm.evaluate(&candidate),
+            RiskDecision::Rejected(reasons)
+                if reasons.contains(&RejectionReason::CorrelatedExposureLimit)
         ));
     }
 }
