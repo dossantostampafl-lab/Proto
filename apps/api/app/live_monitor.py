@@ -258,7 +258,7 @@ class LiveCryptoMonitor:
 
         health = self._adapter.health()
         self._sync_connection_generation(health.connection_generation)
-        report = self._quality.evaluate(tick)
+        report = self._quality.evaluate(tick, commit=False)
         if not report.valid:
             metrics.increment("live_market_frames_rejected")
             for issue in report.issues:
@@ -285,6 +285,12 @@ class LiveCryptoMonitor:
             connection_generation=health.connection_generation,
         ):
             metrics.increment("live_market_frames_rejected")
+            return False
+
+        committed_report = self._quality.evaluate(tick, commit=True)
+        if not committed_report.valid:
+            metrics.increment("live_market_frames_rejected")
+            metrics.increment("live_market_quality_commit_conflicts")
             return False
 
         self._latest[tick.symbol] = tick
