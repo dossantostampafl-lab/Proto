@@ -1,5 +1,5 @@
-from datetime import UTC, datetime, timedelta
 import math
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
