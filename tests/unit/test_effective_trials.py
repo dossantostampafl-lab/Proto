@@ -30,13 +30,12 @@ def test_identical_trials_collapse_to_one_independent_trial() -> None:
 
 def test_partially_correlated_trials_reduce_search_burden() -> None:
     trial_two = (0.008, -0.004, 0.011, -0.001, 0.007, -0.003)
-    trial_three = (-0.004, 0.010, -0.002, 0.012, -0.005, 0.009)
+    trial_three = (0.002, -0.008, 0.006, 0.004, 0.001, -0.003)
 
     report = effective_number_of_trials((BASE, trial_two, trial_three))
 
-    assert 1.0 <= report.implied_independent_trials <= 3.0
-    assert 1 <= report.effective_independent_trials <= 3
-    assert report.effective_independent_trials < report.declared_trials
+    assert 1.0 < report.implied_independent_trials < 3.0
+    assert 1 < report.effective_independent_trials < report.declared_trials
 
 
 def test_negative_average_correlation_cannot_exceed_declared_trials() -> None:
