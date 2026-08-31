@@ -181,3 +181,45 @@ async def persist_quant_lineage(
             return True
         raise
     return True
+
+
+async def persist_research_experiment(
+    engine: AsyncEngine | None,
+    *,
+    experiment_id: str,
+    payload: dict[str, object],
+) -> bool:
+    """Append one deterministic experiment result when persistence is enabled.
+
+    Replaying the exact same manifest/result is idempotent. Reusing the same
+    experiment identity for a different result is rejected so research evidence
+    cannot be silently overwritten.
+    """
+    if engine is None:
+        return False
+
+    table = CANONICAL_TABLES["research_experiments"]
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                insert(table).values(
+                    id=experiment_id,
+                    created_at=datetime.now(UTC),
+                    correlation_id=experiment_id,
+                    payload=payload,
+                )
+            )
+    except IntegrityError as error:
+        async with engine.connect() as connection:
+            existing = await connection.execute(
+                select(table.c.payload).where(table.c.id == experiment_id)
+            )
+            existing_payload = existing.scalar_one_or_none()
+        if existing_payload is None:
+            raise
+        if existing_payload == payload:
+            return True
+        raise RuntimeError(
+            "experiment identity collision: persisted payload differs"
+        ) from error
+    return True
