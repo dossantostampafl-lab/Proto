@@ -4,7 +4,17 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, select, text, update
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    UniqueConstraint,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -29,9 +39,16 @@ class SimulationSessionRecord(Base):
 
 class SimulationFillRecord(Base):
     __tablename__ = "simulation_fills"
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "order_id",
+            name="uq_simulation_fills_session_order",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    order_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    order_id: Mapped[str] = mapped_column(String(36), index=True)
     session_id: Mapped[str] = mapped_column(String(36), default="legacy", index=True)
     market_id: Mapped[str] = mapped_column(String(120), index=True)
     asset: Mapped[str] = mapped_column(String(16), index=True)
@@ -142,7 +159,8 @@ class AsyncSqlFillJournal:
         async with self.session_factory() as session:
             existing = await session.scalar(
                 select(SimulationFillRecord.id).where(
-                    SimulationFillRecord.order_id == order_id
+                    SimulationFillRecord.session_id == session_id,
+                    SimulationFillRecord.order_id == order_id,
                 )
             )
             if existing is not None:
