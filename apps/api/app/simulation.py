@@ -58,16 +58,16 @@ class RiskEngine:
             return False, "max order notional exceeded"
         if request.current_drawdown >= request.limits.max_drawdown and not risk_reducing:
             return False, "max drawdown exceeded"
-        if request.snapshot.volatility > request.limits.max_volatility and not risk_reducing:
-            return False, "max volatility exceeded"
-        if executable_order_notional > max_book_supported_notional:
-            return False, "insufficient top-of-book liquidity"
         if projected_position_notional > request.limits.max_position_notional:
             return False, "max position notional exceeded"
         if projected_gross_exposure > request.limits.max_gross_exposure:
             return False, "max gross exposure exceeded"
         if projected_concentration > request.limits.max_asset_concentration:
             return False, "max asset concentration exceeded"
+        if request.snapshot.volatility > request.limits.max_volatility and not risk_reducing:
+            return False, "max volatility exceeded"
+        if executable_order_notional > max_book_supported_notional:
+            return False, "insufficient top-of-book liquidity"
         if estimated_slippage_bps > request.limits.max_slippage_bps:
             return False, "max slippage exceeded"
         return True, "accepted"
