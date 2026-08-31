@@ -12,6 +12,7 @@ from websockets.asyncio.client import connect
 from services.replay import ReplaySession
 
 from .contracts import OrderBookSnapshot
+from .l2_corpus_storage import PublicL2CorpusSink
 from .live import (
     _COINBASE_PUBLIC_WS,
     PublicFeedTimeoutError,
@@ -31,6 +32,7 @@ class PublicL2StreamHealth:
     frames_received: int
     snapshots_emitted: int
     integrity_error_count: int
+    corpus_write_error_count: int
     message_timeout_count: int
     connected_since: datetime | None
     last_message_at: datetime | None
@@ -52,6 +54,7 @@ class CoinbasePublicL2StreamAdapter:
         message_timeout_seconds: float = 35.0,
         max_levels_per_side: int = 10_000,
         snapshot_depth: int = 1_000,
+        corpus_sink: PublicL2CorpusSink | None = None,
     ) -> None:
         resolved_products = tuple(dict.fromkeys(products))
         if not resolved_products:
@@ -75,6 +78,7 @@ class CoinbasePublicL2StreamAdapter:
         self.reconnect_min_seconds = reconnect_min_seconds
         self.reconnect_max_seconds = reconnect_max_seconds
         self.message_timeout_seconds = message_timeout_seconds
+        self.corpus_sink = corpus_sink
         self._book = PublicL2Book(
             max_levels_per_side=max_levels_per_side,
             snapshot_depth=snapshot_depth,
@@ -86,6 +90,7 @@ class CoinbasePublicL2StreamAdapter:
         self._frames_received = 0
         self._snapshots_emitted = 0
         self._integrity_error_count = 0
+        self._corpus_write_error_count = 0
         self._message_timeout_count = 0
         self._connected_since: datetime | None = None
         self._last_message_at: datetime | None = None
@@ -105,6 +110,7 @@ class CoinbasePublicL2StreamAdapter:
             frames_received=self._frames_received,
             snapshots_emitted=self._snapshots_emitted,
             integrity_error_count=self._integrity_error_count,
+            corpus_write_error_count=self._corpus_write_error_count,
             message_timeout_count=self._message_timeout_count,
             connected_since=self._connected_since,
             last_message_at=self._last_message_at,
@@ -166,6 +172,15 @@ class CoinbasePublicL2StreamAdapter:
                             except PublicL2IntegrityError:
                                 self._integrity_error_count += 1
                                 raise
+                            if snapshots and self.corpus_sink is not None:
+                                try:
+                                    self.corpus_sink.append_message(
+                                        message,
+                                        connection_generation=self._connection_generation,
+                                    )
+                                except Exception:
+                                    self._corpus_write_error_count += 1
+                                    raise
                             if snapshots:
                                 delay = self.reconnect_min_seconds
                             for snapshot in snapshots:
