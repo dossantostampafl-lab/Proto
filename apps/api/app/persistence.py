@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .models import Fill, SimulationOrder
+from .portfolio import PaperPortfolio
+from .portfolio_recovery import recover_paper_portfolio
 from .schema_registry import canonical_metadata
 
 
@@ -44,6 +46,14 @@ class SimulationFillRecord(Base):
         }
 
 
+_recovery_target: PaperPortfolio | None = None
+
+
+def register_portfolio_recovery_target(portfolio: PaperPortfolio) -> None:
+    global _recovery_target
+    _recovery_target = portfolio
+
+
 def build_engine(database_url: str) -> AsyncEngine:
     return create_async_engine(database_url, pool_pre_ping=True)
 
@@ -52,6 +62,10 @@ async def init_database(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await connection.run_sync(canonical_metadata.create_all)
+
+    if _recovery_target is not None:
+        journal = AsyncSqlFillJournal(engine)
+        await recover_paper_portfolio(_recovery_target, journal.iter_chronological())
 
 
 async def database_ready(engine: AsyncEngine) -> bool:
