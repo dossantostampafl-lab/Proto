@@ -9,7 +9,6 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.events.reconciliation import reconcile
 from services.quant.core import (
     EdgeBreakdown,
     ProbabilityEstimate,
@@ -38,6 +37,7 @@ from .models import (
 )
 from .observability import LatencyTimer, access_log
 from .persistence import database_ready, init_database
+from .reconciliation_service import reconciliation_status as build_reconciliation_status
 from .replay import (
     ReplaySeekRequest,
     ReplaySpeedRequest,
@@ -268,46 +268,9 @@ async def get_fills(limit: int = Query(default=100, ge=1, le=1_000)) -> dict[str
     return {"mode": SystemMode.SIMULATION, "count": len(entries), "fills": entries}
 
 
-def _positions_from_fills(entries: list[dict[str, object]]) -> dict[str, float]:
-    positions: dict[str, float] = {}
-    for entry in entries:
-        asset = str(entry["asset"])
-        quantity = float(entry["filled_quantity"])
-        signed_quantity = quantity if str(entry["side"]) == "BUY" else -quantity
-        positions[asset] = positions.get(asset, 0.0) + signed_quantity
-    return positions
-
-
 @app.get("/v1/reconciliation")
 async def reconciliation_status() -> dict[str, object]:
-    memory_entries = portfolio.journal(1_000)
-    authoritative_entries = (
-        await persistent_journal.list(1_000)
-        if persistent_journal is not None
-        else memory_entries
-    )
-    actual_positions = {
-        str(position["asset"]): float(position["quantity"])
-        for position in portfolio.snapshot()["positions"]
-    }
-    result = reconcile(
-        order_ids={str(entry["order_id"]) for entry in memory_entries},
-        fill_order_ids={str(entry["order_id"]) for entry in authoritative_entries},
-        expected_positions=_positions_from_fills(authoritative_entries),
-        actual_positions=actual_positions,
-        journal_event_count=len(memory_entries),
-        persisted_event_count=len(authoritative_entries),
-    )
-    metrics.increment("reconciliation_checks")
-    if not result.consistent:
-        metrics.increment("reconciliation_failures")
-    return {
-        "mode": runtime.mode,
-        "consistent": result.consistent,
-        "issues": [issue.value for issue in result.issues],
-        "journal_fill_count": len(memory_entries),
-        "authoritative_fill_count": len(authoritative_entries),
-    }
+    return await build_reconciliation_status()
 
 
 @app.post("/simulation/start", response_model=RuntimeState)
