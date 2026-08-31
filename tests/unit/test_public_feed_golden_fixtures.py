@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from services.market_data.public_feed_parser import parse_public_ticker_message
 
 
