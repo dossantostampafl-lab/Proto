@@ -56,10 +56,12 @@ from .stability import (
     parameter_stability,
     regime_robustness,
 )
+from .trials import EffectiveTrialReport, effective_number_of_trials
 
 __all__ = [
     "BASELINE_STRATEGIES",
     "CandidateKind",
+    "EffectiveTrialReport",
     "L2BaselineCampaignConfig",
     "L2BaselineCampaignResult",
     "L2BaselineExperimentEvidence",
@@ -90,6 +92,7 @@ __all__ = [
     "combinatorial_purged_cv_splits",
     "deflated_sharpe_ratio",
     "delay_signal",
+    "effective_number_of_trials",
     "evaluate_promotion_gate",
     "evidence_manifest_fingerprint",
     "evidence_payload_fingerprint",
