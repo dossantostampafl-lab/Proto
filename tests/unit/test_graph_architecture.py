@@ -37,6 +37,11 @@ def test_api_main_delegates_reconciliation_boundary() -> None:
     assert ".reconciliation_service" in imports
 
 
+def test_live_monitor_delegates_persistence_boundary() -> None:
+    imports = _imports(API_APP / "live_monitor.py")
+    assert ".live_persistence_coordinator" in imports
+
+
 def test_analytics_surface_uses_canonical_portfolio_state() -> None:
     assert surface.portfolio is app_state.portfolio
 
