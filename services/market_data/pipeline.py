@@ -52,6 +52,7 @@ class MarketDataPipelineSnapshot:
     publish_failures: int
     published: int
     tracked_event_ids: int
+    dedupe_capacity: int
     tracked_markets: int
 
 
@@ -69,19 +70,24 @@ class MarketDataPipeline:
         stream: str = "proto.market.normalized",
         feature_window: FeatureWindow = FeatureWindow.S15,
         history_limit: int = 4_096,
+        dedupe_limit: int = 100_000,
         quality_monitor: DataQualityMonitor | None = None,
     ) -> None:
         if history_limit < 2:
             raise ValueError("history_limit must be at least 2")
+        if dedupe_limit < 2:
+            raise ValueError("dedupe_limit must be at least 2")
         self._event_runtime = event_runtime
         self._stream = stream
         self._feature_window = feature_window
         self._history_limit = history_limit
+        self._dedupe_limit = dedupe_limit
         self._quality = quality_monitor or DataQualityMonitor()
         self._history: dict[tuple[str, str], deque[MarketTick]] = defaultdict(
             lambda: deque(maxlen=self._history_limit)
         )
         self._seen_event_ids: set[str] = set()
+        self._event_id_order: deque[str] = deque()
         self._accepted = 0
         self._duplicates = 0
         self._quality_rejections = 0
@@ -104,6 +110,13 @@ class MarketDataPipeline:
     def _validate_received_at(received_at: datetime) -> None:
         if received_at.tzinfo is None or received_at.utcoffset() is None:
             raise ValueError("received_at must be timezone-aware")
+
+    def _remember_event_id(self, identifier: str) -> None:
+        if len(self._event_id_order) >= self._dedupe_limit:
+            evicted = self._event_id_order.popleft()
+            self._seen_event_ids.remove(evicted)
+        self._event_id_order.append(identifier)
+        self._seen_event_ids.add(identifier)
 
     async def ingest(
         self,
@@ -176,7 +189,7 @@ class MarketDataPipeline:
                 raise
             self._published += 1
 
-        self._seen_event_ids.add(identifier)
+        self._remember_event_id(identifier)
         self._accepted += 1
         return MarketDataPipelineResult(
             event=event,
@@ -194,6 +207,7 @@ class MarketDataPipeline:
             publish_failures=self._publish_failures,
             published=self._published,
             tracked_event_ids=len(self._seen_event_ids),
+            dedupe_capacity=self._dedupe_limit,
             tracked_markets=len(self._history),
         )
 
@@ -201,6 +215,7 @@ class MarketDataPipeline:
         self._quality.reset()
         self._history.clear()
         self._seen_event_ids.clear()
+        self._event_id_order.clear()
         self._accepted = 0
         self._duplicates = 0
         self._quality_rejections = 0
