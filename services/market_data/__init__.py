@@ -33,6 +33,7 @@ from .live_storage import (
     PersistedLiveTick,
     PersistedLiveTickPage,
 )
+from .pipeline import MarketDataPipeline, MarketDataPipelineResult, NormalizedMarketEvent
 from .public_feed_parser import PublicCryptoFeedError, parse_public_ticker_message
 
 __all__ = [
@@ -50,8 +51,11 @@ __all__ = [
     "LiveTickJournal",
     "LiveTickJournalError",
     "MarketDataAdapter",
+    "MarketDataPipeline",
+    "MarketDataPipelineResult",
     "MarketTick",
     "MockPredictionMarketAdapter",
+    "NormalizedMarketEvent",
     "OrderBookMetrics",
     "OrderBookSnapshot",
     "PersistedLiveTick",
