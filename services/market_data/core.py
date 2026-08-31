@@ -104,6 +104,7 @@ class DataQualityMonitor:
         tick: MarketTick,
         *,
         now: datetime | None = None,
+        commit: bool = True,
     ) -> DataQualityReport:
         issues: list[DataQualityIssue] = []
         current_time = now or datetime.now(UTC)
@@ -162,7 +163,7 @@ class DataQualityMonitor:
                     if relative_jump > self.max_relative_price_jump:
                         issues.append(DataQualityIssue.PRICE_JUMP)
 
-        if not issues:
+        if commit and not issues:
             self._last_by_key[key] = tick
 
         return DataQualityReport(valid=not issues, issues=issues)
