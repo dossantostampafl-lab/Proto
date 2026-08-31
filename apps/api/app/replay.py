@@ -6,6 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from services.replay import ReplayEngine, ReplayEvent, ReplayPhase
+from services.replay import ReplaySession as CoreReplaySession
+
 from .models import MarketSnapshot
 
 ReplaySpeed = Literal["1x", "5x", "10x", "50x", "100x", "MAX"]
@@ -37,8 +40,48 @@ class ReplaySpeedRequest(BaseModel):
 
 class HistoricalReplay:
     def __init__(self, frames: list[ReplayFrame]) -> None:
-        self._frames = sorted(frames, key=lambda item: item.timestamp)
+        indexed_frames = list(enumerate(frames))
+        indexed_frames.sort(
+            key=lambda item: (
+                item[1].timestamp,
+                item[1].snapshot.market_id,
+                item[0],
+            )
+        )
+
+        sequence_by_stream: dict[str, int] = {}
+        frame_by_event_id: dict[str, ReplayFrame] = {}
+        events: list[ReplayEvent] = []
+        for original_index, frame in indexed_frames:
+            stream = frame.snapshot.market_id
+            sequence = sequence_by_stream.get(stream, 0)
+            sequence_by_stream[stream] = sequence + 1
+            event_id = f"frame-{original_index}"
+            frame_by_event_id[event_id] = frame
+            events.append(
+                ReplayEvent(
+                    event_id=event_id,
+                    observed_at=frame.timestamp,
+                    phase=ReplayPhase.MARKET_DATA,
+                    stream=stream,
+                    sequence=sequence,
+                    event_type="MARKET_SNAPSHOT",
+                    payload=frame.snapshot.model_dump(mode="json"),
+                )
+            )
+
+        session = CoreReplaySession(
+            session_id="api-historical-replay",
+            seed=0,
+            events=tuple(events),
+        )
+        self._core_engine = ReplayEngine(session)
+        self._frames = tuple(frame_by_event_id[event.event_id] for event in self._core_engine.ordered_events)
         self._cursor = 0
+
+    @property
+    def fingerprint(self) -> str:
+        return self._core_engine.fingerprint()
 
     @property
     def total_frames(self) -> int:
@@ -73,7 +116,7 @@ class HistoricalReplay:
         return frame
 
     def run_all(self) -> list[ReplayFrame]:
-        remaining = self._frames[self._cursor :]
+        remaining = list(self._frames[self._cursor :])
         self._cursor = len(self._frames)
         return remaining
 
@@ -99,9 +142,16 @@ class ReplaySession:
     def speed(self) -> ReplaySpeed:
         return self._speed
 
+    @property
+    def current_timestamp(self) -> datetime | None:
+        return self._last_frame.timestamp if self._last_frame is not None else None
+
     def start(self, request: ReplayStartRequest) -> dict[str, object]:
         frames = [
-            ReplayFrame(timestamp=item.timestamp, snapshot=item.snapshot)
+            ReplayFrame(
+                timestamp=item.timestamp,
+                snapshot=item.snapshot.model_copy(update={"observed_at": item.timestamp}),
+            )
             for item in request.frames
         ]
         self._engine = HistoricalReplay(frames)
@@ -169,6 +219,7 @@ class ReplaySession:
                 "total_frames": 0,
                 "finished": False,
                 "last_timestamp": None,
+                "fingerprint": None,
             }
         return {
             "active": True,
@@ -178,10 +229,10 @@ class ReplaySession:
             "total_frames": self._engine.total_frames,
             "finished": self._engine.finished,
             "last_timestamp": self._last_frame.timestamp if self._last_frame else None,
+            "fingerprint": self._engine.fingerprint,
         }
 
     def _require_engine(self) -> HistoricalReplay:
         if self._engine is None:
             raise RuntimeError("replay session has not been started")
         return self._engine
-
