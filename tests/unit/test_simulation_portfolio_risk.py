@@ -47,7 +47,12 @@ def _request(
 
 
 def test_rejects_projected_gross_exposure_breach() -> None:
-    request = _request(gross=70_000.0, asset_exposure=20_000.0)
+    request = _request(
+        gross=70_000.0,
+        asset_exposure=20_000.0,
+        quantity=3.0,
+        max_concentration=1.0,
+    )
 
     accepted, reason = RiskEngine().validate(request, estimated_slippage_bps=5.0)
 
