@@ -2,7 +2,6 @@ pub mod matching;
 pub mod queue;
 
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -164,6 +163,7 @@ pub fn estimate_fill(input: &FillModelInput) -> Result<FillEstimate, FillModelEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal::prelude::ToPrimitive;
 
     #[test]
     fn lifecycle_rejects_invalid_transition() {
