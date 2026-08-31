@@ -94,6 +94,8 @@ class RiskLimits(BaseModel):
     max_order_notional: float = Field(default=10_000, gt=0)
     max_position_notional: float = Field(default=25_000, gt=0)
     max_slippage_bps: float = Field(default=75, ge=0)
+    max_gross_exposure: float = Field(default=75_000, gt=0)
+    max_asset_concentration: float = Field(default=1.0, gt=0, le=1.0)
 
 
 class SimulationRequest(BaseModel):
@@ -103,6 +105,8 @@ class SimulationRequest(BaseModel):
     snapshot: MarketSnapshot
     current_position_notional: float = Field(default=0, ge=0)
     current_position_quantity: float = 0.0
+    current_gross_exposure: float = Field(default=0, ge=0)
+    current_asset_exposure: float = Field(default=0, ge=0)
     limits: RiskLimits = Field(default_factory=RiskLimits)
     server_execution_permitted: bool = True
 

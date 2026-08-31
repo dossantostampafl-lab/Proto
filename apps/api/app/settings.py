@@ -39,6 +39,17 @@ class Settings(BaseSettings):
         ge=0.0,
         allow_inf_nan=False,
     )
+    simulation_max_gross_exposure: float = Field(
+        default=75_000.0,
+        gt=0.0,
+        allow_inf_nan=False,
+    )
+    simulation_max_asset_concentration: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
 
     @field_validator("system_mode")
     @classmethod
