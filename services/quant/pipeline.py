@@ -12,6 +12,11 @@ from services.hawkes.core import ExponentialHawkesEngine, HawkesEstimate
 from .calibration import CalibrationReport, calibration_report
 from .core import EdgeBreakdown, ProbabilityEstimate, compute_edge, estimate_probability
 from .expected_value import ExpectedValueResult, calculate_expected_value
+from .hierarchical_trend import (
+    HierarchicalTrendInput,
+    HierarchicalTrendResult,
+    evaluate_hierarchical_trend,
+)
 
 
 class CalibrationSample(BaseModel):
@@ -45,6 +50,7 @@ class QuantPipelineInput(BaseModel):
     hawkes_alpha: float = Field(default=0.1, ge=0.0, allow_inf_nan=False)
     hawkes_beta: float = Field(default=1.0, gt=0.0, allow_inf_nan=False)
     expiry_at: datetime | None = None
+    hierarchical_trend: HierarchicalTrendInput | None = None
 
     @model_validator(mode="after")
     def validate_replay_clock(self) -> QuantPipelineInput:
@@ -86,6 +92,9 @@ class QuantPipelineResult(BaseModel):
     hawkes: HawkesEstimate
     greeks: SyntheticGreeks
     time_exposure: TimeExposure
+    hierarchical_trend: HierarchicalTrendResult | None
+    candidate_decision: str
+    candidate_rejection_reasons: tuple[str, ...]
     model_version: str
     feature_version: str
 
@@ -141,6 +150,21 @@ def _correlation_id(data: QuantPipelineInput, override: str | None) -> str:
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _candidate_decision(
+    edge: EdgeBreakdown,
+    expected_value: ExpectedValueResult,
+    trend: HierarchicalTrendResult | None,
+) -> tuple[str, tuple[str, ...]]:
+    reasons: list[str] = []
+    if edge.decision != "APPROVE_CANDIDATE":
+        reasons.append("EDGE_BELOW_THRESHOLD")
+    if expected_value.risk_adjusted_ev <= 0.0:
+        reasons.append("NON_POSITIVE_RISK_ADJUSTED_EV")
+    if trend is not None and trend.decision != "APPROVED":
+        reasons.extend(f"TREND:{reason}" for reason in trend.rejection_reasons)
+    return ("APPROVED" if not reasons else "REJECTED", tuple(reasons))
+
+
 def run_quant_pipeline(
     data: QuantPipelineInput,
     *,
@@ -149,8 +173,8 @@ def run_quant_pipeline(
     """Run the deterministic research/replay probability-to-edge pipeline.
 
     The function is pure with respect to external state. Replay callers provide
-    the source event timestamp, calibration observations, and event times, so
-    no wall-clock data can leak into the result.
+    source timestamps, calibration observations, event times, and optional
+    hierarchical trend context, so no wall-clock data can leak into the result.
     """
     raw: ProbabilityEstimate = estimate_probability(
         market_probability=data.market_probability,
@@ -228,6 +252,17 @@ def run_quant_pipeline(
         imbalance=data.imbalance,
     )
 
+    trend = (
+        evaluate_hierarchical_trend(data.hierarchical_trend)
+        if data.hierarchical_trend
+        else None
+    )
+    candidate_decision, candidate_rejection_reasons = _candidate_decision(
+        edge,
+        expected_value,
+        trend,
+    )
+
     return QuantPipelineResult(
         correlation_id=_correlation_id(data, correlation_id),
         market_id=data.market_id,
@@ -244,6 +279,9 @@ def run_quant_pipeline(
         hawkes=hawkes,
         greeks=greeks,
         time_exposure=_time_exposure(data.observed_at, data.expiry_at),
+        hierarchical_trend=trend,
+        candidate_decision=candidate_decision,
+        candidate_rejection_reasons=candidate_rejection_reasons,
         model_version=raw.model_version,
         feature_version=raw.feature_version,
     )

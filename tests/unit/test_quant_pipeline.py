@@ -1,5 +1,13 @@
 from datetime import UTC, datetime, timedelta
 
+from services.quant.hierarchical_trend import (
+    ExpectancySnapshot,
+    HierarchicalTrendInput,
+    RiskSnapshot,
+    SetupSnapshot,
+    TimeframeSnapshot,
+    TradeDirection,
+)
 from services.quant.pipeline import CalibrationSample, QuantPipelineInput, run_quant_pipeline
 
 
@@ -33,6 +41,52 @@ def _input() -> QuantPipelineInput:
     )
 
 
+def _bullish_timeframe() -> TimeframeSnapshot:
+    return TimeframeSnapshot(
+        close=120.0,
+        ema9=115.0,
+        ema21=110.0,
+        ema50=100.0,
+        ema9_slope=0.8,
+        ema21_slope=0.7,
+        ema50_slope=0.6,
+        structure_score=0.9,
+        atr=4.0,
+    )
+
+
+def _trend_input() -> HierarchicalTrendInput:
+    return HierarchicalTrendInput(
+        direction=TradeDirection.LONG,
+        higher=_bullish_timeframe(),
+        middle=_bullish_timeframe(),
+        lower=_bullish_timeframe(),
+        setup=SetupSnapshot(
+            pullback_quality=0.9,
+            structure_quality=0.9,
+            trigger_quality=0.85,
+            volume_zscore=1.5,
+        ),
+        risk=RiskSnapshot(
+            nav=100_000.0,
+            entry=112.0,
+            structural_invalidation=108.0,
+            atr=2.0,
+            risk_fraction=0.005,
+            cluster_risk=0.01,
+            max_cluster_risk=0.03,
+            portfolio_drawdown=0.02,
+            max_portfolio_drawdown=0.15,
+        ),
+        expectancy=ExpectancySnapshot(
+            win_probability=0.42,
+            average_win_r=3.5,
+            average_loss_r=1.0,
+            costs_r=0.05,
+        ),
+    )
+
+
 def test_quant_pipeline_is_deterministic_given_correlation_id() -> None:
     data = _input()
 
@@ -59,6 +113,7 @@ def test_quant_pipeline_exposes_calibration_edge_and_risk_inputs() -> None:
     assert result.expected_value.win_probability == result.fair_probability
     assert result.time_exposure.time_to_expiry_seconds == 7_200.0
     assert 0.0 < result.time_exposure.expiry_pressure < 1.0
+    assert result.hierarchical_trend is None
 
 
 def test_future_hawkes_events_do_not_leak_into_replay_state() -> None:
@@ -87,3 +142,48 @@ def test_low_liquidity_increases_uncertainty_and_reduces_net_edge() -> None:
     assert illiquid.uncertainty > liquid.uncertainty
     assert illiquid.edge.liquidity_penalty > liquid.edge.liquidity_penalty
     assert illiquid.edge.net_edge < liquid.edge.net_edge
+
+
+def test_trend_context_is_exposed_without_mutating_probability() -> None:
+    data = _input()
+    baseline = run_quant_pipeline(data, correlation_id="baseline")
+    with_trend = run_quant_pipeline(
+        data.model_copy(update={"hierarchical_trend": _trend_input()}),
+        correlation_id="trend",
+    )
+
+    assert with_trend.raw_probability == baseline.raw_probability
+    assert with_trend.fair_probability == baseline.fair_probability
+    assert with_trend.hierarchical_trend is not None
+    assert with_trend.hierarchical_trend.decision == "APPROVED"
+
+
+def test_rejected_trend_vetoes_candidate_without_rewriting_edge() -> None:
+    bearish = TimeframeSnapshot(
+        close=80.0,
+        ema9=85.0,
+        ema21=90.0,
+        ema50=100.0,
+        ema9_slope=-0.9,
+        ema21_slope=-0.8,
+        ema50_slope=-0.7,
+        structure_score=-0.9,
+        atr=4.0,
+    )
+    trend = _trend_input().model_copy(update={"higher": bearish})
+    data = _input().model_copy(
+        update={
+            "hierarchical_trend": trend,
+            "minimum_edge": 0.0,
+        }
+    )
+
+    result = run_quant_pipeline(data, correlation_id="trend-veto")
+
+    assert result.hierarchical_trend is not None
+    assert result.hierarchical_trend.decision == "REJECTED"
+    assert result.candidate_decision == "REJECTED"
+    assert any(
+        reason == "TREND:HIGHER_TIMEFRAME_REGIME_MISALIGNED"
+        for reason in result.candidate_rejection_reasons
+    )
