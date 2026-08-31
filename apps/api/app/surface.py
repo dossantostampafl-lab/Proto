@@ -124,6 +124,15 @@ def _estimate(market: SyntheticMarket):
     )
 
 
+@router.get("/markets")
+def synthetic_markets() -> list[dict[str, str]]:
+    _require_synthetic_research()
+    return [
+        {"id": market.market_id, "asset": market.symbol, "state": "ANALYZED"}
+        for market in _MARKETS.values()
+    ]
+
+
 @router.get("/markets/{market_id}")
 def market_detail(market_id: str) -> dict[str, object]:
     market = _market(market_id)
