@@ -108,6 +108,7 @@ def _event_payload(
         "channel": "l2_data",
         "dataset_content_sha256": dataset_content_sha256,
         "record_index": record.record_index,
+        "event_index": event_index,
         "connection_generation": record.connection_generation,
         "wire_sequence": record.frame.sequence,
         "product_id": event.product_id,
