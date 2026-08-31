@@ -34,6 +34,7 @@ dev = [
   "pytest-cov>=6.2,<7",
   "ruff>=0.12,<1",
   "mypy>=1.17,<2",
+  "mutmut>=3.7,<4",
 ]
 
 [tool.setuptools.packages.find]
@@ -56,3 +57,12 @@ select = ["E", "F", "I", "B", "UP", "ASYNC"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["apps", "services"]
+
+[tool.mutmut]
+source_paths = ["services/"]
+only_mutate = ["services/events/reconciliation.py"]
+pytest_add_cli_args_test_selection = [
+  "tests/unit/test_events.py",
+  "tests/unit/test_reconciliation_guard.py",
+]
+use_setproctitle = false
