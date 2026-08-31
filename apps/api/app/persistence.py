@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, Integer, String, select, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -82,7 +82,7 @@ class AsyncSqlFillJournal:
         self.engine = engine
         self.session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-    async def append(self, order: SimulationOrder, fill: Fill) -> None:
+    async def append(self, order: SimulationOrder, fill: Fill) -> bool:
         order_id = str(fill.order_id)
         async with self.session_factory() as session:
             existing = await session.scalar(
@@ -91,7 +91,7 @@ class AsyncSqlFillJournal:
                 )
             )
             if existing is not None:
-                return
+                return False
 
             session.add(
                 SimulationFillRecord(
@@ -106,7 +106,12 @@ class AsyncSqlFillJournal:
                     filled_at=fill.filled_at,
                 )
             )
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                return False
+            return True
 
     async def list(self, limit: int = 100) -> list[dict[str, object]]:
         safe_limit = min(max(limit, 1), 1_000)

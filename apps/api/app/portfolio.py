@@ -38,13 +38,22 @@ class PaperPortfolio:
     def __init__(self, max_journal_entries: int = 1_000) -> None:
         self._positions: dict[Asset, Position] = {}
         self._journal: list[dict[str, object]] = []
+        self._seen_order_ids: set[str] = set()
         self._max_journal_entries = max_journal_entries
 
     def reset(self) -> None:
         self._positions.clear()
         self._journal.clear()
+        self._seen_order_ids.clear()
 
-    def apply_fill(self, order: SimulationOrder, fill: Fill) -> None:
+    def has_order(self, order_id: object) -> bool:
+        return str(order_id) in self._seen_order_ids
+
+    def apply_fill(self, order: SimulationOrder, fill: Fill) -> bool:
+        order_id = str(fill.order_id)
+        if order_id in self._seen_order_ids:
+            return False
+
         position = self._positions.setdefault(order.asset, Position(asset=order.asset))
         position.fees += fill.fee
 
@@ -70,7 +79,9 @@ class PaperPortfolio:
                 position.average_price = 0.0
 
         position.quantity = new_quantity
+        self._seen_order_ids.add(order_id)
         self._append_journal(order, fill)
+        return True
 
     def _append_journal(self, order: SimulationOrder, fill: Fill) -> None:
         self._journal.append(
