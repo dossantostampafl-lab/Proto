@@ -13,15 +13,25 @@ class SizingMethod(StrEnum):
 
 
 class SizingInput(BaseModel):
-    capital: float = Field(gt=0)
-    max_fraction: float = Field(default=0.02, gt=0, le=0.10)
-    volatility: float = Field(default=0.20, ge=0)
-    target_volatility: float = Field(default=0.15, gt=0)
-    net_edge: float = Field(default=0.0, ge=-1.0, le=1.0)
-    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
-    market_probability: float = Field(default=0.5, gt=0.0, lt=1.0)
-    model_probability: float = Field(default=0.5, ge=0.0, le=1.0)
-    hard_notional_cap: float = Field(gt=0)
+    capital: float = Field(gt=0, allow_inf_nan=False)
+    max_fraction: float = Field(default=0.02, gt=0, le=0.10, allow_inf_nan=False)
+    volatility: float = Field(default=0.20, ge=0, allow_inf_nan=False)
+    target_volatility: float = Field(default=0.15, gt=0, allow_inf_nan=False)
+    net_edge: float = Field(default=0.0, ge=-1.0, le=1.0, allow_inf_nan=False)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0, allow_inf_nan=False)
+    market_probability: float = Field(
+        default=0.5,
+        gt=0.0,
+        lt=1.0,
+        allow_inf_nan=False,
+    )
+    model_probability: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
+    hard_notional_cap: float = Field(gt=0, allow_inf_nan=False)
 
 
 class SizingResult(BaseModel):
