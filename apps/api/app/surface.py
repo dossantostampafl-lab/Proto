@@ -71,7 +71,20 @@ _MARKETS: dict[str, SyntheticMarket] = {
 }
 
 
+def _require_synthetic_research() -> None:
+    if settings.synthetic_research_enabled:
+        return
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "synthetic research surface is disabled; use historical replay or "
+            "public read-only live market data"
+        ),
+    )
+
+
 def _market(market_id: str) -> SyntheticMarket:
+    _require_synthetic_research()
     market = _MARKETS.get(market_id.lower())
     if market is None:
         raise HTTPException(status_code=404, detail="market not found")
@@ -79,6 +92,7 @@ def _market(market_id: str) -> SyntheticMarket:
 
 
 def _market_for_symbol(symbol: str) -> SyntheticMarket:
+    _require_synthetic_research()
     normalized = symbol.upper()
     for market in _MARKETS.values():
         if market.symbol == normalized:
@@ -108,6 +122,15 @@ def _estimate(market: SyntheticMarket):
         volatility=market.volatility,
         imbalance=imbalance,
     )
+
+
+@router.get("/markets")
+def synthetic_markets() -> list[dict[str, str]]:
+    _require_synthetic_research()
+    return [
+        {"id": market.market_id, "asset": market.symbol, "state": "ANALYZED"}
+        for market in _MARKETS.values()
+    ]
 
 
 @router.get("/markets/{market_id}")

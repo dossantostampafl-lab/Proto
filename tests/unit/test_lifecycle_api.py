@@ -1,8 +1,15 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.app.main import app
+from apps.api.app.settings import settings
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def enable_synthetic_research(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "synthetic_research_enabled", True)
 
 
 def test_market_lifecycle_is_computed_from_synthetic_research_inputs() -> None:
