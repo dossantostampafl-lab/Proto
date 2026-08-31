@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from .models import Asset, Fill, Side, SimulationOrder
+
+
+class DuplicateOrderError(ValueError):
+    pass
 
 
 @dataclass
@@ -38,13 +43,23 @@ class PaperPortfolio:
     def __init__(self, max_journal_entries: int = 1_000) -> None:
         self._positions: dict[Asset, Position] = {}
         self._journal: list[dict[str, object]] = []
+        self._processed_order_ids: set[UUID] = set()
         self._max_journal_entries = max_journal_entries
 
     def reset(self) -> None:
         self._positions.clear()
         self._journal.clear()
+        self._processed_order_ids.clear()
+
+    def has_order(self, order_id: UUID) -> bool:
+        return order_id in self._processed_order_ids
 
     def apply_fill(self, order: SimulationOrder, fill: Fill) -> None:
+        if order.id != fill.order_id:
+            raise ValueError("fill order id does not match simulation order")
+        if order.id in self._processed_order_ids:
+            raise DuplicateOrderError(f"duplicate simulation order: {order.id}")
+
         position = self._positions.setdefault(order.asset, Position(asset=order.asset))
         position.fees += fill.fee
 
@@ -71,6 +86,7 @@ class PaperPortfolio:
 
         position.quantity = new_quantity
         self._append_journal(order, fill)
+        self._processed_order_ids.add(order.id)
 
     def _append_journal(self, order: SimulationOrder, fill: Fill) -> None:
         self._journal.append(
@@ -118,3 +134,6 @@ class PaperPortfolio:
             ),
             "total_fees": round(total_fees, 10),
         }
+
+
+__all__ = ["DuplicateOrderError", "PaperPortfolio", "Position"]
