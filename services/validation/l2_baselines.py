@@ -6,9 +6,18 @@ from math import isfinite
 from typing import Literal
 
 from services.market_data.contracts import ResearchAsset
-from services.market_data.l2_corpus_replay import PublicL2CorpusReplay, PublicL2ReplaySnapshot
+from services.market_data.l2_corpus_replay import (
+    PublicL2CorpusReplay,
+    PublicL2ReplaySnapshot,
+)
 
-from .core import PerformanceMetrics, ValidationReport, performance_metrics, purged_walk_forward_splits, validation_report
+from .core import (
+    PerformanceMetrics,
+    ValidationReport,
+    performance_metrics,
+    purged_walk_forward_splits,
+    validation_report,
+)
 from .experiments import stable_fingerprint
 from .overfitting import deflated_sharpe_ratio, probability_of_backtest_overfitting
 from .perturbation import delay_signal, timestamp_shuffle
@@ -37,12 +46,18 @@ BASELINE_STRATEGIES: tuple[L2BaselineSpec, ...] = (
     L2BaselineSpec(
         name="momentum_1",
         version="v1",
-        description="One-step lagged momentum benchmark; current return is never used to form its own signal.",
+        description=(
+            "One-step lagged momentum benchmark; current return is never used "
+            "to form its own signal."
+        ),
     ),
     L2BaselineSpec(
         name="mean_reversion_1",
         version="v1",
-        description="One-step lagged contrarian benchmark; current return is never used to form its own signal.",
+        description=(
+            "One-step lagged contrarian benchmark; current return is never used "
+            "to form its own signal."
+        ),
     ),
 )
 
@@ -303,22 +318,23 @@ def run_l2_baseline_campaign(
     replay: PublicL2CorpusReplay,
     *,
     asset: ResearchAsset,
-    config: L2BaselineCampaignConfig = L2BaselineCampaignConfig(),
+    config: L2BaselineCampaignConfig | None = None,
 ) -> L2BaselineCampaignResult:
     """Run deterministic baseline controls over a verified public L2 corpus."""
 
+    resolved_config = config or L2BaselineCampaignConfig()
     market_samples = build_l2_market_returns(replay, asset=asset)
     market_sample_count = len(market_samples)
-    if config.monte_carlo_block_size > market_sample_count:
+    if resolved_config.monte_carlo_block_size > market_sample_count:
         raise ValueError("monte_carlo_block_size exceeds L2 market sample count")
 
     folds = purged_walk_forward_splits(
         market_sample_count,
-        train_size=config.train_size,
-        test_size=config.test_size,
-        purge_size=config.purge_size,
-        embargo_size=config.embargo_size,
-        step_size=config.step_size,
+        train_size=resolved_config.train_size,
+        test_size=resolved_config.test_size,
+        purge_size=resolved_config.purge_size,
+        embargo_size=resolved_config.embargo_size,
+        step_size=resolved_config.step_size,
     )
 
     runs = tuple(
@@ -326,19 +342,28 @@ def run_l2_baseline_campaign(
             replay,
             asset=asset,
             strategy_name=spec.name,
-            cost_bps=config.cost_bps,
+            cost_bps=resolved_config.cost_bps,
         )
         for spec in BASELINE_STRATEGIES
     )
     validations: list[L2BaselineValidation] = []
-    trials = max(config.trials, len(runs))
+    trials = max(resolved_config.trials, len(runs))
 
     for run in runs:
         report = validation_report(run.returns, folds)
         delayed_positions = tuple(
-            delay_signal(run.positions, config.delay_periods, fill_value=0.0)
+            delay_signal(
+                run.positions,
+                resolved_config.delay_periods,
+                fill_value=0.0,
+            )
         )
-        shuffled_positions = tuple(timestamp_shuffle(run.positions, seed=config.shuffle_seed))
+        shuffled_positions = tuple(
+            timestamp_shuffle(
+                run.positions,
+                seed=resolved_config.shuffle_seed,
+            )
+        )
         validations.append(
             L2BaselineValidation(
                 strategy=run.strategy,
@@ -349,39 +374,45 @@ def run_l2_baseline_campaign(
                 ),
                 monte_carlo=monte_carlo_block_bootstrap(
                     run.returns,
-                    simulations=config.monte_carlo_simulations,
-                    block_size=config.monte_carlo_block_size,
-                    seed=config.monte_carlo_seed,
+                    simulations=resolved_config.monte_carlo_simulations,
+                    block_size=resolved_config.monte_carlo_block_size,
+                    seed=resolved_config.monte_carlo_seed,
                 ),
                 delay_control_metrics=_control_metrics(
                     market_samples,
                     delayed_positions,
-                    cost_bps=config.cost_bps,
+                    cost_bps=resolved_config.cost_bps,
                 ),
                 shuffle_control_metrics=_control_metrics(
                     market_samples,
                     shuffled_positions,
-                    cost_bps=config.cost_bps,
+                    cost_bps=resolved_config.cost_bps,
                 ),
             )
         )
 
-    if market_sample_count >= config.pbo_segments and market_sample_count % config.pbo_segments == 0:
+    pbo_sample_compatible = (
+        market_sample_count >= resolved_config.pbo_segments
+        and market_sample_count % resolved_config.pbo_segments == 0
+    )
+    if pbo_sample_compatible:
         pbo = probability_of_backtest_overfitting(
             tuple(run.returns for run in runs),
-            segments=config.pbo_segments,
+            segments=resolved_config.pbo_segments,
         )
         pbo_status: Literal["COMPUTED", "INSUFFICIENT_SAMPLE"] = "COMPUTED"
     else:
         pbo = None
         pbo_status = "INSUFFICIENT_SAMPLE"
 
-    provenance = replay.experiment_provenance(seed=config.monte_carlo_seed)
+    provenance = replay.experiment_provenance(
+        seed=resolved_config.monte_carlo_seed
+    )
     fingerprint_payload = {
         "asset": asset,
         "dataset": provenance["dataset"],
         "replay_fingerprint": provenance["replay_fingerprint"],
-        "config": asdict(config),
+        "config": asdict(resolved_config),
         "strategies": [
             {
                 "name": run.strategy.name,
