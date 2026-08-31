@@ -46,6 +46,7 @@ from .replay import (
 from .research import metrics
 from .research import router as research_router
 from .settings import settings
+from .simulation_policy import authoritative_simulation_request
 from .websockets import hub
 
 logger = logging.getLogger("proto.api")
@@ -218,19 +219,26 @@ async def simulate(request: SimulationRequest) -> SimulationResult:
         metrics.increment("simulation_rejected")
         return SimulationResult(accepted=False, reason="simulation halted")
 
+    effective_request = authoritative_simulation_request(
+        request,
+        portfolio.snapshot(),
+        max_order_notional=settings.simulation_max_order_notional,
+        max_position_notional=settings.simulation_max_position_notional,
+        max_slippage_bps=settings.simulation_max_slippage_bps,
+    )
     with LatencyTimer(metrics):
-        result = simulator.simulate(request)
+        result = simulator.simulate(effective_request)
 
     if result.accepted and result.fill is not None:
         metrics.increment("simulation_accepted")
-        portfolio.apply_fill(request.order, result.fill)
+        portfolio.apply_fill(effective_request.order, result.fill)
         if persistent_journal is not None:
-            await persistent_journal.append(request.order, result.fill)
+            await persistent_journal.append(effective_request.order, result.fill)
         fill_event = {
             **result.fill.model_dump(mode="json"),
-            "market_id": request.order.market_id,
-            "asset": request.order.asset.value,
-            "side": request.order.side.value,
+            "market_id": effective_request.order.market_id,
+            "asset": effective_request.order.asset.value,
+            "side": effective_request.order.side.value,
         }
         await hub.broadcast(
             "fills",
