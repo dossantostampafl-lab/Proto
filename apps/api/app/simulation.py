@@ -3,9 +3,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from math import ceil, floor, isfinite
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from math import isfinite
 
 from .models import Fill, Side, SimulationRequest, SimulationResult
+
+_BPS = Decimal("10000")
+
+
+def _decimal(value: float) -> Decimal:
+    return Decimal(str(value))
 
 
 @dataclass(frozen=True)
@@ -147,10 +154,12 @@ class PaperSimulator:
             return False, "market snapshot timestamp is in the future"
         return True, "accepted"
 
-    def _price_on_grid(self, raw_price: float, side: Side) -> float:
-        ticks = raw_price / self.config.tick_size
-        grid_ticks = ceil(ticks - 1e-12) if side == Side.BUY else floor(ticks + 1e-12)
-        return grid_ticks * self.config.tick_size
+    def _price_on_grid(self, raw_price: Decimal, side: Side) -> Decimal:
+        tick_size = _decimal(self.config.tick_size)
+        ticks = raw_price / tick_size
+        rounding = ROUND_CEILING if side == Side.BUY else ROUND_FLOOR
+        grid_ticks = ticks.to_integral_value(rounding=rounding)
+        return grid_ticks * tick_size
 
     def _depth_impact_bps(self, *, order_quantity: float, available_quantity: float) -> float:
         if available_quantity <= 0.0:
@@ -201,19 +210,24 @@ class PaperSimulator:
         if not accepted:
             return SimulationResult(accepted=False, reason=reason)
 
-        direction = 1 if order.side == Side.BUY else -1
-        raw_fill_price = executable_price * (1 + direction * slippage_bps / 10_000)
+        executable_price_decimal = _decimal(executable_price)
+        slippage_decimal = _decimal(slippage_bps)
+        direction = Decimal("1") if order.side == Side.BUY else Decimal("-1")
+        raw_fill_price = executable_price_decimal * (
+            Decimal("1") + direction * slippage_decimal / _BPS
+        )
         fill_price = self._price_on_grid(raw_fill_price, order.side)
-        notional = order.quantity * fill_price
-        fee = notional * self.config.fee_bps / 10_000
+        quantity = _decimal(order.quantity)
+        notional = quantity * fill_price
+        fee = notional * _decimal(self.config.fee_bps) / _BPS
         fill = Fill(
             order_id=order.id,
             market_id=order.market_id,
             asset=order.asset,
             side=order.side,
             filled_quantity=order.quantity,
-            fill_price=round(fill_price, 10),
-            fee=round(fee, 10),
+            fill_price=float(fill_price),
+            fee=float(fee),
             slippage_bps=round(slippage_bps, 6),
         )
         return SimulationResult(accepted=True, reason="simulated fill", fill=fill)
