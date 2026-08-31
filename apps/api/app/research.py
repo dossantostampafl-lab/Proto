@@ -14,6 +14,7 @@ from .lifecycle import router as lifecycle_router
 from .live_routes import router as live_router
 from .metrics_state import metrics
 from .models import MarketSnapshot
+from .observability import OperationLatencyTimer
 from .replay import HistoricalReplay, ReplayFrame
 from .safety_surface import router as safety_router
 from .surface import router as surface_router
@@ -49,10 +50,11 @@ class ReplayRequest(BaseModel):
 
 @router.post("/research/calibration")
 def calibration(request: CalibrationRequest) -> dict[str, object]:
-    report = calibration_report(
-        [(item.probability, item.outcome) for item in request.observations],
-        bin_count=request.bins,
-    )
+    with OperationLatencyTimer(metrics, "calibration"):
+        report = calibration_report(
+            [(item.probability, item.outcome) for item in request.observations],
+            bin_count=request.bins,
+        )
     metrics.increment("calibration_requests")
     return {
         "count": report.count,
@@ -155,6 +157,18 @@ def prometheus_metrics() -> str:
             [
                 f"# TYPE proto_{safe_name}_total counter",
                 f"proto_{safe_name}_total {value}",
+            ]
+        )
+    for operation, latency in snapshot["operation_latency"].items():
+        safe_operation = "".join(
+            character if character.isalnum() else "_" for character in operation
+        )
+        lines.extend(
+            [
+                f"# TYPE proto_{safe_operation}_latency_ms gauge",
+                f"proto_{safe_operation}_latency_ms {latency['average_ms']}",
+                f"# TYPE proto_{safe_operation}_latency_samples_total counter",
+                f"proto_{safe_operation}_latency_samples_total {latency['samples']}",
             ]
         )
     return "\n".join(lines) + "\n"
