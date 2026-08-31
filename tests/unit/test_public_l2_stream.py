@@ -33,6 +33,25 @@ class FakeConnection:
         return None
 
 
+class RecordingCorpusSink:
+    def __init__(self, *, failures: int = 0) -> None:
+        self.failures = failures
+        self.connection_generations: list[int] = []
+        self.messages: list[str | bytes | dict[str, object]] = []
+
+    def append_message(
+        self,
+        message: str | bytes | dict[str, object],
+        *,
+        connection_generation: int,
+    ) -> None:
+        if self.failures > 0:
+            self.failures -= 1
+            raise OSError("corpus write failed")
+        self.connection_generations.append(connection_generation)
+        self.messages.append(message)
+
+
 def _l2_message(
     sequence: int,
     *,
@@ -91,6 +110,7 @@ async def test_public_l2_stream_subscribes_without_credentials_and_emits_snapsho
     assert health.connection_generation == 1
     assert health.frames_received == 1
     assert health.snapshots_emitted == 1
+    assert health.corpus_write_error_count == 0
     assert health.last_sequence == 10
 
     subscriptions = [json.loads(message) for message in websocket.sent]
@@ -149,8 +169,83 @@ async def test_public_l2_stream_reconnects_and_requires_fresh_snapshot_after_gap
     assert health.connection_attempts == 2
     assert health.reconnect_count == 1
     assert health.integrity_error_count == 1
+    assert health.corpus_write_error_count == 0
     assert health.last_sequence == 40
     assert len(adapter.connection_replay_session("recovered").events) == 1
+
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_public_l2_stream_persists_validated_frames_before_emission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = FakeWebSocket([_l2_message(30), _l2_message(31, event_type="update")])
+    monkeypatch.setattr(
+        l2_live_module,
+        "connect",
+        lambda *_args, **_kwargs: FakeConnection(websocket),
+    )
+    sink = RecordingCorpusSink()
+    adapter = CoinbasePublicL2StreamAdapter(
+        message_timeout_seconds=1.0,
+        corpus_sink=sink,
+    )
+    stream = adapter.stream()
+
+    first_snapshot = await anext(stream)
+    second_snapshot = await anext(stream)
+
+    assert first_snapshot.asset == "BTC"
+    assert second_snapshot.asset == "BTC"
+    assert sink.connection_generations == [1, 1]
+    assert len(sink.messages) == 2
+    health = adapter.health()
+    assert health.frames_received == 2
+    assert health.snapshots_emitted == 2
+    assert health.corpus_write_error_count == 0
+
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_public_l2_stream_fails_closed_and_reconnects_on_corpus_write_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = FakeWebSocket([_l2_message(50)])
+    second = FakeWebSocket([_l2_message(60)])
+    connections = [first, second]
+
+    def fake_connect(*_args: object, **_kwargs: object) -> FakeConnection:
+        if not connections:
+            raise AssertionError("unexpected extra reconnect")
+        return FakeConnection(connections.pop(0))
+
+    monkeypatch.setattr(l2_live_module, "connect", fake_connect)
+    sink = RecordingCorpusSink(failures=1)
+    adapter = CoinbasePublicL2StreamAdapter(
+        reconnect_min_seconds=0.001,
+        reconnect_max_seconds=0.002,
+        message_timeout_seconds=1.0,
+        corpus_sink=sink,
+    )
+    stream = adapter.stream()
+
+    recovered_snapshot = await anext(stream)
+
+    assert recovered_snapshot.asset == "BTC"
+    assert recovered_snapshot.bids[0].price == 61000.0
+    assert sink.connection_generations == [2]
+    assert len(sink.messages) == 1
+    health = adapter.health()
+    assert health.connection_generation == 2
+    assert health.connection_attempts == 2
+    assert health.reconnect_count == 1
+    assert health.frames_received == 2
+    assert health.snapshots_emitted == 1
+    assert health.corpus_write_error_count == 1
+    assert health.integrity_error_count == 0
+    assert health.last_sequence == 60
 
     await stream.aclose()
 
