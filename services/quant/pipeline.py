@@ -1,0 +1,227 @@
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from services.analytics.greeks import SyntheticGreeks, calculate_synthetic_greeks
+from services.hawkes.core import ExponentialHawkesEngine, HawkesEstimate
+
+from .calibration import CalibrationReport, calibration_report
+from .core import EdgeBreakdown, ProbabilityEstimate, compute_edge, estimate_probability
+from .expected_value import ExpectedValueResult, calculate_expected_value
+
+
+class CalibrationSample(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    probability: float = Field(ge=0.0, le=1.0)
+    outcome: int = Field(ge=0, le=1)
+
+
+class QuantPipelineInput(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    market_id: str = Field(min_length=1, max_length=120)
+    symbol: str = Field(min_length=1, max_length=32)
+    observed_at: datetime
+    market_probability: float = Field(ge=0.0, le=1.0)
+    volatility: float = Field(ge=0.0)
+    imbalance: float = Field(ge=-1.0, le=1.0)
+    liquidity_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    fees: float = Field(default=0.001, ge=0.0)
+    slippage: float = Field(default=0.001, ge=0.0)
+    spread_cost: float = Field(default=0.0, ge=0.0)
+    hedge_cost: float = Field(default=0.0, ge=0.0)
+    latency_penalty: float = Field(default=0.0005, ge=0.0)
+    minimum_edge: float = Field(default=0.01, ge=0.0)
+    calibration_samples: tuple[CalibrationSample, ...] = ()
+    calibration_bins: int = Field(default=10, ge=2, le=100)
+    calibration_prior_strength: float = Field(default=5.0, gt=0.0)
+    event_times: tuple[float, ...] = ()
+    hawkes_mu: float = Field(default=0.2, ge=0.0)
+    hawkes_alpha: float = Field(default=0.1, ge=0.0)
+    hawkes_beta: float = Field(default=1.0, gt=0.0)
+    expiry_at: datetime | None = None
+
+
+class TimeExposure(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    time_to_expiry_seconds: float | None
+    expiry_pressure: float
+
+
+class QuantPipelineResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    correlation_id: str
+    market_id: str
+    symbol: str
+    observed_at: datetime
+    raw_probability: float = Field(ge=0.0, le=1.0)
+    calibrated_probability: float = Field(ge=0.0, le=1.0)
+    fair_probability: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    uncertainty: float = Field(ge=0.0, le=1.0)
+    calibration_report: CalibrationReport | None
+    edge: EdgeBreakdown
+    expected_value: ExpectedValueResult
+    hawkes: HawkesEstimate
+    greeks: SyntheticGreeks
+    time_exposure: TimeExposure
+    model_version: str
+    feature_version: str
+
+
+def _calibrated_probability(
+    raw_probability: float,
+    report: CalibrationReport | None,
+    *,
+    prior_strength: float,
+) -> float:
+    if report is None:
+        return raw_probability
+
+    bucket = next(
+        (
+            item
+            for item in report.bins
+            if item.lower <= raw_probability < item.upper
+            or (raw_probability == 1.0 and item.upper == 1.0)
+        ),
+        None,
+    )
+    if bucket is None or bucket.count == 0 or bucket.observed_frequency is None:
+        return raw_probability
+
+    data_weight = bucket.count / (bucket.count + prior_strength)
+    calibrated = (
+        data_weight * bucket.observed_frequency
+        + (1.0 - data_weight) * raw_probability
+    )
+    return min(max(calibrated, 0.0), 1.0)
+
+
+def _time_exposure(observed_at: datetime, expiry_at: datetime | None) -> TimeExposure:
+    if expiry_at is None:
+        return TimeExposure(time_to_expiry_seconds=None, expiry_pressure=0.0)
+    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+        raise ValueError("observed_at must be timezone-aware when expiry_at is supplied")
+    if expiry_at.tzinfo is None or expiry_at.utcoffset() is None:
+        raise ValueError("expiry_at must be timezone-aware")
+
+    remaining = max((expiry_at - observed_at).total_seconds(), 0.0)
+    pressure = 1.0 / (1.0 + remaining / 3_600.0)
+    return TimeExposure(
+        time_to_expiry_seconds=remaining,
+        expiry_pressure=pressure,
+    )
+
+
+def run_quant_pipeline(
+    data: QuantPipelineInput,
+    *,
+    correlation_id: str | None = None,
+) -> QuantPipelineResult:
+    """Run the deterministic research/replay probability-to-edge pipeline.
+
+    The function is pure with respect to external state. Replay callers provide
+    the source event timestamp, calibration observations, and event times, so
+    no wall-clock data can leak into the result.
+    """
+    raw: ProbabilityEstimate = estimate_probability(
+        market_probability=data.market_probability,
+        volatility=data.volatility,
+        imbalance=data.imbalance,
+        timestamp=data.observed_at,
+    )
+
+    report = (
+        calibration_report(
+            [(sample.probability, sample.outcome) for sample in data.calibration_samples],
+            bin_count=data.calibration_bins,
+        )
+        if data.calibration_samples
+        else None
+    )
+    calibrated = _calibrated_probability(
+        raw.probability,
+        report,
+        prior_strength=data.calibration_prior_strength,
+    )
+
+    calibration_uncertainty = report.expected_calibration_error * 0.5 if report else 0.0
+    liquidity_uncertainty = (1.0 - data.liquidity_score) * 0.05
+    uncertainty = min(
+        1.0,
+        raw.uncertainty + calibration_uncertainty + liquidity_uncertainty,
+    )
+    confidence = max(0.0, 1.0 - uncertainty)
+    fair_probability = (
+        confidence * calibrated + (1.0 - confidence) * data.market_probability
+    )
+
+    liquidity_penalty = (1.0 - data.liquidity_score) * 0.01
+    uncertainty_penalty = uncertainty * 0.02
+    edge = compute_edge(
+        model_probability=fair_probability,
+        market_probability=data.market_probability,
+        fees=data.fees,
+        slippage=data.slippage,
+        spread_cost=data.spread_cost,
+        hedge_cost=data.hedge_cost,
+        uncertainty_penalty=uncertainty_penalty,
+        latency_penalty=data.latency_penalty,
+        liquidity_penalty=liquidity_penalty,
+        minimum_edge=data.minimum_edge,
+    )
+
+    expected_value = calculate_expected_value(
+        win_probability=fair_probability,
+        profit_if_win=1.0 - data.market_probability,
+        loss_if_lose=data.market_probability,
+        fees=data.fees,
+        slippage=data.slippage,
+        spread_cost=data.spread_cost,
+        hedge_cost=data.hedge_cost,
+        latency_cost=data.latency_penalty + liquidity_penalty,
+        uncertainty_penalty=uncertainty_penalty,
+    )
+
+    hawkes_engine = ExponentialHawkesEngine(
+        mu=data.hawkes_mu,
+        alpha=data.hawkes_alpha,
+        beta=data.hawkes_beta,
+    )
+    for event_time in sorted(data.event_times):
+        if event_time <= data.observed_at.timestamp():
+            hawkes_engine.record(event_time)
+    hawkes = hawkes_engine.estimate(timestamp=data.observed_at.timestamp())
+
+    greeks = calculate_synthetic_greeks(
+        market_probability=data.market_probability,
+        volatility=data.volatility,
+        imbalance=data.imbalance,
+    )
+
+    return QuantPipelineResult(
+        correlation_id=correlation_id or str(uuid4()),
+        market_id=data.market_id,
+        symbol=data.symbol.upper(),
+        observed_at=data.observed_at,
+        raw_probability=raw.probability,
+        calibrated_probability=calibrated,
+        fair_probability=fair_probability,
+        confidence=confidence,
+        uncertainty=uncertainty,
+        calibration_report=report,
+        edge=edge,
+        expected_value=expected_value,
+        hawkes=hawkes,
+        greeks=greeks,
+        time_exposure=_time_exposure(data.observed_at, data.expiry_at),
+        model_version=raw.model_version,
+        feature_version=raw.feature_version,
+    )
