@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from itertools import combinations
-from math import erf, exp, log, pi, sqrt
+from math import erf, log, sqrt
 from statistics import mean, pstdev
 
 from .core import performance_metrics
@@ -51,7 +51,11 @@ def deflated_sharpe_ratio(
     if variance_term <= 0.0:
         return 0.0
 
-    statistic = (sharpe - expected_max_sharpe) * sqrt(len(returns) - 1) / sqrt(variance_term)
+    statistic = (
+        (sharpe - expected_max_sharpe)
+        * sqrt(len(returns) - 1)
+        / sqrt(variance_term)
+    )
     return min(max(_normal_cdf(statistic), 0.0), 1.0)
 
 
@@ -88,17 +92,23 @@ def probability_of_backtest_overfitting(
 
     for train_segments in combinations(range(segments), half):
         train_set = set(train_segments)
-        train_indices = tuple(index for seg in train_segments for index in segment_indices[seg])
+        train_indices = tuple(
+            index for segment in train_segments for index in segment_indices[segment]
+        )
         test_indices = tuple(
             index
-            for seg in range(segments)
-            if seg not in train_set
-            for index in segment_indices[seg]
+            for segment in range(segments)
+            if segment not in train_set
+            for index in segment_indices[segment]
         )
 
-        train_scores = tuple(_strategy_score(values, train_indices) for values in strategy_returns)
+        train_scores = tuple(
+            _strategy_score(values, train_indices) for values in strategy_returns
+        )
         best_strategy = max(range(len(train_scores)), key=train_scores.__getitem__)
-        test_scores = tuple(_strategy_score(values, test_indices) for values in strategy_returns)
+        test_scores = tuple(
+            _strategy_score(values, test_indices) for values in strategy_returns
+        )
         ranked = sorted(range(len(test_scores)), key=test_scores.__getitem__)
         rank = ranked.index(best_strategy) + 1
         relative_rank = rank / (len(test_scores) + 1.0)
