@@ -91,9 +91,15 @@ class HierarchicalTrendInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_geometry(self) -> HierarchicalTrendInput:
-        if self.direction is TradeDirection.LONG and self.risk.structural_invalidation >= self.risk.entry:
+        if (
+            self.direction is TradeDirection.LONG
+            and self.risk.structural_invalidation >= self.risk.entry
+        ):
             raise ValueError("long structural invalidation must be below entry")
-        if self.direction is TradeDirection.SHORT and self.risk.structural_invalidation <= self.risk.entry:
+        if (
+            self.direction is TradeDirection.SHORT
+            and self.risk.structural_invalidation <= self.risk.entry
+        ):
             raise ValueError("short structural invalidation must be above entry")
         return self
 
@@ -177,7 +183,10 @@ def evaluate_hierarchical_trend(data: HierarchicalTrendInput) -> HierarchicalTre
     lower_score = _timeframe_score(data.lower)
     sign = 1.0 if data.direction is TradeDirection.LONG else -1.0
 
-    alignment_score = _directional_alignment(data.direction, (higher_score, middle_score, lower_score))
+    alignment_score = _directional_alignment(
+        data.direction,
+        (higher_score, middle_score, lower_score),
+    )
     setup_score = _setup_score(data.setup)
     stop_price = _stop_price(data.direction, data.risk)
     stop_distance = abs(data.risk.entry - stop_price)
