@@ -16,10 +16,10 @@ persistent_journal = (
     AsyncSqlFillJournal(persistence_engine) if persistence_engine is not None else None
 )
 runtime = RuntimeState()
-simulator = PaperSimulator()
 portfolio = PaperPortfolio()
 register_portfolio_recovery_target(portfolio)
-replay_session = ReplaySession()
+replay_session = ReplaySession(on_timeline_reset=portfolio.reset)
+simulator = PaperSimulator(reference_time_provider=lambda: replay_session.current_timestamp)
 
 
 def reset_runtime_state() -> RuntimeState:
