@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -76,7 +77,9 @@ class HistoricalReplay:
             events=tuple(events),
         )
         self._core_engine = ReplayEngine(session)
-        self._frames = tuple(frame_by_event_id[event.event_id] for event in self._core_engine.ordered_events)
+        self._frames = tuple(
+            frame_by_event_id[event.event_id] for event in self._core_engine.ordered_events
+        )
         self._cursor = 0
 
     @property
@@ -124,11 +127,12 @@ class HistoricalReplay:
 class ReplaySession:
     """Stateful deterministic replay controller for the simulation runtime."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_timeline_reset: Callable[[], None] | None = None) -> None:
         self._engine: HistoricalReplay | None = None
         self._speed: ReplaySpeed = "1x"
         self._paused = True
         self._last_frame: ReplayFrame | None = None
+        self._on_timeline_reset = on_timeline_reset
 
     @property
     def active(self) -> bool:
@@ -146,6 +150,10 @@ class ReplaySession:
     def current_timestamp(self) -> datetime | None:
         return self._last_frame.timestamp if self._last_frame is not None else None
 
+    def _reset_timeline_state(self) -> None:
+        if self._on_timeline_reset is not None:
+            self._on_timeline_reset()
+
     def start(self, request: ReplayStartRequest) -> dict[str, object]:
         frames = [
             ReplayFrame(
@@ -154,7 +162,9 @@ class ReplaySession:
             )
             for item in request.frames
         ]
-        self._engine = HistoricalReplay(frames)
+        engine = HistoricalReplay(frames)
+        self._reset_timeline_state()
+        self._engine = engine
         self._speed = request.speed
         self._paused = False
         self._last_frame = None
@@ -183,6 +193,7 @@ class ReplaySession:
 
     def restart(self) -> dict[str, object]:
         engine = self._require_engine()
+        self._reset_timeline_state()
         engine.reset()
         self._paused = False
         self._last_frame = None
@@ -194,6 +205,7 @@ class ReplaySession:
             engine.seek(cursor)
         except ValueError as error:
             raise RuntimeError(str(error)) from error
+        self._reset_timeline_state()
         self._last_frame = engine.previous()
         self._paused = True
         return self.status()
