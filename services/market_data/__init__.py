@@ -40,6 +40,14 @@ from .pipeline import (
     NormalizedMarketEvent,
 )
 from .public_feed_parser import PublicCryptoFeedError, parse_public_ticker_message
+from .public_l2 import (
+    PublicL2Book,
+    PublicL2Event,
+    PublicL2Frame,
+    PublicL2IntegrityError,
+    PublicL2Update,
+    parse_public_l2_message,
+)
 
 __all__ = [
     "BinaryContractSnapshot",
@@ -69,11 +77,17 @@ __all__ = [
     "PublicCryptoFeedError",
     "PublicFeedHealth",
     "PublicFeedTimeoutError",
+    "PublicL2Book",
+    "PublicL2Event",
+    "PublicL2Frame",
+    "PublicL2IntegrityError",
+    "PublicL2Update",
     "PublicMarketDataAdapter",
     "ResearchAsset",
     "SyntheticAdapter",
     "compute_orderbook_metrics",
     "evaluate_live_coverage",
     "live_readiness_failures",
+    "parse_public_l2_message",
     "parse_public_ticker_message",
 ]
