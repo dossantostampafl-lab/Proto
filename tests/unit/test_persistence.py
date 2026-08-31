@@ -72,6 +72,28 @@ async def test_new_simulation_session_hides_prior_session_from_active_recovery()
     await engine.dispose()
 
 
+async def test_same_order_id_can_be_replayed_in_a_new_simulation_session() -> None:
+    engine = build_engine("sqlite+aiosqlite:///:memory:")
+    await init_database(engine)
+    journal = AsyncSqlFillJournal(engine)
+
+    order, fill = await _paper_order_and_fill("deterministic-replay")
+    assert await journal.append(order, fill) is True
+    first_session = (await journal.list(limit=10))[0]["session_id"]
+
+    second_session = await journal.start_new_session()
+    assert second_session != first_session
+    assert await journal.append(order, fill) is True
+    assert await journal.append(order, fill) is False
+
+    records = await journal.list(limit=10)
+    assert len(records) == 1
+    assert records[0]["session_id"] == second_session
+    assert records[0]["order_id"] == str(order.id)
+
+    await engine.dispose()
+
+
 async def test_init_database_creates_canonical_research_tables() -> None:
     engine = build_engine("sqlite+aiosqlite:///:memory:")
     await init_database(engine)
@@ -80,9 +102,19 @@ async def test_init_database_creates_canonical_research_tables() -> None:
         table_names = await connection.run_sync(
             lambda sync_connection: set(inspect(sync_connection).get_table_names())
         )
+        unique_constraints = await connection.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_unique_constraints(
+                "simulation_fills"
+            )
+        )
 
     assert set(CANONICAL_TABLE_NAMES).issubset(table_names)
     assert "simulation_fills" in table_names
     assert "simulation_sessions" in table_names
+    assert any(
+        constraint["name"] == "uq_simulation_fills_session_order"
+        and constraint["column_names"] == ["session_id", "order_id"]
+        for constraint in unique_constraints
+    )
 
     await engine.dispose()
