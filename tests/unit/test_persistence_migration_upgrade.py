@@ -67,3 +67,30 @@ def test_simulation_session_migration_upgrade_and_downgrade(monkeypatch) -> None
         assert "session_id" not in fill_columns
 
         canonical.downgrade()
+
+
+def test_research_experiment_migration_upgrade_and_downgrade(monkeypatch) -> None:
+    migration = _load_migration_module("0005_research_experiments")
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    with engine.begin() as connection:
+        context = MigrationContext.configure(connection)
+        operations = Operations(context)
+        monkeypatch.setattr(migration, "op", operations)
+        migration.upgrade()
+
+        inspector = inspect(connection)
+        assert migration.TABLE_NAME in set(inspector.get_table_names())
+        columns = {column["name"] for column in inspector.get_columns(migration.TABLE_NAME)}
+        assert columns == {"id", "created_at", "correlation_id", "payload"}
+        indexes = {index["name"] for index in inspector.get_indexes(migration.TABLE_NAME)}
+        assert indexes == {
+            "ix_research_experiments_created_at",
+            "ix_research_experiments_correlation_id",
+        }
+
+        migration.downgrade()
+        assert migration.TABLE_NAME not in set(inspect(connection).get_table_names())
