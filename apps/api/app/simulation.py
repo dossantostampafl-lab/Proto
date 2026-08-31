@@ -41,9 +41,12 @@ class RiskEngine:
             else 0.0
         )
         if request.order.side == Side.BUY:
-            executable_book_notional = request.snapshot.ask * request.snapshot.ask_size
+            executable_price = request.snapshot.ask
+            executable_book_notional = executable_price * request.snapshot.ask_size
         else:
-            executable_book_notional = request.snapshot.bid * request.snapshot.bid_size
+            executable_price = request.snapshot.bid
+            executable_book_notional = executable_price * request.snapshot.bid_size
+        executable_order_notional = request.order.quantity * executable_price
         allowed_book_ratio = 1.0 if risk_reducing else request.limits.max_order_to_book_ratio
         max_book_supported_notional = executable_book_notional * allowed_book_ratio
 
@@ -57,7 +60,7 @@ class RiskEngine:
             return False, "max drawdown exceeded"
         if request.snapshot.volatility > request.limits.max_volatility and not risk_reducing:
             return False, "max volatility exceeded"
-        if order_notional > max_book_supported_notional:
+        if executable_order_notional > max_book_supported_notional:
             return False, "insufficient top-of-book liquidity"
         if projected_position_notional > request.limits.max_position_notional:
             return False, "max position notional exceeded"
