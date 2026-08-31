@@ -55,6 +55,64 @@ pub enum GateDecision {
     Rejected(Vec<GateRejection>),
 }
 
+#[derive(Debug, Clone, Default)]
+struct BatchExposure {
+    position_by_market: HashMap<String, Decimal>,
+    notional_by_market: HashMap<String, Decimal>,
+    notional_by_asset: HashMap<String, Decimal>,
+    notional_by_cluster: HashMap<String, Decimal>,
+    total_notional: Decimal,
+}
+
+impl BatchExposure {
+    fn apply(&mut self, item: &BatchRiskRequest<'_>) {
+        let notional = item.request.order_notional.abs();
+        *self
+            .position_by_market
+            .entry(item.market_key.to_owned())
+            .or_default() += item.request.order_size;
+        *self
+            .notional_by_market
+            .entry(item.market_key.to_owned())
+            .or_default() += notional;
+        *self
+            .notional_by_asset
+            .entry(item.asset_key.to_owned())
+            .or_default() += notional;
+        *self
+            .notional_by_cluster
+            .entry(item.cluster_key.to_owned())
+            .or_default() += notional;
+        self.total_notional += notional;
+    }
+
+    fn for_keys(&self, market_key: &str, asset_key: &str, cluster_key: &str) -> ReservedExposure {
+        ReservedExposure {
+            position: self
+                .position_by_market
+                .get(market_key)
+                .copied()
+                .unwrap_or(Decimal::ZERO),
+            market_notional: self
+                .notional_by_market
+                .get(market_key)
+                .copied()
+                .unwrap_or(Decimal::ZERO),
+            asset_notional: self
+                .notional_by_asset
+                .get(asset_key)
+                .copied()
+                .unwrap_or(Decimal::ZERO),
+            cluster_notional: self
+                .notional_by_cluster
+                .get(cluster_key)
+                .copied()
+                .unwrap_or(Decimal::ZERO),
+            total_notional: self.total_notional,
+        }
+    }
+}
+
 /// Stateful fail-closed wrapper around the deterministic `RiskManager`.
 ///
 /// This layer closes three production-risk gaps that a single stateless
@@ -179,16 +237,18 @@ impl ReservationAwareRiskGate {
             return GateDecision::Rejected(vec![GateRejection::NotReconciled]);
         }
 
-        let mut cumulative = ReservedExposure::default();
+        let mut cumulative = BatchExposure::default();
         let mut failures = Vec::new();
 
         for item in requests {
+            let batch_for_keys =
+                cumulative.for_keys(item.market_key, item.asset_key, item.cluster_key);
             let adjusted = self.with_reserved_exposure(
                 item.request,
                 item.market_key,
                 item.asset_key,
                 item.cluster_key,
-                &cumulative,
+                &batch_for_keys,
             );
 
             if let RiskDecision::Rejected(reasons) = self.manager.evaluate(&adjusted) {
@@ -196,12 +256,7 @@ impl ReservationAwareRiskGate {
                 continue;
             }
 
-            let notional = item.request.order_notional.abs();
-            cumulative.position += item.request.order_size;
-            cumulative.market_notional += notional;
-            cumulative.asset_notional += notional;
-            cumulative.cluster_notional += notional;
-            cumulative.total_notional += notional;
+            cumulative.apply(&item);
         }
 
         if failures.is_empty() {
@@ -264,7 +319,7 @@ mod tests {
                 max_total_exposure: Decimal::new(300_000, 0),
                 max_correlated_exposure: Decimal::new(110_000, 0),
                 max_open_positions: 8,
-                max_concentration: Decimal::new(90, 2),
+                max_concentration: Decimal::ONE,
                 max_loss_per_session: Decimal::new(7_500, 0),
                 max_daily_drawdown: Decimal::new(5_000, 0),
                 minimum_net_edge: Decimal::new(1, 2),
@@ -377,5 +432,27 @@ mod tests {
                         if inner.contains(&RejectionReason::CorrelatedExposureLimit)
                 ))
         ));
+    }
+
+    #[test]
+    fn batch_does_not_mix_independent_market_limits() {
+        let gate = ReservationAwareRiskGate::new_presumed_reconciled(manager());
+        let first = request(60_000);
+        let second = request(60_000);
+        let decision = gate.evaluate_batch([
+            BatchRiskRequest {
+                request: &first,
+                market_key: "btc-usd",
+                asset_key: "btc",
+                cluster_key: "crypto-a",
+            },
+            BatchRiskRequest {
+                request: &second,
+                market_key: "gold-usd",
+                asset_key: "gold",
+                cluster_key: "metals",
+            },
+        ]);
+        assert_eq!(decision, GateDecision::Approved);
     }
 }
