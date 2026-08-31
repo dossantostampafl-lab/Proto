@@ -108,13 +108,16 @@ impl SimulatedOrder {
         if quantity <= Decimal::ZERO || quantity > remaining {
             return Err(TransitionError::InvalidFill);
         }
-        self.filled_quantity += quantity;
-        let next = if self.filled_quantity == self.quantity {
+        let next = if self.filled_quantity + quantity == self.quantity {
             OrderState::Filled
         } else {
             OrderState::PartiallyFilled
         };
-        self.transition(next)
+        // Validate and commit the lifecycle transition before changing fill accounting.
+        // This keeps the operation atomic when a fill arrives in an invalid state.
+        self.transition(next)?;
+        self.filled_quantity += quantity;
+        Ok(())
     }
 }
 
@@ -197,6 +200,26 @@ mod tests {
             order.apply_fill(Decimal::new(2, 0)),
             Err(TransitionError::InvalidFill)
         );
+    }
+
+    #[test]
+    fn invalid_state_fill_does_not_mutate_accounting() {
+        let mut order = SimulatedOrder::new(
+            Uuid::new_v4(),
+            "cmd-atomic".into(),
+            Decimal::ONE,
+            Decimal::new(2, 0),
+        );
+
+        assert_eq!(
+            order.apply_fill(Decimal::ONE),
+            Err(TransitionError::Invalid(
+                OrderState::Created,
+                OrderState::PartiallyFilled
+            ))
+        );
+        assert_eq!(order.state, OrderState::Created);
+        assert_eq!(order.filled_quantity, Decimal::ZERO);
     }
 
     #[test]
