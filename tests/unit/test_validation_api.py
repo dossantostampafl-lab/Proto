@@ -79,6 +79,23 @@ def test_validation_report_serializes_infinite_ratio_metrics_as_null() -> None:
     assert body["performance"]["profit_factor"] is None
 
 
+def test_validation_report_invalid_fold_geometry_returns_422() -> None:
+    response = client.post(
+        "/research/validation/report",
+        json={
+            "returns": [0.01, 0.02, -0.01, 0.005, 0.004, -0.002],
+            "train_size": 6,
+            "test_size": 3,
+            "monte_carlo_simulations": 20,
+            "monte_carlo_block_size": 2,
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 422
+    assert "no validation folds" in body["detail"]
+
+
 def test_pbo_endpoint_returns_bounded_probability() -> None:
     response = client.post(
         "/research/validation/pbo",
