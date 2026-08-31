@@ -4,9 +4,15 @@ from apps.api.app.main import app
 
 client = TestClient(app)
 
+_DISABLED_DETAIL = (
+    "synthetic research surface is disabled; use historical replay or "
+    "public read-only live market data"
+)
+
 
 def test_operational_synthetic_surfaces_are_disabled_by_default() -> None:
     for path in (
+        "/markets",
         "/markets/btc-threshold",
         "/market-data/BTC",
         "/orderbook/BTC",
@@ -22,7 +28,7 @@ def test_operational_synthetic_surfaces_are_disabled_by_default() -> None:
     ):
         response = client.get(path)
         assert response.status_code == 503, path
-        assert response.json()["detail"] == "synthetic research surface disabled"
+        assert response.json()["detail"] == _DISABLED_DETAIL
 
 
 def test_canonical_simulation_portfolio_surfaces_remain_available() -> None:
