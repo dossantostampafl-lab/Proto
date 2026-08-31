@@ -38,6 +38,7 @@ def _request() -> SimulationRequest:
 
 @pytest.mark.asyncio
 async def test_persistence_failure_does_not_mutate_paper_portfolio(monkeypatch) -> None:
+    main.reset_runtime_state()
     main.portfolio.reset()
     main.metrics.reset()
     monkeypatch.setattr(main, "persistent_journal", FailingJournal())
