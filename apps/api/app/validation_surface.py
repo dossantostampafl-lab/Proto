@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+from datetime import datetime
 from math import isfinite
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from services.validation import (
     ParameterPoint,
@@ -16,8 +18,11 @@ from services.validation import (
     regime_robustness,
     validation_report,
 )
+from services.validation.experiments import stable_fingerprint
 
+from .app_state import persistence_engine
 from .metrics_state import metrics
+from .research_persistence import persist_research_experiment
 
 router = APIRouter(prefix="/research/validation", tags=["research", "validation"])
 
@@ -36,6 +41,10 @@ def _json_safe(value: object) -> object:
 
 def _unprocessable(error: ValueError) -> HTTPException:
     return HTTPException(status_code=422, detail=str(error))
+
+
+def _aware(value: datetime) -> bool:
+    return value.tzinfo is not None and value.utcoffset() is not None
 
 
 class ParameterPointRequest(BaseModel):
@@ -86,8 +95,100 @@ class PboRequest(BaseModel):
         return self
 
 
-@router.post("/report")
-def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
+class DatasetProvenanceRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    source: str = Field(min_length=1, max_length=200)
+    venue: str = Field(min_length=1, max_length=80)
+    data_level: Literal["L1", "L2", "L3", "TRADES", "MIXED"]
+    content_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    schema_version: str = Field(min_length=1, max_length=64)
+    symbols: list[str] = Field(min_length=1)
+    start_at: datetime
+    end_at: datetime
+    event_count: int = Field(gt=0)
+    quality: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("content_sha256")
+    @classmethod
+    def normalize_content_sha256(cls, value: str) -> str:
+        return value.lower()
+
+    @field_validator("symbols")
+    @classmethod
+    def normalize_symbols(cls, value: list[str]) -> list[str]:
+        symbols = sorted({item.strip().upper() for item in value if item.strip()})
+        if not symbols:
+            raise ValueError("symbols must contain at least one non-empty symbol")
+        return symbols
+
+    @model_validator(mode="after")
+    def validate_time_bounds(self) -> DatasetProvenanceRequest:
+        if not _aware(self.start_at) or not _aware(self.end_at):
+            raise ValueError("dataset timestamps must be timezone-aware")
+        if self.start_at >= self.end_at:
+            raise ValueError("dataset start_at must be before end_at")
+        return self
+
+
+class ExperimentWindowRequest(BaseModel):
+    role: Literal["TRAIN", "VALIDATION", "TEST", "OOS"]
+    start_at: datetime
+    end_at: datetime
+
+    @model_validator(mode="after")
+    def validate_window(self) -> ExperimentWindowRequest:
+        if not _aware(self.start_at) or not _aware(self.end_at):
+            raise ValueError("experiment window timestamps must be timezone-aware")
+        if self.start_at >= self.end_at:
+            raise ValueError("experiment window start_at must be before end_at")
+        return self
+
+
+class ExperimentManifestRequest(BaseModel):
+    research_mode: Literal["HISTORICAL_REPLAY", "SIMULATION", "PAPER_TRADING"]
+    dataset: DatasetProvenanceRequest
+    feature_version: str = Field(min_length=1, max_length=120)
+    strategy_name: str = Field(min_length=1, max_length=120)
+    strategy_version: str = Field(min_length=1, max_length=120)
+    model_version: str = Field(min_length=1, max_length=120)
+    git_sha: str = Field(pattern=r"^[0-9a-fA-F]{7,64}$")
+    seed: int
+    replay_fingerprint: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
+    windows: list[ExperimentWindowRequest] = Field(min_length=1)
+    parameters: dict[str, object] = Field(default_factory=dict)
+    execution_assumptions: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("git_sha")
+    @classmethod
+    def normalize_git_sha(cls, value: str) -> str:
+        return value.lower()
+
+    @field_validator("replay_fingerprint")
+    @classmethod
+    def normalize_replay_fingerprint(cls, value: str | None) -> str | None:
+        return value.lower() if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_windows_against_dataset(self) -> ExperimentManifestRequest:
+        previous_end: datetime | None = None
+        for window in self.windows:
+            if window.start_at < self.dataset.start_at or window.end_at > self.dataset.end_at:
+                raise ValueError("experiment windows must be contained by dataset coverage")
+            if previous_end is not None and window.start_at < previous_end:
+                raise ValueError("experiment windows must be ordered and non-overlapping")
+            previous_end = window.end_at
+        return self
+
+
+class ExperimentValidationRequest(BaseModel):
+    manifest: ExperimentManifestRequest
+    validation: ValidationRequest
+
+
+def run_validation_report(request: ValidationRequest) -> dict[str, object]:
     returns = tuple(request.returns)
     try:
         folds = purged_walk_forward_splits(
@@ -145,6 +246,11 @@ def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
     }
 
 
+@router.post("/report")
+def validation_report_endpoint(request: ValidationRequest) -> dict[str, object]:
+    return run_validation_report(request)
+
+
 @router.post("/pbo")
 def pbo_endpoint(request: PboRequest) -> dict[str, object]:
     try:
@@ -160,6 +266,58 @@ def pbo_endpoint(request: PboRequest) -> dict[str, object]:
     return {
         "probability_of_backtest_overfitting": pbo,
         "strategy_count": len(request.strategy_returns),
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
+
+
+@router.post("/experiments/validate")
+async def validate_experiment(
+    request: ExperimentValidationRequest,
+) -> dict[str, object]:
+    manifest = request.manifest.model_dump(mode="json")
+    validation_plan = request.validation.model_dump(mode="json", exclude={"returns"})
+    try:
+        dataset_fingerprint = stable_fingerprint(manifest["dataset"])
+        experiment_id = stable_fingerprint(
+            {
+                "manifest": manifest,
+                "validation_plan": validation_plan,
+            }
+        )
+        returns_fingerprint = stable_fingerprint({"returns": request.validation.returns})
+    except ValueError as error:
+        metrics.increment("research_experiment_rejected")
+        raise _unprocessable(error) from error
+
+    validation_result = run_validation_report(request.validation)
+    payload: dict[str, object] = {
+        "manifest": manifest,
+        "validation_plan": validation_plan,
+        "returns_fingerprint": returns_fingerprint,
+        "validation_result": validation_result,
+    }
+    try:
+        persisted = await persist_research_experiment(
+            persistence_engine,
+            experiment_id=experiment_id,
+            payload=payload,
+        )
+    except RuntimeError as error:
+        metrics.increment("research_experiment_collision")
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    metrics.increment("research_experiment_requests")
+    if persisted:
+        metrics.increment("research_experiment_persisted")
+    return {
+        "experiment_id": experiment_id,
+        "dataset_fingerprint": dataset_fingerprint,
+        "returns_fingerprint": returns_fingerprint,
+        "manifest": manifest,
+        "validation_plan": validation_plan,
+        "validation_result": validation_result,
+        "persisted": persisted,
         "financial_connectivity": False,
         "real_money_execution": False,
     }
