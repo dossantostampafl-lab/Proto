@@ -16,6 +16,12 @@ type LiveAnalytics = {
   realized_volatility: number;
   current_imbalance: number;
 };
+type RiskState = {
+  mode: string;
+  simulation_allowed: boolean;
+  financial_connectivity: boolean;
+  real_money_execution: boolean;
+};
 type SimulationResult = {
   accepted: boolean;
   reason: string;
@@ -124,18 +130,21 @@ function mountPaperOrderConsole() {
   const quoteBid = document.createElement("span");
   const quoteAsk = document.createElement("span");
   const quoteBook = document.createElement("span");
-  quote.append(quoteBid, quoteAsk, quoteBook);
+  const modeState = document.createElement("span");
+  modeState.className = "paperModeState";
+  quote.append(quoteBid, quoteAsk, quoteBook, modeState);
 
   const submit = document.createElement("button");
   submit.type = "submit";
   submit.className = "paperSubmit";
   submit.textContent = "SIMULATE PAPER ORDER";
+  submit.disabled = true;
 
   const status = document.createElement("div");
   status.className = "paperResult idle";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
-  status.textContent = "Waiting for a fresh public quote.";
+  status.textContent = "Checking public quote and authoritative simulation mode.";
 
   const boundary = document.createElement("small");
   boundary.className = "paperBoundary";
@@ -146,8 +155,19 @@ function mountPaperOrderConsole() {
 
   let side: Side = "BUY";
   let lastFrame: LiveFrame | null = null;
+  let riskState: RiskState | null = null;
   let refreshInFlight = false;
   let submitInFlight = false;
+
+  const simulationPermitted = () => Boolean(
+    riskState?.simulation_allowed
+    && riskState.financial_connectivity === false
+    && riskState.real_money_execution === false,
+  );
+
+  const updateSubmitState = () => {
+    submit.disabled = submitInFlight || lastFrame === null || !simulationPermitted();
+  };
 
   const setSide = (next: Side) => {
     side = next;
@@ -162,13 +182,20 @@ function mountPaperOrderConsole() {
   sell.addEventListener("click", () => setSide("SELL"));
   setSide("BUY");
 
-  const refreshQuote = async () => {
+  const refreshContext = async () => {
     if (refreshInFlight || submitInFlight) return;
     refreshInFlight = true;
     try {
       const symbol = selectedSymbol();
       text(symbolBadge, `${symbol}/USD · PAPER`);
-      const frameResult = await jsonRequest<LiveFrame>(`/live/market-data/${symbol}`);
+      const [frameResult, riskResult] = await Promise.all([
+        jsonRequest<LiveFrame>(`/live/market-data/${symbol}`),
+        jsonRequest<RiskState>("/risk"),
+      ]);
+
+      riskState = riskResult.ok && riskResult.data ? riskResult.data : null;
+      text(modeState, riskState ? `mode ${riskState.mode}` : "mode unavailable");
+
       if (!frameResult.ok || !frameResult.data) {
         lastFrame = null;
         text(quoteBid, "bid —");
@@ -176,20 +203,28 @@ function mountPaperOrderConsole() {
         text(quoteBook, "top size —");
         status.className = "paperResult error";
         text(status, frameResult.status === 0 ? "Public quote request unavailable." : `Public quote unavailable (${frameResult.status}).`);
-        submit.disabled = true;
+        updateSubmitState();
         return;
       }
+
       lastFrame = frameResult.data;
       text(quoteBid, `bid ${frameResult.data.bid.toLocaleString("en-US", { maximumFractionDigits: 8 })}`);
       text(quoteAsk, `ask ${frameResult.data.ask.toLocaleString("en-US", { maximumFractionDigits: 8 })}`);
       const topSize = side === "BUY" ? frameResult.data.ask_size : frameResult.data.bid_size;
       text(quoteBook, `${side.toLowerCase()} top ${topSize.toLocaleString("en-US", { maximumFractionDigits: 6 })}`);
       if (!limit.matches(":focus")) limit.value = String(side === "BUY" ? frameResult.data.ask : frameResult.data.bid);
-      submit.disabled = false;
-      if (!status.classList.contains("accepted") && !status.classList.contains("rejected")) {
+
+      if (!riskState) {
+        status.className = "paperResult error";
+        text(status, "Authoritative risk state is unavailable; simulation is locked.");
+      } else if (!simulationPermitted()) {
+        status.className = "paperResult locked";
+        text(status, `SIMULATOR LOCKED IN ${riskState.mode} · server policy permits fills only in SIMULATION or PAPER_TRADING.`);
+      } else if (!status.classList.contains("accepted") && !status.classList.contains("rejected")) {
         status.className = "paperResult ready";
-        text(status, "Fresh public quote loaded. Risk and portfolio state are enforced by the server.");
+        text(status, "Fresh public quote loaded. Backend simulation/risk gate is enabled for this runtime mode.");
       }
+      updateSubmitState();
     } finally {
       refreshInFlight = false;
     }
@@ -198,13 +233,20 @@ function mountPaperOrderConsole() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (submitInFlight) return;
+    if (!simulationPermitted()) {
+      status.className = "paperResult locked";
+      text(status, `SIMULATOR LOCKED IN ${riskState?.mode ?? "UNKNOWN"} · no order was submitted.`);
+      updateSubmitState();
+      return;
+    }
+
     const symbol = selectedSymbol();
     const quantityValue = Number(quantity.value);
     const limitValue = Number(limit.value);
     if (!lastFrame || lastFrame.symbol !== symbol) {
       status.className = "paperResult error";
       text(status, "Selected market changed. Refreshing quote before simulation.");
-      await refreshQuote();
+      await refreshContext();
       return;
     }
     if (!Number.isFinite(quantityValue) || quantityValue <= 0 || quantityValue > MAX_QUANTITY) {
@@ -221,7 +263,7 @@ function mountPaperOrderConsole() {
     }
 
     submitInFlight = true;
-    submit.disabled = true;
+    updateSubmitState();
     status.className = "paperResult working";
     text(status, "Submitting to backend risk gate and execution simulator…");
     try {
@@ -247,7 +289,6 @@ function mountPaperOrderConsole() {
           imbalance,
           observed_at: lastFrame.received_at || lastFrame.timestamp,
         },
-        server_execution_permitted: true,
       };
       const result = await jsonRequest<SimulationResult>("/v1/simulate", { method: "POST", body: JSON.stringify(payload) });
       if (!result.ok || !result.data) {
@@ -265,15 +306,15 @@ function mountPaperOrderConsole() {
       }
     } finally {
       submitInFlight = false;
-      submit.disabled = lastFrame === null;
-      window.setTimeout(() => void refreshQuote(), 250);
+      updateSubmitState();
+      window.setTimeout(() => void refreshContext(), 250);
     }
   });
 
-  const timer = window.setInterval(() => void refreshQuote(), 2000);
-  const selectionObserver = new MutationObserver(() => void refreshQuote());
+  const timer = window.setInterval(() => void refreshContext(), 2000);
+  const selectionObserver = new MutationObserver(() => void refreshContext());
   document.querySelectorAll(".marketTile").forEach((tile) => selectionObserver.observe(tile, { attributes: true, attributeFilter: ["class"] }));
-  void refreshQuote();
+  void refreshContext();
 
   window.addEventListener("beforeunload", () => {
     window.clearInterval(timer);
