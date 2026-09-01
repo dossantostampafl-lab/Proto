@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -107,7 +108,12 @@ class Position:
 
 
 class PaperPortfolio:
-    def __init__(self, max_journal_entries: int = 1_000) -> None:
+    def __init__(
+        self,
+        max_journal_entries: int = 1_000,
+        *,
+        reference_time_provider: Callable[[], datetime | None] | None = None,
+    ) -> None:
         self._positions: dict[Asset, Position] = {}
         self._journal: list[dict[str, object]] = []
         self._seen_order_ids: set[str] = set()
@@ -115,6 +121,7 @@ class PaperPortfolio:
         self._turnover_notional = ZERO
         self._slippage_cost = ZERO
         self._realized_pnl_high_watermark = ZERO
+        self._reference_time_provider = reference_time_provider
 
     def reset(self) -> None:
         self._positions.clear()
@@ -220,12 +227,18 @@ class PaperPortfolio:
         as_of: datetime | None = None,
     ) -> dict[str, object]:
         marks = marks or {}
-        if as_of is not None:
-            _require_aware_timestamp(as_of, field_name="portfolio as_of timestamp")
+        resolved_as_of = as_of
+        if resolved_as_of is None and self._reference_time_provider is not None:
+            resolved_as_of = self._reference_time_provider()
+        if resolved_as_of is not None:
+            _require_aware_timestamp(
+                resolved_as_of,
+                field_name="portfolio as_of timestamp",
+            )
         decimal_marks = {asset: _decimal(price) for asset, price in marks.items()}
         ordered_positions = sorted(self._positions.values(), key=lambda item: item.asset.value)
         positions = [
-            position.as_dict(marks.get(position.asset), as_of=as_of)
+            position.as_dict(marks.get(position.asset), as_of=resolved_as_of)
             for position in ordered_positions
         ]
         total_realized_pnl = sum(
@@ -267,7 +280,7 @@ class PaperPortfolio:
         temporal_exposure = sum(
             (
                 position.temporal_exposure_at(
-                    as_of=as_of,
+                    as_of=resolved_as_of,
                     mark_price=decimal_marks.get(position.asset),
                 )
                 for position in ordered_positions
@@ -275,13 +288,16 @@ class PaperPortfolio:
             start=ZERO,
         )
         max_position_age = max(
-            (position.position_age_seconds(as_of=as_of) for position in ordered_positions),
+            (
+                position.position_age_seconds(as_of=resolved_as_of)
+                for position in ordered_positions
+            ),
             default=ZERO,
         )
 
         return {
             "mode": "SIMULATION",
-            "as_of": as_of.isoformat() if as_of is not None else None,
+            "as_of": resolved_as_of.isoformat() if resolved_as_of is not None else None,
             "positions": positions,
             "open_position_count": len(exposure_by_asset),
             "gross_exposure": _json_number(gross_exposure),
