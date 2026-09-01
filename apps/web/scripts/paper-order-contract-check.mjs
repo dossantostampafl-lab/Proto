@@ -9,6 +9,8 @@ assert.match(terminalRuntime, /import "\.\/paper-order-runtime"/, "terminal runt
 assert.match(runtime, /\/v1\/simulate/, "paper console must submit only to the canonical simulation endpoint");
 assert.match(runtime, /\/live\/market-data\/\$\{symbol\}/, "paper console must price from canonical public live market data");
 assert.match(runtime, /\/live\/analytics\/\$\{symbol\}/, "paper console must use canonical public analytics for simulation snapshot context");
+assert.match(runtime, /Canonical live analytics are unavailable; simulation was not submitted\./, "paper console must fail closed when canonical analytics are unavailable");
+assert.doesNotMatch(runtime, /market_probability:\s*0\.5/, "paper console must not invent a prediction-market probability for crypto simulation");
 assert.match(runtime, /Backend-authoritative simulation only/, "paper console must disclose server-authoritative simulation semantics");
 assert.match(runtime, /No exchange credentials · no financial connectivity · no real-money execution/, "paper console must disclose the financial safety boundary");
 assert.match(runtime, /server_execution_permitted: true/, "paper request must opt into the existing simulation gate rather than bypass it");
