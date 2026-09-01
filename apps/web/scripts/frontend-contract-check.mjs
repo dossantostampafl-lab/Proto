@@ -34,7 +34,7 @@ assert.match(runtime, /scrollIntoView/, "command navigation must move to the req
 assert.match(runtime, /aria-current/, "active command navigation state must be announced");
 assert.match(runtime, /prefers-reduced-motion/, "runtime navigation must respect reduced motion");
 assert.match(runtime, /document\.body\.style\.overflow = "hidden"/, "modal runtime must lock background scrolling");
-assert.match(runtime, /event\.key === "Tab"/, "modal runtime must trap keyboard focus");
+assert.match(runtime, /event\.key !== "Tab"/, "modal runtime must trap keyboard focus");
 assert.match(runtime, /event\.key === "Escape"/, "modal runtime must preserve Escape dismissal");
 assert.match(runtime, /opener\.focus\(\)/, "modal runtime must restore focus to its opener");
 assert.match(runtimeStyles, /scroll-margin-top/, "section targets must reserve sticky-header scroll offset");
