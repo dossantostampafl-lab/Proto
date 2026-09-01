@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 type PerformanceMetrics = {
   sample_count: number;
@@ -44,6 +44,8 @@ type Props = {
   apiBase: string;
 };
 
+const VALIDATION_TIMEOUT_MS = 20_000;
+
 function formatNumber(value: number | null, digits = 3) {
   if (value === null) return "∞";
   return new Intl.NumberFormat("en-US", {
@@ -73,6 +75,9 @@ export function ValidationPanel({ apiBase }: Props) {
   const [report, setReport] = useState<ValidationReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
+
+  useEffect(() => () => activeRequest.current?.abort(), []);
 
   const sampleCount = useMemo(() => {
     if (!rawReturns.trim()) return 0;
@@ -80,7 +85,12 @@ export function ValidationPanel({ apiBase }: Props) {
   }, [rawReturns]);
 
   async function runValidation() {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS);
     setBusy(true);
+    setError(null);
     try {
       const returns = parseReturns(rawReturns);
       const testSize = Math.max(2, Math.floor(returns.length / 4));
@@ -101,16 +111,25 @@ export function ValidationPanel({ apiBase }: Props) {
           monte_carlo_block_size: Math.min(5, returns.length),
           monte_carlo_seed: 7,
         }),
+        cache: "no-store",
+        signal: controller.signal,
       });
       const body = (await response.json()) as ValidationReport & { detail?: string };
       if (!response.ok) throw new Error(body.detail ?? "Validation request failed.");
       setReport(body);
-      setError(null);
     } catch (validationError) {
+      if (controller.signal.aborted) {
+        if (activeRequest.current === controller) setError("Validation request timed out or was cancelled.");
+        return;
+      }
       setReport(null);
       setError(validationError instanceof Error ? validationError.message : "Validation failed.");
     } finally {
-      setBusy(false);
+      window.clearTimeout(timeout);
+      if (activeRequest.current === controller) {
+        activeRequest.current = null;
+        setBusy(false);
+      }
     }
   }
 
@@ -125,7 +144,9 @@ export function ValidationPanel({ apiBase }: Props) {
             renders the returned walk-forward, DSR, drawdown and Monte Carlo diagnostics.
           </p>
         </div>
-        <span className="validationStatus">{report ? "REPORT READY" : "NOT RUN"}</span>
+        <span className="validationStatus" role="status" aria-live="polite">
+          {busy ? "RUNNING" : report ? "REPORT READY" : "NOT RUN"}
+        </span>
       </div>
 
       <div className="validationInputGrid">
@@ -143,13 +164,13 @@ export function ValidationPanel({ apiBase }: Props) {
         <div className="validationRunBox">
           <strong>No synthetic score is shown.</strong>
           <p>The panel remains empty until a real research/replay series is submitted.</p>
-          <button disabled={busy || sampleCount < 6} onClick={() => void runValidation()}>
+          <button type="button" disabled={busy || sampleCount < 6} onClick={() => void runValidation()}>
             {busy ? "Validating…" : "Run validation"}
           </button>
         </div>
       </div>
 
-      {error && <p className="validationError">{error}</p>}
+      {error && <p className="validationError" role="alert">{error}</p>}
 
       {report && (
         <>
