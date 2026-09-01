@@ -65,8 +65,16 @@ class PaperAutopilotService:
                         "before autopilot starts"
                     ),
                 )
+            previous_symbol = self._config.symbol
             self._config = config
             if self.running:
+                if config.symbol != previous_symbol:
+                    # Signal-consumption state belongs to one market. A symbol
+                    # transition must not inherit BUY/SELL hysteresis from the
+                    # previously configured market. The global cooldown is kept
+                    # intentionally to prevent a cross-asset burst after update.
+                    self._armed_side = None
+                    self._last_signal = None
                 self._last_reason = "CONFIG_UPDATED"
                 return self.status()
             self._started_at = datetime.now(UTC)
