@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "contract-check": "node scripts/frontend-contract-check.mjs && node scripts/validation-lifecycle-check.mjs && node scripts/navigation-contract-check.mjs && node scripts/paper-order-contract-check.mjs",
+    "contract-check": "node scripts/frontend-contract-check.mjs && node scripts/validation-lifecycle-check.mjs && node scripts/navigation-contract-check.mjs && node scripts/paper-order-contract-check.mjs && node scripts/tablet-layout-contract-check.mjs",
     "bundle-check": "node scripts/bundle-budget-check.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
