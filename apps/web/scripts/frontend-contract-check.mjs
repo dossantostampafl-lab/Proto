@@ -120,7 +120,8 @@ await missing("../src/premium-runtime.ts", "superseded premium runtime must rema
 await missing("../src/premium-runtime.css", "superseded premium runtime styles must remain removed");
 assert.match(dockerfile, /VITE_API_BASE_URL=""/, "single-origin deploy must remain hostname-portable");
 assert.match(dockerfile, /SYNTHETIC_RESEARCH_ENABLED=true/, "Railway image must explicitly enable the isolated synthetic research workspace");
-assert.match(dockerfile, /PERSISTENCE_ENABLED=true/, "Railway image must enable the public read-only live-history journal");
+assert.match(dockerfile, /LIVE_PERSISTENCE_ENABLED=true/, "Railway image must enable only the public read-only live-history journal");
+assert.doesNotMatch(dockerfile, /\n\s*PERSISTENCE_ENABLED=true/, "Railway live-history bootstrap must not implicitly enable general simulation persistence");
 assert.match(pyproject, /"aiosqlite>=0\.21,<1"/, "runtime dependencies must include the async sqlite driver used by default live persistence");
 assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bundle must not hardcode Railway hostname");
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
