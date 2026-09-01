@@ -22,6 +22,20 @@ def _paper_runtime() -> None:
     runtime.kill_switch = KillSwitchState.ARMED
 
 
+def _fresh_live(monkeypatch, symbol: str = "BTC") -> None:
+    monkeypatch.setattr(
+        module.live_monitor,
+        "status",
+        lambda: {
+            "running": True,
+            "receiving_data": True,
+            "fresh_symbols": [symbol],
+            "financial_connectivity": False,
+            "real_money_execution": False,
+        },
+    )
+
+
 @pytest.mark.asyncio
 async def test_autopilot_start_fails_closed_outside_paper_runtime() -> None:
     runtime.mode = SystemMode.LIVE_MONITORING
@@ -39,8 +53,50 @@ async def test_autopilot_start_fails_closed_outside_paper_runtime() -> None:
 
 
 @pytest.mark.asyncio
+async def test_autopilot_stale_live_data_blocks_submission(monkeypatch) -> None:
+    _paper_runtime()
+    service = PaperAutopilotService()
+    service._config = PaperAutopilotConfig(  # noqa: SLF001 - white-box safety regression
+        symbol="BTC",
+        imbalance_trigger=0.6,
+        cooldown_seconds=5,
+        quantity=0.001,
+        max_spread_bps=20,
+    )
+    monkeypatch.setattr(
+        module.live_monitor,
+        "status",
+        lambda: {
+            "running": True,
+            "receiving_data": True,
+            "fresh_symbols": [],
+            "financial_connectivity": False,
+            "real_money_execution": False,
+        },
+    )
+    monkeypatch.setattr(
+        module.live_monitor,
+        "snapshot",
+        lambda symbol: (_ for _ in ()).throw(AssertionError("stale snapshot must not be read")),
+    )
+
+    async def fail_if_called(request):
+        raise AssertionError("simulator must not be called with stale live data")
+
+    monkeypatch.setattr(module, "simulate", fail_if_called)
+
+    await service._cycle()  # noqa: SLF001
+
+    state = service.status()
+    assert state["last_reason"] == "WAITING_FOR_FRESH_LIVE_DATA"
+    assert state["live_market_ready"] is False
+    assert state["counters"]["submissions"] == 0
+
+
+@pytest.mark.asyncio
 async def test_autopilot_same_signal_regime_submits_only_once(monkeypatch) -> None:
     _paper_runtime()
+    _fresh_live(monkeypatch)
     service = PaperAutopilotService()
     service._config = PaperAutopilotConfig(  # noqa: SLF001 - white-box safety regression
         symbol="BTC",
@@ -80,6 +136,7 @@ async def test_autopilot_same_signal_regime_submits_only_once(monkeypatch) -> No
 
     state = service.status()
     assert calls == 1
+    assert state["live_market_ready"] is True
     assert state["counters"]["submissions"] == 1
     assert state["counters"]["rejected"] == 1
     assert state["last_reason"] == "SIGNAL_ALREADY_CONSUMED"
@@ -88,6 +145,7 @@ async def test_autopilot_same_signal_regime_submits_only_once(monkeypatch) -> No
 @pytest.mark.asyncio
 async def test_autopilot_spread_and_liquidity_guards_block_submission(monkeypatch) -> None:
     _paper_runtime()
+    _fresh_live(monkeypatch)
     service = PaperAutopilotService()
     service._config = PaperAutopilotConfig(  # noqa: SLF001
         imbalance_trigger=0.6,
@@ -126,13 +184,15 @@ async def test_autopilot_spread_and_liquidity_guards_block_submission(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_autopilot_worker_can_start_and_stop_cleanly() -> None:
+async def test_autopilot_worker_can_start_and_stop_cleanly(monkeypatch) -> None:
     _paper_runtime()
+    _fresh_live(monkeypatch)
     service = PaperAutopilotService()
 
     started = await service.start(PaperAutopilotConfig())
     assert started["running"] is True
     assert started["paper_runtime_ready"] is True
+    assert started["live_market_ready"] is True
 
     stopped = await service.stop()
     assert stopped["running"] is False
