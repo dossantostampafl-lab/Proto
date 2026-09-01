@@ -68,6 +68,7 @@ pub enum RejectionReason {
     EdgeTooSmall,
     ConfidenceTooLow,
     LiquidityTooLow,
+    VolatilityTooHigh,
     LatencyTooHigh,
 }
 
@@ -84,14 +85,18 @@ pub struct RiskManager {
 }
 
 impl RiskManager {
+    fn is_risk_reducing(request: &RiskRequest) -> bool {
+        request.current_position * request.order_size < Decimal::ZERO
+            && request.order_size.abs() <= request.current_position.abs()
+    }
+
     pub fn evaluate(&self, request: &RiskRequest) -> RiskDecision {
         let mut reasons = Vec::new();
         let projected_position = request.current_position + request.order_size;
         // Only a same-side close can use the risk-reducing path. An order that
         // crosses through zero creates new opposite-side exposure and must pass
         // the full alpha/liquidity/open-position gates.
-        let risk_reducing = request.current_position * request.order_size < Decimal::ZERO
-            && request.order_size.abs() <= request.current_position.abs();
+        let risk_reducing = Self::is_risk_reducing(request);
         let projected_market_exposure = if risk_reducing {
             (request.current_market_exposure - request.order_notional.abs()).max(Decimal::ZERO)
         } else {
@@ -174,6 +179,33 @@ impl RiskManager {
             RiskDecision::Approved
         } else {
             RiskDecision::Rejected(reasons)
+        }
+    }
+
+    /// Evaluate the normal risk contract plus a market-specific volatility ceiling.
+    ///
+    /// The volatility gate is entry/increasing-exposure protection. Strictly
+    /// risk-reducing closes may still proceed during a volatility spike so the
+    /// control cannot trap exposure that the caller is trying to reduce.
+    pub fn evaluate_with_volatility(
+        &self,
+        request: &RiskRequest,
+        observed_volatility: Decimal,
+        max_volatility: Decimal,
+    ) -> RiskDecision {
+        let decision = self.evaluate(request);
+        if Self::is_risk_reducing(request) || observed_volatility <= max_volatility {
+            return decision;
+        }
+
+        match decision {
+            RiskDecision::Approved => {
+                RiskDecision::Rejected(vec![RejectionReason::VolatilityTooHigh])
+            }
+            RiskDecision::Rejected(mut reasons) => {
+                reasons.push(RejectionReason::VolatilityTooHigh);
+                RiskDecision::Rejected(reasons)
+            }
         }
     }
 }
@@ -326,5 +358,56 @@ mod tests {
             RiskDecision::Rejected(reasons)
                 if reasons.contains(&RejectionReason::CorrelatedExposureLimit)
         ));
+    }
+
+    #[test]
+    fn volatility_gate_rejects_new_exposure_above_limit() {
+        let decision = manager().evaluate_with_volatility(
+            &request(),
+            Decimal::new(85, 2),
+            Decimal::new(60, 2),
+        );
+
+        assert_eq!(
+            decision,
+            RiskDecision::Rejected(vec![RejectionReason::VolatilityTooHigh])
+        );
+    }
+
+    #[test]
+    fn volatility_gate_preserves_existing_rejection_reasons() {
+        let mut candidate = request();
+        candidate.confidence = Decimal::ZERO;
+        let decision = manager().evaluate_with_volatility(
+            &candidate,
+            Decimal::new(85, 2),
+            Decimal::new(60, 2),
+        );
+
+        assert!(matches!(
+            decision,
+            RiskDecision::Rejected(reasons)
+                if reasons.contains(&RejectionReason::ConfidenceTooLow)
+                    && reasons.contains(&RejectionReason::VolatilityTooHigh)
+        ));
+    }
+
+    #[test]
+    fn volatility_spike_does_not_block_strictly_risk_reducing_close() {
+        let mut candidate = request();
+        candidate.current_position = Decimal::new(2, 0);
+        candidate.order_size = Decimal::new(-1, 0);
+        candidate.current_market_exposure = Decimal::new(70_000, 0);
+        candidate.current_asset_exposure = Decimal::new(80_000, 0);
+        candidate.current_total_exposure = Decimal::new(120_000, 0);
+
+        assert_eq!(
+            manager().evaluate_with_volatility(
+                &candidate,
+                Decimal::new(250, 2),
+                Decimal::new(60, 2),
+            ),
+            RiskDecision::Approved
+        );
     }
 }
