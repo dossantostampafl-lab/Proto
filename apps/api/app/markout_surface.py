@@ -10,6 +10,7 @@ from services.market_data.contracts import OrderBookSnapshot, ResearchAsset
 from services.market_data.l2_corpus_replay import PublicL2ReplaySnapshot
 from services.market_data.markout import (
     DEFAULT_MARKOUT_HORIZONS_MS,
+    FillMarkout,
     FillObservation,
     compute_fill_markout,
     summarize_markouts,
@@ -62,13 +63,14 @@ class MarkoutRequest(BaseModel):
             previous = clocks.get(key)
             if previous is not None and point.snapshot.observed_at < previous:
                 raise ValueError(
-                    "L2 snapshots must be ordered by observed_at within connection generation and asset"
+                    "L2 snapshots must be ordered by observed_at within "
+                    "connection generation and asset"
                 )
             clocks[key] = point.snapshot.observed_at
         return self
 
 
-def _serialize_markout(item) -> dict[str, object]:
+def _serialize_markout(item: FillMarkout) -> dict[str, object]:
     return {
         "fill_id": item.fill_id,
         "side": item.side,
