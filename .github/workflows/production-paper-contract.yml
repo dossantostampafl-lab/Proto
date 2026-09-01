@@ -55,6 +55,8 @@ jobs:
                   status, autopilot = get_json("/paper/automation/status")
                   if status != 200:
                       raise AssertionError(f"autopilot status HTTP {status}")
+                  if "live_market_ready" not in autopilot:
+                      raise AssertionError("deployed autopilot predates authoritative live-readiness gating")
                   if autopilot.get("financial_connectivity") is not False:
                       raise AssertionError("autopilot violated no-financial-connectivity boundary")
                   if autopilot.get("real_money_execution") is not False:
@@ -73,6 +75,7 @@ jobs:
                               "mode": paper.get("mode"),
                               "paper_execution_enabled": paper.get("paper_execution_enabled"),
                               "autopilot_running": paper.get("autopilot_running"),
+                              "live_market_ready": autopilot.get("live_market_ready"),
                           },
                           sort_keys=True,
                       ),
