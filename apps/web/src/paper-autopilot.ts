@@ -110,7 +110,7 @@ function mountPaperAutopilot() {
   const strong = document.createElement("strong");
   strong.textContent = "SERVER PAPER AUTOPILOT";
   const small = document.createElement("small");
-  small.textContent = "Continues on the server after this dashboard tab is closed";
+  small.textContent = "Primary automation · continues on the server after this dashboard tab is closed";
   title.append(strong, small);
   const stateBadge = document.createElement("span");
   stateBadge.className = "paperAutoBadge off";
@@ -162,7 +162,7 @@ function mountPaperAutopilot() {
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "paperAutoToggle";
-  toggle.textContent = "START SERVER AUTOPILOT";
+  toggle.textContent = "START PAPER AUTOPILOT";
   controls.append(thresholdLabel, cooldownLabel, quantityLabel, spreadLabel, toggle);
 
   const telemetry = document.createElement("div");
@@ -179,13 +179,13 @@ function mountPaperAutopilot() {
   status.className = "paperAutoStatus idle";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
-  status.textContent = "Server autopilot is off.";
+  status.textContent = "Paper autopilot is off.";
 
   const boundary = document.createElement("small");
   boundary.className = "paperAutoBoundary";
   boundary.textContent = "Persistent server task · simulation only · no exchange account · no financial connectivity · no real-money execution";
   section.append(head, controls, telemetry, status, boundary);
-  host.append(section);
+  host.prepend(section);
 
   let busy = false;
   let active = false;
@@ -232,7 +232,7 @@ function mountPaperAutopilot() {
       active = false;
       stateBadge.className = "paperAutoBadge off";
       stateBadge.textContent = "UNKNOWN";
-      toggle.textContent = "START SERVER AUTOPILOT";
+      toggle.textContent = "START PAPER AUTOPILOT";
       toggle.disabled = busy;
       setInputsDisabled(busy);
       status.className = "paperAutoStatus error";
@@ -244,7 +244,7 @@ function mountPaperAutopilot() {
     active = safe && server.running;
     stateBadge.className = `paperAutoBadge ${active ? "on" : "off"}`;
     stateBadge.textContent = active ? "SERVER ACTIVE" : "OFF";
-    toggle.textContent = active ? "STOP SERVER AUTOPILOT" : "START SERVER AUTOPILOT";
+    toggle.textContent = active ? "STOP PAPER AUTOPILOT" : "START PAPER AUTOPILOT";
     toggle.disabled = busy || !safe;
     setInputsDisabled(active || busy);
 
@@ -269,7 +269,7 @@ function mountPaperAutopilot() {
       status.textContent = `SERVER AUTOPILOT PAUSED · ${reason} · enable PAPER_TRADING to resume decisions.`;
     } else {
       status.className = "paperAutoStatus idle";
-      status.textContent = `Server autopilot off · ${reason}`;
+      status.textContent = `Paper autopilot off · ${reason}`;
     }
   };
 
