@@ -1,3 +1,4 @@
+pub mod admission;
 pub mod matching;
 pub mod queue;
 
