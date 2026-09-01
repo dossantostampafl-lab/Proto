@@ -1,0 +1,94 @@
+name: Production Paper Contract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-paper-contract-main
+  cancel-in-progress: true
+
+jobs:
+  railway-paper-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+    steps:
+      - name: Verify deployed paper lifecycle contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
+          last_error = None
+
+          def get_json(path: str):
+              request = urllib.request.Request(
+                  f"{origin}{path}",
+                  headers={"User-Agent": "proto-paper-contract/1.0"},
+              )
+              with urllib.request.urlopen(request, timeout=10) as response:
+                  return response.status, json.loads(response.read().decode("utf-8"))
+
+          for attempt in range(1, 61):
+              try:
+                  status, paper = get_json("/paper/status")
+                  if status != 200:
+                      raise AssertionError(f"paper status HTTP {status}")
+                  if "autopilot_running" not in paper:
+                      raise AssertionError("deployed paper status predates coupled autopilot lifecycle")
+                  if paper.get("financial_connectivity") is not False:
+                      raise AssertionError("paper status violated no-financial-connectivity boundary")
+                  if paper.get("real_money_execution") is not False:
+                      raise AssertionError("paper status violated no-real-money boundary")
+
+                  status, autopilot = get_json("/paper/automation/status")
+                  if status != 200:
+                      raise AssertionError(f"autopilot status HTTP {status}")
+                  if autopilot.get("financial_connectivity") is not False:
+                      raise AssertionError("autopilot violated no-financial-connectivity boundary")
+                  if autopilot.get("real_money_execution") is not False:
+                      raise AssertionError("autopilot violated no-real-money boundary")
+                  if bool(paper.get("autopilot_running")) != bool(autopilot.get("running")):
+                      raise AssertionError(
+                          "paper/autopilot running state is inconsistent: "
+                          f"paper={paper.get('autopilot_running')!r} "
+                          f"autopilot={autopilot.get('running')!r}"
+                      )
+
+                  print(
+                      "production paper contract: ok",
+                      json.dumps(
+                          {
+                              "mode": paper.get("mode"),
+                              "paper_execution_enabled": paper.get("paper_execution_enabled"),
+                              "autopilot_running": paper.get("autopilot_running"),
+                          },
+                          sort_keys=True,
+                      ),
+                  )
+                  break
+              except (
+                  AssertionError,
+                  json.JSONDecodeError,
+                  urllib.error.URLError,
+                  TimeoutError,
+              ) as error:
+                  last_error = error
+                  print(f"attempt {attempt}/60 not ready: {type(error).__name__}: {error}")
+                  if attempt == 60:
+                      raise
+                  time.sleep(5)
+          else:
+              raise RuntimeError(f"paper contract exhausted retries: {last_error}")
+          PY
