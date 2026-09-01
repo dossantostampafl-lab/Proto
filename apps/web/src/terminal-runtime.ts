@@ -68,6 +68,19 @@ function bindSectionNavigation() {
   };
   setActive("COMMAND");
 
+  const systemButton = byName.get("SYSTEM");
+  const onSystemClick = () => {
+    setActive("SYSTEM");
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(".operationalSurface") ?? document.querySelector<HTMLElement>("footer[data-section='SYSTEM']");
+      target?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+  };
+  systemButton?.addEventListener("click", onSystemClick);
+
   const observer = new IntersectionObserver((entries) => {
     const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
     const name = visible?.target instanceof HTMLElement ? visible.target.dataset.section : undefined;
@@ -75,7 +88,10 @@ function bindSectionNavigation() {
   }, { rootMargin: "-72px 0px -55% 0px", threshold: [0.08, 0.2, 0.45, 0.7] });
 
   sections.forEach((section) => observer.observe(section));
-  return () => observer.disconnect();
+  return () => {
+    systemButton?.removeEventListener("click", onSystemClick);
+    observer.disconnect();
+  };
 }
 
 function startRuntime() {
