@@ -61,19 +61,25 @@ assert.match(runtime, /IntersectionObserver/, "command navigation must track vis
 assert.match(runtime, /aria-current/, "visible command section must be announced");
 assert.match(runtime, /import "\.\/operational-runtime"/, "terminal runtime must load operational telemetry");
 assert.match(runtime, /document\.querySelector<HTMLElement>\("\.operationalSurface"\)/, "System command must prefer operational telemetry surface");
+assert.doesNotMatch(runtime, /innerHTML/, "command rail runtime must use DOM APIs instead of HTML injection");
 assert.match(runtimeStyles, /\.commandRail/, "command rail must have dedicated visual treatment");
 assert.match(runtimeStyles, /aria-current="page"/, "active command section must have visible styling");
 
-assert.match(operational, /requestJson<RuntimeState>\("\/system\/status"\)/, "system runtime must come from backend contract");
-assert.match(operational, /requestJson<RiskState>\("\/risk"\)/, "risk policy must come from backend contract");
-assert.match(operational, /requestJson<Reconciliation>\("\/v1\/reconciliation"\)/, "reconciliation must come from canonical endpoint");
-assert.match(operational, /requestJson<Fills>\("\/v1\/fills\?limit=8"\)/, "recent fills must come from canonical simulated journal endpoint");
+assert.match(operational, /requestJson<RuntimeState>\("\/system\/status", signal\)/, "system runtime must come from backend contract");
+assert.match(operational, /requestJson<RiskState>\("\/risk", signal\)/, "risk policy must come from backend contract");
+assert.match(operational, /requestJson<Reconciliation>\("\/v1\/reconciliation", signal\)/, "reconciliation must come from canonical endpoint");
+assert.match(operational, /requestJson<Fills>\("\/v1\/fills\?limit=8", signal\)/, "recent fills must come from canonical simulated journal endpoint");
 assert.match(operational, /surface\.dataset\.section = "SYSTEM"/, "operational surface must identify itself as System navigation content");
 assert.match(operational, /real_money_execution === false/, "operational surface must preserve execution boundary");
 assert.match(operational, /RECENT SIMULATED FILLS/, "fill journal must be explicitly labeled simulated");
 assert.match(operational, /textContent = text/, "runtime must render backend strings as text rather than HTML");
 assert.doesNotMatch(operational, /innerHTML/, "operational runtime must not inject backend content as HTML");
 assert.match(operational, /inFlight/, "operational polling must prevent overlapping requests");
+assert.match(operational, /refreshController\?\.abort\(\)/, "operational cleanup must abort in-flight requests");
+assert.match(operational, /SNAPSHOT_STALE_MS/, "operational telemetry must distinguish stale snapshots");
+assert.match(operational, /function endpointState/, "partial endpoint failures must be visible rather than silently rendered as blanks");
+assert.match(operational, /Reconciliation endpoint unavailable; no consistency claim is being made\./, "reconciliation failure must not be presented as a valid consistency state");
+assert.match(operationalStyles, /\.opsEndpoint/, "operational endpoint health must have visible status styling");
 assert.match(operationalStyles, /@media\(max-width:820px\)/, "operational telemetry must support tablet layout");
 
 assert.match(styles, /grid-template-columns:225px minmax\(590px,2\.35fr\) minmax\(250px,\.95fr\)/, "desktop terminal must preserve dense three-column command-center hierarchy");
@@ -104,4 +110,4 @@ assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bu
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
 
-console.log("frontend live-ingest contracts: ok");
+console.log("frontend operational-resilience contracts: ok");
