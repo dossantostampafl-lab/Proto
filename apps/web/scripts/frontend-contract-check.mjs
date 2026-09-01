@@ -38,12 +38,15 @@ assert.doesNotMatch(runtime, /document\.body\.style\.overflow = "hidden"/, "runt
 assert.match(runtime, /IntersectionObserver/, "command navigation must track visible sections");
 assert.match(runtime, /aria-current/, "visible command section must be announced");
 assert.match(runtime, /import "\.\/operational-runtime"/, "terminal runtime must load operational telemetry");
+assert.match(runtime, /document\.querySelector<HTMLElement>\("\.operationalSurface"\)/, "System command must prefer operational telemetry surface");
+assert.match(runtime, /systemButton\?\.addEventListener\("click", onSystemClick\)/, "System command must have a runtime navigation handler");
 assert.match(runtimeStyles, /aria-current="page"/, "active command section must have visible styling");
 
 assert.match(operational, /requestJson<RuntimeState>\("\/system\/status"\)/, "system runtime must come from backend contract");
 assert.match(operational, /requestJson<RiskState>\("\/risk"\)/, "risk policy must come from backend contract");
 assert.match(operational, /requestJson<Reconciliation>\("\/v1\/reconciliation"\)/, "reconciliation must come from canonical endpoint");
 assert.match(operational, /requestJson<Fills>\("\/v1\/fills\?limit=8"\)/, "recent fills must come from canonical simulated journal endpoint");
+assert.match(operational, /surface\.dataset\.section = "SYSTEM"/, "operational surface must identify itself as System navigation content");
 assert.match(operational, /real_money_execution === false/, "operational surface must preserve execution boundary");
 assert.match(operational, /RECENT SIMULATED FILLS/, "fill journal must be explicitly labeled simulated");
 assert.match(operational, /textContent = text/, "runtime must render backend strings as text rather than HTML");
