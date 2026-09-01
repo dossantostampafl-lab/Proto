@@ -1,6 +1,7 @@
 import "./terminal-runtime.css";
 import "./operational-runtime";
 import "./paper-order-runtime";
+import "./paper-mode-control";
 
 const FOCUSABLE = [
   "a[href]",
