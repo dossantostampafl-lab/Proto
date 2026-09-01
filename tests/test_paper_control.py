@@ -25,6 +25,7 @@ def test_paper_start_enables_only_internal_paper_runtime() -> None:
 
     status = client.get("/paper/status").json()
     assert status["paper_execution_enabled"] is True
+    assert status["autopilot_running"] is False
     assert status["financial_connectivity"] is False
     assert status["real_money_execution"] is False
 
@@ -34,4 +35,25 @@ def test_paper_stop_disables_simulated_execution() -> None:
     response = client.post("/paper/stop")
     assert response.status_code == 200
     assert response.json()["running"] is False
-    assert client.get("/paper/status").json()["paper_execution_enabled"] is False
+    status = client.get("/paper/status").json()
+    assert status["paper_execution_enabled"] is False
+    assert status["autopilot_running"] is False
+
+
+def test_paper_stop_also_disarms_persistent_autopilot() -> None:
+    assert client.post("/paper/start").status_code == 200
+    started = client.post("/paper/automation/start", json={})
+    assert started.status_code == 200
+    assert started.json()["running"] is True
+    assert client.get("/paper/status").json()["autopilot_running"] is True
+
+    stopped = client.post("/paper/stop")
+    assert stopped.status_code == 200
+    assert stopped.json()["running"] is False
+
+    paper_status = client.get("/paper/status").json()
+    autopilot_status = client.get("/paper/automation/status").json()
+    assert paper_status["paper_execution_enabled"] is False
+    assert paper_status["autopilot_running"] is False
+    assert autopilot_status["running"] is False
+    assert autopilot_status["last_reason"] == "STOPPED"
