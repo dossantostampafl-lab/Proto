@@ -141,7 +141,10 @@ class PromotionGateEvidence:
         )
         if any(value is not None and not 0.0 <= value <= 1.0 for value in bounded):
             raise ValueError("bounded promotion evidence must be between 0 and 1")
-        if self.frozen_holdout_seal_id is not None and not self.frozen_holdout_seal_id.strip():
+        if (
+            self.frozen_holdout_seal_id is not None
+            and not self.frozen_holdout_seal_id.strip()
+        ):
             raise ValueError("frozen_holdout_seal_id must not be blank when present")
 
 
@@ -173,15 +176,38 @@ def _check(
     observed: int | float | str | bool | None,
     requirement: str,
 ) -> PromotionCheck:
-    return PromotionCheck(name=name, passed=passed, observed=observed, requirement=requirement)
+    return PromotionCheck(
+        name=name,
+        passed=passed,
+        observed=observed,
+        requirement=requirement,
+    )
 
 
-def _minimum_check(name: str, observed: int | float | None, minimum: int | float) -> PromotionCheck:
-    return _check(name, observed is not None and observed >= minimum, observed, f">= {minimum}")
+def _minimum_check(
+    name: str,
+    observed: int | float | None,
+    minimum: int | float,
+) -> PromotionCheck:
+    return _check(
+        name,
+        observed is not None and observed >= minimum,
+        observed,
+        f">= {minimum}",
+    )
 
 
-def _maximum_check(name: str, observed: float | None, maximum: float) -> PromotionCheck:
-    return _check(name, observed is not None and observed <= maximum, observed, f"<= {maximum}")
+def _maximum_check(
+    name: str,
+    observed: float | None,
+    maximum: float,
+) -> PromotionCheck:
+    return _check(
+        name,
+        observed is not None and observed <= maximum,
+        observed,
+        f"<= {maximum}",
+    )
 
 
 def _negative_control_check(
@@ -205,26 +231,62 @@ def _candidate_checks(
     policy: PromotionGatePolicy,
 ) -> tuple[PromotionCheck, ...]:
     return (
-        _minimum_check("oos_sample_count", evidence.oos_sample_count, policy.min_oos_samples),
-        _minimum_check("validation_fold_count", evidence.validation_fold_count, policy.min_validation_folds),
-        _minimum_check("cumulative_return", evidence.cumulative_return, policy.min_cumulative_return),
+        _minimum_check(
+            "oos_sample_count",
+            evidence.oos_sample_count,
+            policy.min_oos_samples,
+        ),
+        _minimum_check(
+            "validation_fold_count",
+            evidence.validation_fold_count,
+            policy.min_validation_folds,
+        ),
+        _minimum_check(
+            "cumulative_return",
+            evidence.cumulative_return,
+            policy.min_cumulative_return,
+        ),
         _minimum_check("sharpe", evidence.sharpe, policy.min_sharpe),
-        _minimum_check("positive_fold_fraction", evidence.positive_fold_fraction, policy.min_positive_fold_fraction),
-        _minimum_check("robustness_score", evidence.robustness_score, policy.min_robustness_score),
-        _minimum_check("deflated_sharpe_ratio", evidence.deflated_sharpe_ratio, policy.min_deflated_sharpe_ratio),
+        _minimum_check(
+            "positive_fold_fraction",
+            evidence.positive_fold_fraction,
+            policy.min_positive_fold_fraction,
+        ),
+        _minimum_check(
+            "robustness_score",
+            evidence.robustness_score,
+            policy.min_robustness_score,
+        ),
+        _minimum_check(
+            "deflated_sharpe_ratio",
+            evidence.deflated_sharpe_ratio,
+            policy.min_deflated_sharpe_ratio,
+        ),
         _maximum_check(
             "probability_of_backtest_overfitting",
             evidence.probability_of_backtest_overfitting,
             policy.max_probability_of_backtest_overfitting,
         ),
-        _maximum_check("max_drawdown", evidence.max_drawdown, policy.max_drawdown),
+        _maximum_check(
+            "max_drawdown",
+            evidence.max_drawdown,
+            policy.max_drawdown,
+        ),
         _maximum_check(
             "monte_carlo_probability_of_loss",
             evidence.monte_carlo_probability_of_loss,
             policy.max_monte_carlo_probability_of_loss,
         ),
-        _minimum_check("regime_robustness_score", evidence.regime_robustness_score, policy.min_regime_robustness_score),
-        _minimum_check("parameter_stability_score", evidence.parameter_stability_score, policy.min_parameter_stability_score),
+        _minimum_check(
+            "regime_robustness_score",
+            evidence.regime_robustness_score,
+            policy.min_regime_robustness_score,
+        ),
+        _minimum_check(
+            "parameter_stability_score",
+            evidence.parameter_stability_score,
+            policy.min_parameter_stability_score,
+        ),
         _negative_control_check(
             "delay_control_sharpe",
             evidence.delay_control_sharpe,
@@ -247,7 +309,12 @@ def _candidate_checks(
             evidence.family_spa_p_value,
             policy.max_family_spa_p_value,
         ),
-        _check("frozen_holdout_passed", evidence.frozen_holdout_passed, evidence.frozen_holdout_passed, "must be true"),
+        _check(
+            "frozen_holdout_passed",
+            evidence.frozen_holdout_passed,
+            evidence.frozen_holdout_passed,
+            "must be true",
+        ),
         _check(
             "frozen_holdout_consumed",
             evidence.frozen_holdout_consumed,
