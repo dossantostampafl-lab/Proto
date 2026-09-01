@@ -5,22 +5,33 @@ const runtime = await readFile(new URL("../src/paper-order-runtime.ts", import.m
 const terminalRuntime = await readFile(new URL("../src/terminal-runtime.ts", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/paper-order-runtime.css", import.meta.url), "utf8");
 
-assert.match(terminalRuntime, /import "\.\/paper-order-runtime"/, "terminal runtime must load the functional paper order console");
-assert.match(runtime, /\/v1\/simulate/, "paper console must submit only to the canonical simulation endpoint");
+assert.match(terminalRuntime, /import "\.\/paper-order-runtime"/, "terminal runtime must load the paper order console");
+assert.match(runtime, /jsonRequest<RiskState>\("\/risk"\)/, "paper console must read the backend simulation gate");
+assert.match(runtime, /jsonRequest<RuntimeState>\("\/system\/status"\)/, "paper console must read the canonical execution runtime mode");
+assert.match(runtime, /jsonRequest<LiveBoundary>\("\/live\/status"\)/, "paper console must read the public-live financial boundary");
+assert.match(runtime, /SIMULATION_MODES = new Set\(\["SIMULATION", "PAPER_TRADING"\]\)/, "paper console must permit mutation only in simulation execution modes");
+assert.match(runtime, /riskState\?\.simulation_allowed/, "paper console must obey backend simulation availability");
+assert.match(runtime, /liveBoundary\?\.financial_connectivity === false/, "paper console must require no financial connectivity");
+assert.match(runtime, /liveBoundary\.real_money_execution === false/, "paper console must require the public-live no-real-money boundary");
+assert.match(runtime, /riskState\.real_money_execution === false/, "paper console must require the risk no-real-money boundary");
+assert.match(runtime, /SIMULATOR LOCKED IN/, "disallowed runtime modes must be visible rather than presenting a fake enabled control");
+assert.match(runtime, /no order was submitted/, "mode-locked submission must fail closed before the simulation request");
+assert.doesNotMatch(runtime, /server_execution_permitted:\s*true/, "client must not pretend to authorize server execution");
+assert.match(runtime, /\/v1\/simulate/, "enabled paper console must submit only to the canonical simulation endpoint");
 assert.match(runtime, /\/live\/market-data\/\$\{symbol\}/, "paper console must price from canonical public live market data");
 assert.match(runtime, /\/live\/analytics\/\$\{symbol\}/, "paper console must use canonical public analytics for simulation snapshot context");
 assert.match(runtime, /Canonical live analytics are unavailable; simulation was not submitted\./, "paper console must fail closed when canonical analytics are unavailable");
 assert.doesNotMatch(runtime, /market_probability:\s*0\.5/, "paper console must not invent a prediction-market probability for crypto simulation");
 assert.match(runtime, /Backend-authoritative simulation only/, "paper console must disclose server-authoritative simulation semantics");
 assert.match(runtime, /No exchange credentials · no financial connectivity · no real-money execution/, "paper console must disclose the financial safety boundary");
-assert.match(runtime, /server_execution_permitted: true/, "paper request must opt into the existing simulation gate rather than bypass it");
 assert.match(runtime, /REJECTED BY SIMULATION\/RISK GATE/, "risk rejection must be visible to the operator");
 assert.match(runtime, /SIMULATED FILL/, "accepted results must be explicitly labeled simulated");
 assert.match(runtime, /quantityValue <= 0 \|\| quantityValue > MAX_QUANTITY/, "client must bound quantity before submission");
 assert.match(runtime, /submitInFlight/, "duplicate concurrent submissions must be prevented");
 assert.doesNotMatch(runtime, /api[_-]?key|bearer\s|wallet_address|private[_-]?key|broker_url/i, "paper runtime must not implement account or credential connectivity");
+assert.match(styles, /\.paperResult\.locked/, "authoritative mode lock must have dedicated visual treatment");
 assert.match(styles, /\.paperOrderConsole/, "paper order console must have dedicated visual treatment");
 assert.match(styles, /@media\(max-width:620px\)/, "paper console must remain usable on narrow tablet/mobile layouts");
 assert.match(styles, /focus-visible/, "paper controls must retain visible keyboard focus");
 
-console.log("frontend paper-order safety and functionality contracts: ok");
+console.log("frontend paper-order authoritative-mode contracts: ok");
