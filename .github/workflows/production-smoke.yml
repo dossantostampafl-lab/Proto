@@ -25,15 +25,21 @@ jobs:
           python - <<'PY'
           from __future__ import annotations
 
+          import base64
+          import hashlib
           import json
           import os
+          import socket
+          import ssl
           import time
           import urllib.error
           import urllib.request
+          from urllib.parse import urlparse
 
           origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
           attempts = 60
           delay = 10
+          websocket_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
           def request(path: str):
               req = urllib.request.Request(
@@ -48,6 +54,95 @@ jobs:
               if status != 200:
                   raise AssertionError(f"{path} returned HTTP {status}")
               return headers, json.loads(body.decode("utf-8"))
+
+          def recv_exact(connection, size: int) -> bytes:
+              chunks = bytearray()
+              while len(chunks) < size:
+                  chunk = connection.recv(size - len(chunks))
+                  if not chunk:
+                      raise AssertionError("WebSocket closed before the expected frame completed")
+                  chunks.extend(chunk)
+              return bytes(chunks)
+
+          def websocket_market_frame() -> dict[str, object]:
+              parsed = urlparse(origin)
+              host = parsed.hostname
+              if not host:
+                  raise AssertionError("production origin has no hostname")
+              port = parsed.port or 443
+              key = base64.b64encode(os.urandom(16)).decode("ascii")
+              expected_accept = base64.b64encode(
+                  hashlib.sha1(f"{key}{websocket_guid}".encode("ascii")).digest()
+              ).decode("ascii")
+              raw = socket.create_connection((host, port), timeout=10)
+              context = ssl.create_default_context()
+              connection = context.wrap_socket(raw, server_hostname=host)
+              connection.settimeout(8)
+              try:
+                  handshake = (
+                      "GET /ws/market-data HTTP/1.1\r\n"
+                      f"Host: {host}\r\n"
+                      "Upgrade: websocket\r\n"
+                      "Connection: Upgrade\r\n"
+                      f"Sec-WebSocket-Key: {key}\r\n"
+                      "Sec-WebSocket-Version: 13\r\n"
+                      "User-Agent: proto-production-smoke/1.0\r\n\r\n"
+                  )
+                  connection.sendall(handshake.encode("ascii"))
+                  header_bytes = bytearray()
+                  while b"\r\n\r\n" not in header_bytes:
+                      header_bytes.extend(connection.recv(4096))
+                      if len(header_bytes) > 32_768:
+                          raise AssertionError("WebSocket handshake headers exceeded safety limit")
+                  raw_headers, remainder = bytes(header_bytes).split(b"\r\n\r\n", 1)
+                  lines = raw_headers.decode("latin-1").split("\r\n")
+                  if " 101 " not in f" {lines[0]} ":
+                      raise AssertionError(f"WebSocket handshake did not return 101: {lines[0]!r}")
+                  response_headers = {}
+                  for line in lines[1:]:
+                      if ":" in line:
+                          name, value = line.split(":", 1)
+                          response_headers[name.strip().lower()] = value.strip()
+                  if response_headers.get("sec-websocket-accept") != expected_accept:
+                      raise AssertionError("WebSocket Sec-WebSocket-Accept validation failed")
+
+                  buffered = bytearray(remainder)
+
+                  def take(size: int) -> bytes:
+                      while len(buffered) < size:
+                          buffered.extend(connection.recv(max(4096, size - len(buffered))))
+                      value = bytes(buffered[:size])
+                      del buffered[:size]
+                      return value
+
+                  for _ in range(6):
+                      first, second = take(2)
+                      opcode = first & 0x0F
+                      masked = bool(second & 0x80)
+                      length = second & 0x7F
+                      if length == 126:
+                          length = int.from_bytes(take(2), "big")
+                      elif length == 127:
+                          length = int.from_bytes(take(8), "big")
+                      mask = take(4) if masked else b""
+                      payload = bytearray(take(length))
+                      if masked:
+                          for index in range(len(payload)):
+                              payload[index] ^= mask[index % 4]
+                      if opcode == 0x8:
+                          raise AssertionError("WebSocket closed before a live market-data frame arrived")
+                      if opcode != 0x1:
+                          continue
+                      message = json.loads(payload.decode("utf-8"))
+                      if message.get("type") != "market-data":
+                          continue
+                      data = message.get("data")
+                      if not isinstance(data, dict) or data.get("symbol") not in {"BTC", "ETH", "SOL"}:
+                          raise AssertionError(f"unexpected WebSocket market-data payload: {message!r}")
+                      return message
+                  raise AssertionError("WebSocket connected but no market-data text frame arrived")
+              finally:
+                  connection.close()
 
           last_error: Exception | None = None
           for attempt in range(1, attempts + 1):
@@ -102,21 +197,28 @@ jobs:
                   if history.get("financial_connectivity") is not False or history.get("real_money_execution") is not False:
                       raise AssertionError("persisted history violated financial safety boundary")
 
+                  ws_message = websocket_market_frame()
+                  ws_data = ws_message["data"]
+                  if ws_data.get("financial_connectivity") not in (None, False):
+                      raise AssertionError("WebSocket live frame violated financial-connectivity boundary")
+                  if ws_data.get("real_money_execution") not in (None, False):
+                      raise AssertionError("WebSocket live frame violated real-money boundary")
+
                   _, system = json_get("/system/status")
                   _, risk = json_get("/risk")
                   _, paper = json_get("/paper/status")
+                  _, autopilot = json_get("/paper/automation/status")
                   mode = system.get("mode")
                   known_modes = {"SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY", "LIVE_MONITORING"}
                   if mode not in known_modes:
                       raise AssertionError(f"unexpected runtime mode: {mode!r}")
                   if risk.get("mode") != mode:
                       raise AssertionError(f"risk/runtime mode mismatch: risk={risk.get('mode')!r} runtime={mode!r}")
-                  if paper.get("mode") != mode:
-                      raise AssertionError(f"paper/runtime mode mismatch: paper={paper.get('mode')!r} runtime={mode!r}")
-                  if risk.get("financial_connectivity") is not False or risk.get("real_money_execution") is not False:
-                      raise AssertionError("risk surface violated financial safety boundary")
-                  if paper.get("financial_connectivity") is not False or paper.get("real_money_execution") is not False:
-                      raise AssertionError("paper surface violated financial safety boundary")
+                  if paper.get("mode") != mode or autopilot.get("mode") != mode:
+                      raise AssertionError("paper/autopilot runtime mode does not match /system/status")
+                  for name, surface in (("risk", risk), ("paper", paper), ("autopilot", autopilot)):
+                      if surface.get("financial_connectivity") is not False or surface.get("real_money_execution") is not False:
+                          raise AssertionError(f"{name} surface violated financial safety boundary")
 
                   expected_simulation_allowed = bool(
                       mode in {"SIMULATION", "PAPER_TRADING"}
@@ -124,22 +226,16 @@ jobs:
                       and system.get("kill_switch") == "ARMED"
                   )
                   if risk.get("simulation_allowed") is not expected_simulation_allowed:
-                      raise AssertionError(
-                          "risk simulation_allowed is inconsistent with authoritative runtime mode/state: "
-                          f"mode={mode!r} running={system.get('running')!r} "
-                          f"kill_switch={system.get('kill_switch')!r} risk={risk.get('simulation_allowed')!r}"
-                      )
+                      raise AssertionError("risk simulation_allowed is inconsistent with authoritative runtime mode/state")
                   expected_paper_enabled = bool(
                       mode == "PAPER_TRADING"
                       and system.get("running") is True
                       and system.get("kill_switch") == "ARMED"
                   )
                   if paper.get("paper_execution_enabled") is not expected_paper_enabled:
-                      raise AssertionError(
-                          "paper_execution_enabled is inconsistent with authoritative runtime state: "
-                          f"mode={mode!r} running={system.get('running')!r} "
-                          f"kill_switch={system.get('kill_switch')!r} paper={paper.get('paper_execution_enabled')!r}"
-                      )
+                      raise AssertionError("paper_execution_enabled is inconsistent with authoritative runtime state")
+                  if autopilot.get("paper_runtime_ready") is not expected_paper_enabled:
+                      raise AssertionError("autopilot paper_runtime_ready is inconsistent with authoritative runtime state")
 
                   print(
                       "production smoke: ok",
@@ -149,6 +245,8 @@ jobs:
                               "runtime_mode": mode,
                               "simulation_allowed": risk.get("simulation_allowed"),
                               "paper_execution_enabled": paper.get("paper_execution_enabled"),
+                              "server_autopilot_running": autopilot.get("running"),
+                              "websocket_symbol": ws_data.get("symbol"),
                               "live_generation": market.get("connection_generation"),
                               "live_sequence": market.get("sequence"),
                               "fresh_symbols": sorted(fresh),
@@ -157,7 +255,7 @@ jobs:
                       ),
                   )
                   break
-              except (AssertionError, KeyError, ValueError, json.JSONDecodeError, urllib.error.URLError, TimeoutError) as error:
+              except (AssertionError, KeyError, ValueError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as error:
                   last_error = error
                   print(f"attempt {attempt}/{attempts} not ready: {type(error).__name__}: {error}")
                   if attempt == attempts:

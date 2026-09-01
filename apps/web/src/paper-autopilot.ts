@@ -1,7 +1,6 @@
 import "./paper-autopilot.css";
 
 type SymbolName = "BTC" | "ETH" | "SOL";
-type Side = "BUY" | "SELL";
 type PaperStatus = {
   mode: string;
   running: boolean;
@@ -9,34 +8,61 @@ type PaperStatus = {
   financial_connectivity: boolean;
   real_money_execution: boolean;
 };
-type LiveFrame = {
-  timestamp: string;
-  received_at?: string | null;
+type AutopilotConfig = {
   symbol: SymbolName;
-  bid: number;
-  ask: number;
-  bid_size: number;
-  ask_size: number;
+  imbalance_trigger: number;
+  cooldown_seconds: number;
+  quantity: number;
+  max_spread_bps: number;
 };
-type LiveAnalytics = {
-  realized_volatility: number;
-  current_imbalance: number;
-};
-type SimulationResult = {
-  accepted: boolean;
-  reason: string;
-  fill?: { fill_price: number; filled_quantity: number; fee: number; slippage_bps: number } | null;
+type AutopilotStatus = {
+  mode: string;
+  running: boolean;
+  paper_runtime_ready: boolean;
+  kill_switch: string;
+  config: AutopilotConfig;
+  started_at?: string | null;
+  last_cycle_at?: string | null;
+  last_action_at?: string | null;
+  last_reason: string;
+  last_signal?: {
+    symbol?: string;
+    imbalance?: number;
+    realized_volatility?: number;
+    spread_bps?: number;
+    observed_at?: string | null;
+  } | null;
+  last_result?: {
+    accepted?: boolean;
+    reason?: string;
+    fill?: {
+      asset?: string;
+      side?: string;
+      filled_quantity?: number;
+      fill_price?: number;
+      slippage_bps?: number;
+    } | null;
+  } | null;
+  counters: {
+    cycles: number;
+    signals: number;
+    submissions: number;
+    accepted: number;
+    rejected: number;
+    errors: number;
+  };
+  financial_connectivity: boolean;
+  real_money_execution: boolean;
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin;
-const TICK_MS = 3000;
 const REQUEST_TIMEOUT_MS = 3500;
+const STATUS_MS = 2000;
 const DEFAULT_THRESHOLD = 0.65;
-const RESET_THRESHOLD_FACTOR = 0.5;
 const DEFAULT_COOLDOWN_SECONDS = 20;
 const DEFAULT_QUANTITY = 0.001;
+const DEFAULT_MAX_SPREAD_BPS = 20;
 const MAX_QUANTITY = 1000;
-const MAX_SPREAD_BPS = 20;
 
 async function requestJson<T>(path: string, init?: RequestInit) {
   const controller = new AbortController();
@@ -50,7 +76,9 @@ async function requestJson<T>(path: string, init?: RequestInit) {
       signal: controller.signal,
       headers,
     });
-    return { ok: response.ok, status: response.status, data: response.ok ? await response.json() as T : null };
+    let data: T | null = null;
+    if (response.ok) data = await response.json() as T;
+    return { ok: response.ok, status: response.status, data };
   } catch {
     return { ok: false, status: 0, data: null as T | null };
   } finally {
@@ -64,21 +92,25 @@ function selectedSymbol(): SymbolName {
   return symbol === "ETH" || symbol === "SOL" ? symbol : "BTC";
 }
 
+function finite(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function mountPaperAutopilot() {
   const host = document.querySelector<HTMLElement>(".automation .automationBody");
   if (!host || host.querySelector(".paperAutopilot")) return false;
 
   const section = document.createElement("section");
   section.className = "paperAutopilot";
-  section.setAttribute("aria-label", "Rule based paper autopilot");
+  section.setAttribute("aria-label", "Server paper autopilot");
 
   const head = document.createElement("div");
   head.className = "paperAutoHead";
   const title = document.createElement("div");
   const strong = document.createElement("strong");
-  strong.textContent = "RULE-BASED PAPER AUTOPILOT";
+  strong.textContent = "SERVER PAPER AUTOPILOT";
   const small = document.createElement("small");
-  small.textContent = "Runs only while this dashboard session is open";
+  small.textContent = "Continues on the server after this dashboard tab is closed";
   title.append(strong, small);
   const stateBadge = document.createElement("span");
   stateBadge.className = "paperAutoBadge off";
@@ -87,7 +119,6 @@ function mountPaperAutopilot() {
 
   const controls = document.createElement("div");
   controls.className = "paperAutoControls";
-
   const thresholdLabel = document.createElement("label");
   thresholdLabel.textContent = "IMBALANCE TRIGGER";
   const threshold = document.createElement("input");
@@ -118,213 +149,192 @@ function mountPaperAutopilot() {
   quantity.value = String(DEFAULT_QUANTITY);
   quantityLabel.append(quantity);
 
+  const spreadLabel = document.createElement("label");
+  spreadLabel.textContent = "MAX SPREAD (BP)";
+  const maxSpread = document.createElement("input");
+  maxSpread.type = "number";
+  maxSpread.min = "0.01";
+  maxSpread.max = "75";
+  maxSpread.step = "0.5";
+  maxSpread.value = String(DEFAULT_MAX_SPREAD_BPS);
+  spreadLabel.append(maxSpread);
+
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "paperAutoToggle";
-  toggle.textContent = "START AUTOPILOT";
-  controls.append(thresholdLabel, cooldownLabel, quantityLabel, toggle);
+  toggle.textContent = "START SERVER AUTOPILOT";
+  controls.append(thresholdLabel, cooldownLabel, quantityLabel, spreadLabel, toggle);
 
   const telemetry = document.createElement("div");
   telemetry.className = "paperAutoTelemetry";
   const signal = document.createElement("span");
   const lastAction = document.createElement("span");
-  const guard = document.createElement("span");
+  const counters = document.createElement("span");
   signal.textContent = "signal —";
   lastAction.textContent = "last action —";
-  guard.textContent = `guard spread ≤ ${MAX_SPREAD_BPS} bp`;
-  telemetry.append(signal, lastAction, guard);
+  counters.textContent = "cycles 0 · fills 0 · rejected 0";
+  telemetry.append(signal, lastAction, counters);
 
   const status = document.createElement("div");
   status.className = "paperAutoStatus idle";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
-  status.textContent = "Autopilot is off. Enable PAPER_TRADING first, then start this rule-based simulator.";
+  status.textContent = "Server autopilot is off.";
 
   const boundary = document.createElement("small");
   boundary.className = "paperAutoBoundary";
-  boundary.textContent = "Simulation only · no exchange account · no financial connectivity · no real-money execution";
-
+  boundary.textContent = "Persistent server task · simulation only · no exchange account · no financial connectivity · no real-money execution";
   section.append(head, controls, telemetry, status, boundary);
   host.append(section);
 
-  let enabled = false;
-  let cycleInFlight = false;
-  let lastActionAt = 0;
-  let armedDirection: Side | null = null;
+  let busy = false;
+  let active = false;
+  let hydratedFromServer = false;
 
-  const renderToggle = () => {
-    stateBadge.className = `paperAutoBadge ${enabled ? "on" : "off"}`;
-    stateBadge.textContent = enabled ? "ACTIVE" : "OFF";
-    toggle.textContent = enabled ? "STOP AUTOPILOT" : "START AUTOPILOT";
+  const setInputsDisabled = (disabled: boolean) => {
+    threshold.disabled = disabled;
+    cooldown.disabled = disabled;
+    quantity.disabled = disabled;
+    maxSpread.disabled = disabled;
   };
 
-  const validInputs = () => {
-    const thresholdValue = Number(threshold.value);
-    const cooldownSeconds = Number(cooldown.value);
+  const configFromInputs = (): AutopilotConfig | null => {
+    const imbalance_trigger = Number(threshold.value);
+    const cooldown_seconds = Number(cooldown.value);
     const quantityValue = Number(quantity.value);
+    const max_spread_bps = Number(maxSpread.value);
+    if (
+      !Number.isFinite(imbalance_trigger) || imbalance_trigger < 0.1 || imbalance_trigger > 0.95
+      || !Number.isFinite(cooldown_seconds) || cooldown_seconds < 5 || cooldown_seconds > 300
+      || !Number.isFinite(quantityValue) || quantityValue <= 0 || quantityValue > MAX_QUANTITY
+      || !Number.isFinite(max_spread_bps) || max_spread_bps < 0.01 || max_spread_bps > 75
+    ) return null;
     return {
-      thresholdValue,
-      cooldownSeconds,
-      quantityValue,
-      valid: Number.isFinite(thresholdValue)
-        && thresholdValue >= 0.1
-        && thresholdValue <= 0.95
-        && Number.isFinite(cooldownSeconds)
-        && cooldownSeconds >= 5
-        && cooldownSeconds <= 300
-        && Number.isFinite(quantityValue)
-        && quantityValue > 0
-        && quantityValue <= MAX_QUANTITY,
+      symbol: selectedSymbol(),
+      imbalance_trigger,
+      cooldown_seconds,
+      quantity: quantityValue,
+      max_spread_bps,
     };
   };
 
-  const executeCycle = async () => {
-    if (!enabled || cycleInFlight || document.hidden) return;
-    cycleInFlight = true;
-    try {
-      const config = validInputs();
-      if (!config.valid) {
-        enabled = false;
-        renderToggle();
-        status.className = "paperAutoStatus error";
-        status.textContent = "Autopilot stopped: trigger, cooldown or quantity is outside allowed bounds.";
-        return;
-      }
+  const hydrateInputs = (server: AutopilotStatus) => {
+    if (hydratedFromServer || !server.config) return;
+    threshold.value = String(server.config.imbalance_trigger);
+    cooldown.value = String(server.config.cooldown_seconds);
+    quantity.value = String(server.config.quantity);
+    maxSpread.value = String(server.config.max_spread_bps);
+    hydratedFromServer = true;
+  };
 
-      const paper = await requestJson<PaperStatus>("/paper/status");
-      const safePaper = paper.ok
-        && paper.data?.paper_execution_enabled === true
-        && paper.data.financial_connectivity === false
-        && paper.data.real_money_execution === false;
-      if (!safePaper) {
-        status.className = "paperAutoStatus locked";
-        status.textContent = "Autopilot waiting: authoritative PAPER_TRADING runtime is not enabled.";
-        return;
-      }
+  const render = (server: AutopilotStatus | null, error?: string) => {
+    if (!server) {
+      active = false;
+      stateBadge.className = "paperAutoBadge off";
+      stateBadge.textContent = "UNKNOWN";
+      toggle.textContent = "START SERVER AUTOPILOT";
+      toggle.disabled = busy;
+      setInputsDisabled(busy);
+      status.className = "paperAutoStatus error";
+      status.textContent = error ?? "Server autopilot status unavailable.";
+      return;
+    }
+    hydrateInputs(server);
+    const safe = server.financial_connectivity === false && server.real_money_execution === false;
+    active = safe && server.running;
+    stateBadge.className = `paperAutoBadge ${active ? "on" : "off"}`;
+    stateBadge.textContent = active ? "SERVER ACTIVE" : "OFF";
+    toggle.textContent = active ? "STOP SERVER AUTOPILOT" : "START SERVER AUTOPILOT";
+    toggle.disabled = busy || !safe;
+    setInputsDisabled(active || busy);
 
-      const symbol = selectedSymbol();
-      const [frameResult, analyticsResult] = await Promise.all([
-        requestJson<LiveFrame>(`/live/market-data/${symbol}`),
-        requestJson<LiveAnalytics>(`/live/analytics/${symbol}`),
-      ]);
-      if (!frameResult.ok || !frameResult.data || !analyticsResult.ok || !analyticsResult.data) {
-        status.className = "paperAutoStatus error";
-        status.textContent = "Autopilot skipped cycle: canonical live quote or analytics unavailable.";
-        return;
-      }
+    const s = server.last_signal;
+    signal.textContent = s && finite(s.imbalance) && finite(s.spread_bps)
+      ? `${s.symbol ?? server.config.symbol} imbalance ${s.imbalance.toFixed(3)} · spread ${s.spread_bps.toFixed(2)} bp`
+      : "signal —";
+    const fill = server.last_result?.fill;
+    lastAction.textContent = fill
+      ? `${fill.side ?? "—"} ${fill.asset ?? server.config.symbol} ${fill.filled_quantity ?? "—"} @ ${fill.fill_price ?? "—"}`
+      : server.last_action_at
+        ? `last action ${server.last_action_at.slice(11, 19)} UTC`
+        : "last action —";
+    counters.textContent = `cycles ${server.counters.cycles} · fills ${server.counters.accepted} · rejected ${server.counters.rejected}`;
 
-      const frame = frameResult.data;
-      const imbalance = analyticsResult.data.current_imbalance;
-      const volatility = analyticsResult.data.realized_volatility;
-      if (!Number.isFinite(imbalance) || !Number.isFinite(volatility)) {
-        status.className = "paperAutoStatus error";
-        status.textContent = "Autopilot skipped cycle: non-finite analytics were rejected.";
-        return;
-      }
-      const spreadBps = ((frame.ask - frame.bid) / Math.max(frame.ask, 1e-9)) * 10_000;
-      signal.textContent = `${symbol} imbalance ${imbalance.toFixed(3)} · vol ${(volatility * 100).toFixed(3)}% · spread ${spreadBps.toFixed(2)} bp`;
-
-      if (Math.abs(imbalance) < config.thresholdValue * RESET_THRESHOLD_FACTOR) {
-        armedDirection = null;
-      }
-      if (Math.abs(imbalance) < config.thresholdValue) {
-        status.className = "paperAutoStatus watching";
-        status.textContent = `WATCHING ${symbol} · |imbalance| ${Math.abs(imbalance).toFixed(3)} below trigger ${config.thresholdValue.toFixed(2)}.`;
-        return;
-      }
-      if (!Number.isFinite(spreadBps) || spreadBps > MAX_SPREAD_BPS) {
-        status.className = "paperAutoStatus guarded";
-        status.textContent = `GUARD HOLD · spread ${spreadBps.toFixed(2)} bp exceeds ${MAX_SPREAD_BPS} bp.`;
-        return;
-      }
-
-      const side: Side = imbalance > 0 ? "BUY" : "SELL";
-      if (armedDirection === side) {
-        status.className = "paperAutoStatus watching";
-        status.textContent = `SIGNAL ALREADY CONSUMED · waiting for imbalance to neutralize before another ${side}.`;
-        return;
-      }
-      const cooldownMs = config.cooldownSeconds * 1000;
-      if (Date.now() - lastActionAt < cooldownMs) {
-        const remaining = Math.ceil((cooldownMs - (Date.now() - lastActionAt)) / 1000);
-        status.className = "paperAutoStatus guarded";
-        status.textContent = `COOLDOWN · ${remaining}s remaining before another simulated action.`;
-        return;
-      }
-
-      const topSize = side === "BUY" ? frame.ask_size : frame.bid_size;
-      if (!Number.isFinite(topSize) || topSize <= 0 || config.quantityValue > topSize) {
-        status.className = "paperAutoStatus guarded";
-        status.textContent = `LIQUIDITY GUARD · requested ${config.quantityValue} exceeds current ${side.toLowerCase()} top size ${Number.isFinite(topSize) ? topSize : 0}.`;
-        return;
-      }
-
-      const marketId = `autopilot-${symbol.toLowerCase()}-usd`;
-      const limitPrice = side === "BUY" ? frame.ask : frame.bid;
-      const payload = {
-        order: {
-          market_id: marketId,
-          asset: symbol,
-          side,
-          quantity: config.quantityValue,
-          limit_price: limitPrice,
-        },
-        snapshot: {
-          symbol,
-          market_id: marketId,
-          bid: frame.bid,
-          ask: frame.ask,
-          bid_size: frame.bid_size,
-          ask_size: frame.ask_size,
-          volatility: Math.max(volatility, 0),
-          imbalance: Math.max(-1, Math.min(1, imbalance)),
-          observed_at: frame.received_at || frame.timestamp,
-        },
-      };
-
-      status.className = "paperAutoStatus working";
-      status.textContent = `Submitting ${side} ${config.quantityValue} ${symbol} to the server-authoritative simulator…`;
-      const result = await requestJson<SimulationResult>("/v1/simulate", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      lastActionAt = Date.now();
-      armedDirection = side;
-      if (!result.ok || !result.data) {
-        status.className = "paperAutoStatus error";
-        status.textContent = result.status === 0
-          ? "Autopilot simulation request failed before a server response."
-          : `Autopilot simulation endpoint returned HTTP ${result.status}.`;
-        return;
-      }
-      if (result.data.accepted && result.data.fill) {
-        status.className = "paperAutoStatus accepted";
-        status.textContent = `AUTO SIMULATED FILL · ${side} ${result.data.fill.filled_quantity} ${symbol} @ ${result.data.fill.fill_price} · slippage ${result.data.fill.slippage_bps.toFixed(2)} bp`;
-        lastAction.textContent = `${new Date().toISOString().slice(11, 19)} UTC · ${side} ${symbol}`;
-        window.dispatchEvent(new CustomEvent("proto:paper-fill", { detail: { symbol, source: "autopilot" } }));
-      } else {
-        status.className = "paperAutoStatus rejected";
-        status.textContent = `AUTOPILOT REJECTED BY RISK GATE · ${result.data.reason}`;
-        lastAction.textContent = `${new Date().toISOString().slice(11, 19)} UTC · rejected ${side} ${symbol}`;
-      }
-    } finally {
-      cycleInFlight = false;
+    const reason = server.last_reason.replaceAll("_", " ");
+    if (active && server.paper_runtime_ready) {
+      status.className = server.last_reason.startsWith("RISK_REJECTED") ? "paperAutoStatus rejected" : server.last_reason === "SIMULATED_FILL" ? "paperAutoStatus accepted" : "paperAutoStatus watching";
+      status.textContent = `SERVER AUTOPILOT ACTIVE · ${server.config.symbol} · ${reason}`;
+    } else if (active) {
+      status.className = "paperAutoStatus locked";
+      status.textContent = `SERVER AUTOPILOT PAUSED · ${reason} · enable PAPER_TRADING to resume decisions.`;
+    } else {
+      status.className = "paperAutoStatus idle";
+      status.textContent = `Server autopilot off · ${reason}`;
     }
   };
 
-  toggle.addEventListener("click", () => {
-    enabled = !enabled;
-    armedDirection = null;
-    renderToggle();
-    status.className = enabled ? "paperAutoStatus watching" : "paperAutoStatus idle";
-    status.textContent = enabled
-      ? "Autopilot active. Waiting for a qualifying canonical imbalance signal."
-      : "Autopilot stopped. No automatic simulation requests will be sent.";
-    if (enabled) void executeCycle();
+  const refresh = async () => {
+    if (busy) return;
+    const result = await requestJson<AutopilotStatus>("/paper/automation/status");
+    render(result.ok ? result.data : null, result.status === 0 ? "Server autopilot endpoint unavailable." : `Autopilot status HTTP ${result.status}`);
+  };
+
+  const ensurePaperRuntime = async () => {
+    const current = await requestJson<PaperStatus>("/paper/status");
+    if (!current.ok || !current.data) return { ok: false, message: current.status === 0 ? "Paper runtime endpoint unavailable." : `Paper runtime HTTP ${current.status}` };
+    if (current.data.financial_connectivity !== false || current.data.real_money_execution !== false) return { ok: false, message: "Paper runtime safety boundary is not satisfied." };
+    if (current.data.paper_execution_enabled) return { ok: true, message: "ready" };
+    const started = await requestJson<PaperStatus>("/paper/start", { method: "POST" });
+    if (!started.ok || !started.data?.paper_execution_enabled) return { ok: false, message: started.status === 0 ? "Could not enable PAPER_TRADING runtime." : `Paper start HTTP ${started.status}` };
+    return { ok: true, message: "ready" };
+  };
+
+  toggle.addEventListener("click", async () => {
+    if (busy) return;
+    busy = true;
+    toggle.disabled = true;
+    setInputsDisabled(true);
+    if (active) {
+      status.className = "paperAutoStatus working";
+      status.textContent = "Stopping persistent server autopilot…";
+      const stopped = await requestJson<AutopilotStatus>("/paper/automation/stop", { method: "POST" });
+      busy = false;
+      render(stopped.ok ? stopped.data : null, stopped.status === 0 ? "Could not reach server autopilot." : `Autopilot stop HTTP ${stopped.status}`);
+      return;
+    }
+
+    const config = configFromInputs();
+    if (!config) {
+      busy = false;
+      setInputsDisabled(false);
+      status.className = "paperAutoStatus error";
+      status.textContent = "Autopilot configuration is outside the allowed trigger, cooldown, quantity or spread bounds.";
+      toggle.disabled = false;
+      return;
+    }
+
+    status.className = "paperAutoStatus working";
+    status.textContent = "Enabling PAPER_TRADING and starting the persistent server autopilot…";
+    const paper = await ensurePaperRuntime();
+    if (!paper.ok) {
+      busy = false;
+      setInputsDisabled(false);
+      status.className = "paperAutoStatus error";
+      status.textContent = paper.message;
+      toggle.disabled = false;
+      return;
+    }
+
+    const started = await requestJson<AutopilotStatus>("/paper/automation/start", {
+      method: "POST",
+      body: JSON.stringify(config),
+    });
+    busy = false;
+    render(started.ok ? started.data : null, started.status === 409 ? "PAPER_TRADING did not become authoritative before autopilot start; try again." : started.status === 0 ? "Could not reach server autopilot." : `Autopilot start HTTP ${started.status}`);
   });
 
-  renderToggle();
-  const timer = window.setInterval(() => void executeCycle(), TICK_MS);
+  const timer = window.setInterval(() => void refresh(), STATUS_MS);
+  void refresh();
   window.addEventListener("beforeunload", () => window.clearInterval(timer), { once: true });
   return true;
 }
