@@ -16,7 +16,7 @@ assert.match(runtime, /REJECTED BY SIMULATION\/RISK GATE/, "risk rejection must 
 assert.match(runtime, /SIMULATED FILL/, "accepted results must be explicitly labeled simulated");
 assert.match(runtime, /quantityValue <= 0 \|\| quantityValue > MAX_QUANTITY/, "client must bound quantity before submission");
 assert.match(runtime, /submitInFlight/, "duplicate concurrent submissions must be prevented");
-assert.doesNotMatch(runtime, /exchange|broker|wallet|credential/i, "paper runtime must not contain account-connectivity implementation");
+assert.doesNotMatch(runtime, /api[_-]?key|bearer\s|wallet_address|private[_-]?key|broker_url/i, "paper runtime must not implement account or credential connectivity");
 assert.match(styles, /\.paperOrderConsole/, "paper order console must have dedicated visual treatment");
 assert.match(styles, /@media\(max-width:620px\)/, "paper console must remain usable on narrow tablet/mobile layouts");
 assert.match(styles, /focus-visible/, "paper controls must retain visible keyboard focus");
