@@ -22,7 +22,7 @@ class LiveDurabilityRuntime:
     async def start(self, *, monitor: LiveCryptoMonitor, settings: Settings) -> None:
         if self.running:
             return
-        if not settings.persistence_enabled:
+        if not settings.live_persistence_enabled:
             monitor.configure_persistence(None, required=False)
             return
 

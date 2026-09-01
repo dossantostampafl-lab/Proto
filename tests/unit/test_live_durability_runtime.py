@@ -53,7 +53,7 @@ def _tick() -> MarketTick:
 async def test_live_durability_runtime_persists_and_recovers_history(tmp_path: Path) -> None:
     database_path = tmp_path / "live-history.db"
     settings = Settings(
-        persistence_enabled=True,
+        live_persistence_enabled=True,
         database_url=f"sqlite+aiosqlite:///{database_path}",
         live_history_retention_seconds=3600,
         live_history_prune_every_writes=100,
@@ -94,12 +94,26 @@ async def test_live_durability_runtime_persists_and_recovers_history(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_live_persistence_is_independent_from_general_persistence() -> None:
+    monitor = LiveCryptoMonitor(StaticAdapter())
+    runtime = LiveDurabilityRuntime()
+    settings = Settings(persistence_enabled=True, live_persistence_enabled=False)
+
+    await runtime.start(monitor=monitor, settings=settings)
+
+    assert runtime.running is False
+    persistence = monitor.persistence_status()
+    assert persistence["configured"] is False
+    assert persistence["required"] is False
+
+
+@pytest.mark.asyncio
 async def test_migration_managed_runtime_fails_closed_when_schema_is_missing(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "missing-live-schema.db"
     settings = Settings(
-        persistence_enabled=True,
+        live_persistence_enabled=True,
         live_database_auto_create=False,
         database_url=f"sqlite+aiosqlite:///{database_path}",
         live_history_retention_seconds=3600,
