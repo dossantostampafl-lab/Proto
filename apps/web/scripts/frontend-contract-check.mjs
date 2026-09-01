@@ -5,6 +5,8 @@ const source = await readFile(new URL("../src/terminal.tsx", import.meta.url), "
 const styles = await readFile(new URL("../src/terminal.css", import.meta.url), "utf8");
 const runtime = await readFile(new URL("../src/terminal-runtime.ts", import.meta.url), "utf8");
 const runtimeStyles = await readFile(new URL("../src/terminal-runtime.css", import.meta.url), "utf8");
+const operational = await readFile(new URL("../src/operational-runtime.ts", import.meta.url), "utf8");
+const operationalStyles = await readFile(new URL("../src/operational-runtime.css", import.meta.url), "utf8");
 const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const dockerfile = await readFile(new URL("../../../Dockerfile", import.meta.url), "utf8");
 const railwayApp = await readFile(new URL("../../api/app/railway_app.py", import.meta.url), "utf8");
@@ -30,11 +32,25 @@ assert.match(source, /ValidationPanel/, "validation lab must remain integrated")
 assert.match(source, /document\.body\.style\.overflow="hidden"/, "React must own modal scroll lock");
 assert.match(source, /e\.key==="Escape"/, "React must own Escape dismissal");
 assert.match(source, /opener\.current\?\.focus\(\)/, "React must restore focus to the modal opener");
+
 assert.match(runtime, /event\.key !== "Tab"/, "runtime must trap keyboard focus");
 assert.doesNotMatch(runtime, /document\.body\.style\.overflow = "hidden"/, "runtime must not duplicate modal scroll-lock ownership");
 assert.match(runtime, /IntersectionObserver/, "command navigation must track visible sections");
 assert.match(runtime, /aria-current/, "visible command section must be announced");
+assert.match(runtime, /import "\.\/operational-runtime"/, "terminal runtime must load operational telemetry");
 assert.match(runtimeStyles, /aria-current="page"/, "active command section must have visible styling");
+
+assert.match(operational, /requestJson<RuntimeState>\("\/system\/status"\)/, "system runtime must come from backend contract");
+assert.match(operational, /requestJson<RiskState>\("\/risk"\)/, "risk policy must come from backend contract");
+assert.match(operational, /requestJson<Reconciliation>\("\/v1\/reconciliation"\)/, "reconciliation must come from canonical endpoint");
+assert.match(operational, /requestJson<Fills>\("\/v1\/fills\?limit=8"\)/, "recent fills must come from canonical simulated journal endpoint");
+assert.match(operational, /real_money_execution === false/, "operational surface must preserve execution boundary");
+assert.match(operational, /RECENT SIMULATED FILLS/, "fill journal must be explicitly labeled simulated");
+assert.match(operational, /textContent = text/, "runtime must render backend strings as text rather than HTML");
+assert.doesNotMatch(operational, /innerHTML/, "operational runtime must not inject backend content as HTML");
+assert.match(operational, /inFlight/, "operational polling must prevent overlapping requests");
+assert.match(operationalStyles, /@media\(max-width:820px\)/, "operational telemetry must support tablet layout");
+
 assert.match(styles, /prefers-reduced-motion/, "terminal must respect reduced motion");
 assert.match(styles, /focus-visible/, "terminal controls must expose keyboard focus");
 assert.match(styles, /scrollbar-color/, "terminal must define scrollbar baseline");
@@ -52,4 +68,4 @@ assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bu
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
 
-console.log("frontend single-surface contracts: ok");
+console.log("frontend operational terminal contracts: ok");
