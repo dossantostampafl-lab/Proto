@@ -67,7 +67,34 @@ function bindDialog(dialog: HTMLElement) {
   };
 }
 
+function bindSectionNavigation() {
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".topbar nav button"));
+  const sections = Array.from(document.querySelectorAll<HTMLElement>("[data-section]"));
+  if (!buttons.length || !sections.length) return () => {};
+
+  const byName = new Map(buttons.map((button) => [button.textContent?.trim().toUpperCase() ?? "", button]));
+  const setActive = (name: string) => {
+    buttons.forEach((button) => {
+      const active = button === byName.get(name);
+      button.classList.toggle("active", active);
+      if (active) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    });
+  };
+  setActive("COMMAND");
+
+  const observer = new IntersectionObserver((entries) => {
+    const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    const name = visible?.target instanceof HTMLElement ? visible.target.dataset.section : undefined;
+    if (name) setActive(name);
+  }, { rootMargin: "-72px 0px -55% 0px", threshold: [0.08, 0.2, 0.45, 0.7] });
+
+  sections.forEach((section) => observer.observe(section));
+  return () => observer.disconnect();
+}
+
 function startRuntime() {
+  const stopNavigation = bindSectionNavigation();
   const observer = new MutationObserver(() => {
     const dialog = document.querySelector<HTMLElement>(".validationOverlay[role='dialog']");
     if (dialog) bindDialog(dialog);
@@ -75,6 +102,7 @@ function startRuntime() {
   });
   observer.observe(document.getElementById("root") ?? document.body, { childList: true, subtree: true });
   return () => {
+    stopNavigation();
     observer.disconnect();
     if (cleanupDialog) cleanupDialog();
   };
