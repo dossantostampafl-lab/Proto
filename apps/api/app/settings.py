@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     system_mode: str = "LIVE_MONITORING"
     synthetic_research_enabled: bool = False
     live_monitoring_autostart: bool = False
+    live_persistence_enabled: bool = False
     live_history_retention_seconds: int = Field(default=86_400, ge=300, le=604_800)
     live_history_query_max: int = Field(default=1_000, ge=1, le=10_000)
     live_history_prune_every_writes: int = Field(default=1_000, ge=1, le=100_000)
