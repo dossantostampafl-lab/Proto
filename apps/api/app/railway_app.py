@@ -8,12 +8,15 @@ from fastapi.staticfiles import StaticFiles
 
 from .live_routes import router as live_router
 from .main import app
+from .paper_control import router as paper_control_router
 
 # Railway runs the research/simulation API and the public read-only BTC/ETH/SOL
 # monitor in the same process. The live router owns the monitor lifespan and uses
 # the existing WebSocket hub from ``main`` to publish market-data/orderbook
-# frames. No account credentials or financial connectivity are introduced.
+# frames. Paper controls only switch the internal simulated runtime and never add
+# account credentials or financial connectivity.
 app.include_router(live_router)
+app.include_router(paper_control_router)
 
 _CONTENT_SECURITY_POLICY = "; ".join(
     (
