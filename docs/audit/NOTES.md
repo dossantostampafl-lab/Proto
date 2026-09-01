@@ -1,0 +1,1 @@
+This audit branch changes only paper/simulation freshness enforcement and regression coverage. It does not introduce brokerage, wallet, credential, custody, deposit, withdrawal, or real-money execution paths.
