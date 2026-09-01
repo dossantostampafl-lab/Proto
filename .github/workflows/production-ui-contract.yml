@@ -1,0 +1,64 @@
+name: Production UI Contract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-ui-contract-main
+  cancel-in-progress: true
+
+jobs:
+  railway-ui-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+      EXPECTED_UI_RELEASE: primary-paper-autopilot-v1
+    steps:
+      - name: Verify deployed dashboard UI generation
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
+          expected = os.environ["EXPECTED_UI_RELEASE"]
+          last_error = None
+
+          for attempt in range(1, 61):
+              try:
+                  request = urllib.request.Request(
+                      f"{origin}/",
+                      headers={"User-Agent": "proto-ui-contract/1.0"},
+                  )
+                  with urllib.request.urlopen(request, timeout=10) as response:
+                      body = response.read().decode("utf-8")
+                      headers = {name.lower(): value for name, value in response.headers.items()}
+                  if '<div id="root"></div>' not in body:
+                      raise AssertionError("dashboard React root is missing")
+                  actual = headers.get("x-proto-ui-release")
+                  if actual != expected:
+                      raise AssertionError(
+                          f"UI deployment mismatch: expected={expected!r} got={actual!r}"
+                      )
+                  if "no-store" not in headers.get("cache-control", ""):
+                      raise AssertionError("dashboard HTML cache policy is not no-store")
+                  print(f"production UI contract: ok release={actual}")
+                  break
+              except (AssertionError, urllib.error.URLError, TimeoutError) as error:
+                  last_error = error
+                  print(f"attempt {attempt}/60 not ready: {type(error).__name__}: {error}")
+                  if attempt == 60:
+                      raise
+                  time.sleep(5)
+          else:
+              raise RuntimeError(f"UI contract exhausted retries: {last_error}")
+          PY

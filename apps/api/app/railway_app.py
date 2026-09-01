@@ -21,10 +21,11 @@ app.include_router(live_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
 
-# Deliberately static application-contract marker. Production smoke uses this to
-# distinguish "the endpoint responds" from "the expected dashboard generation
-# is actually deployed" without relying on provider-specific Railway metadata.
+# Deliberately static application-contract markers. Production verification uses
+# them to distinguish "the endpoint responds" from "the expected backend/UI
+# generation is actually deployed" without provider-specific Railway metadata.
 _DASHBOARD_RELEASE = "server-paper-autopilot-v1"
+_DASHBOARD_UI_RELEASE = "primary-paper-autopilot-v1"
 
 _CONTENT_SECURITY_POLICY = "; ".join(
     (
@@ -61,6 +62,7 @@ async def dashboard_http_policy(request: Request, call_next) -> Response:
         "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     )
     response.headers["X-Proto-Release"] = _DASHBOARD_RELEASE
+    response.headers["X-Proto-UI-Release"] = _DASHBOARD_UI_RELEASE
     return response
 
 
