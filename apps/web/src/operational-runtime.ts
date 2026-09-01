@@ -13,6 +13,7 @@ type Snapshot = {
   reconciliation: ApiResult<Reconciliation>;
   fills: ApiResult<Fills>;
   receivedAt: number;
+  latencyMs: number;
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin;
@@ -87,15 +88,18 @@ function renderUnavailable(surface: HTMLElement, snapshot: Snapshot | null) {
 }
 
 function render(surface: HTMLElement, snapshot: Snapshot) {
-  const { runtime, risk, reconciliation, fills, receivedAt } = snapshot;
+  const { runtime, risk, reconciliation, fills, receivedAt, latencyMs } = snapshot;
   surface.replaceChildren();
 
   const summary = el("div", "opsSummary");
-  const now = Date.now();
-  const stale = now - receivedAt > SNAPSHOT_STALE_MS;
+  const stale = Date.now() - receivedAt > SNAPSHOT_STALE_MS;
+  const pulse = el("span", `opsPulse ${stale ? "warn" : "ok"}`);
+  pulse.setAttribute("aria-hidden", "true");
   summary.append(
+    pulse,
     el("strong", stale ? "warn" : "ok", stale ? "TELEMETRY STALE" : "TELEMETRY CURRENT"),
     el("span", "", `updated ${new Date(receivedAt).toISOString().slice(11, 19)} UTC`),
+    el("span", "opsLatency", `round-trip ${latencyMs} ms`),
   );
   const endpointGroup = el("div", "opsEndpointGroup");
   endpointGroup.append(
@@ -158,7 +162,10 @@ function render(surface: HTMLElement, snapshot: Snapshot) {
     fillList.slice(0, 8).forEach((fill) => {
       const row = el("div", "fillRow");
       const identity = el("span", "fillIdentity");
-      identity.append(el("b", fill.side === "BUY" ? "ok" : fill.side === "SELL" ? "bad" : "", `${fill.side ?? "—"} ${fill.asset ?? "—"}`), el("small", "", fill.order_id?.slice(0, 8) ?? "—"));
+      identity.append(
+        el("b", fill.side === "BUY" ? "ok" : fill.side === "SELL" ? "bad" : "", `${fill.side ?? "—"} ${fill.asset ?? "—"}`),
+        el("small", "", fill.order_id?.slice(0, 8) ?? "—"),
+      );
       row.append(
         identity,
         el("span", "", `${fill.filled_quantity == null ? "—" : fill.filled_quantity.toFixed(6)} @ ${money(fill.fill_price)}`),
@@ -187,6 +194,7 @@ function startOperationalTelemetry() {
     inFlight = true;
     refreshController = new AbortController();
     const signal = refreshController.signal;
+    const started = performance.now();
     try {
       const [runtime, risk, reconciliation, fills] = await Promise.all([
         requestJson<RuntimeState>("/system/status", signal),
@@ -195,7 +203,14 @@ function startOperationalTelemetry() {
         requestJson<Fills>("/v1/fills?limit=8", signal),
       ]);
       if (cancelled || signal.aborted) return;
-      const snapshot: Snapshot = { runtime, risk, reconciliation, fills, receivedAt: Date.now() };
+      const snapshot: Snapshot = {
+        runtime,
+        risk,
+        reconciliation,
+        fills,
+        receivedAt: Date.now(),
+        latencyMs: Math.max(0, Math.round(performance.now() - started)),
+      };
       const anyOk = runtime.ok || risk.ok || reconciliation.ok || fills.ok;
       if (!anyOk) {
         lastSnapshot = null;

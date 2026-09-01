@@ -79,7 +79,12 @@ assert.match(operational, /refreshController\?\.abort\(\)/, "operational cleanup
 assert.match(operational, /SNAPSHOT_STALE_MS/, "operational telemetry must distinguish stale snapshots");
 assert.match(operational, /function endpointState/, "partial endpoint failures must be visible rather than silently rendered as blanks");
 assert.match(operational, /Reconciliation endpoint unavailable; no consistency claim is being made\./, "reconciliation failure must not be presented as a valid consistency state");
+assert.match(operational, /const started = performance\.now\(\)/, "operational refresh must measure real request round-trip time");
+assert.match(operational, /round-trip \$\{latencyMs\} ms/, "measured operational activity must be visible");
 assert.match(operationalStyles, /\.opsEndpoint/, "operational endpoint health must have visible status styling");
+assert.match(operationalStyles, /\.opsPulse/, "current operational telemetry must have a restrained activity indicator");
+assert.match(operationalStyles, /@keyframes opsPulse/, "activity indicator must be driven by explicit animation styling");
+assert.match(operationalStyles, /\.opsPulse\.ok\{animation:none\}/, "reduced-motion mode must disable activity pulse animation");
 assert.match(operationalStyles, /@media\(max-width:820px\)/, "operational telemetry must support tablet layout");
 
 assert.match(styles, /grid-template-columns:225px minmax\(590px,2\.35fr\) minmax\(250px,\.95fr\)/, "desktop terminal must preserve dense three-column command-center hierarchy");
@@ -90,7 +95,7 @@ assert.match(styles, /scrollbar-color/, "terminal must define scrollbar baseline
 assert.match(styles, /@media\(max-width:820px\)/, "terminal must include tablet breakpoint");
 assert.match(visualStyles, /\.edgeViz/, "edge visualization must have dedicated styling");
 assert.match(visualStyles, /\.hawkesViz/, "Hawkes visualization must have dedicated styling");
-assert.match(visualStyles, /\.greeksVisual/, "Greeks visualization must have dedicated styling");
+assert.match(visualStyles, /\.greeksVisual/, "Greeks visualization must have dedicated visual encoding");
 assert.match(visualStyles, /\.axisLabel/, "institutional chart axes must have dedicated styling");
 assert.match(visualStyles, /\.lastPriceLine/, "current-price guide must have dedicated styling");
 assert.match(visualStyles, /\.chartMeta/, "chart OHLC metadata strip must have dedicated styling");
