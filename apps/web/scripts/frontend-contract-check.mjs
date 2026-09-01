@@ -23,6 +23,7 @@ assert.match(source, /Math\.floor\(sourceMs \/ CANDLE_MS\)/, "OHLC bucket must d
 assert.match(source, /120\)/, "websocket batching interval must remain bounded");
 assert.match(source, /requestJson<LiveStatus>\("\/live\/status"\)/, "frontend must reconcile authoritative live status");
 assert.match(source, /REST FALLBACK/, "transport fallback must be visible");
+assert.match(source, /WebSocket unavailable · REST reconciliation active/, "REST fallback must explain transport state honestly");
 assert.match(source, /LIVE PUBLIC/, "live provenance must be explicit");
 assert.match(source, /SYNTHETIC RESEARCH/, "research provenance must be explicit");
 assert.match(source, /PAPER \/ SIM/, "paper provenance must be explicit");
@@ -31,6 +32,12 @@ assert.match(source, /EXEC SIMULATION/, "execution mode must be explicit and sep
 assert.match(source, /EXECUTION SIMULATOR/, "automation must terminate in simulated execution");
 assert.match(source, /No exchange-account connectivity or real-money execution path is exposed\./, "financial boundary must be explicit");
 assert.match(source, /L1 ORDER BOOK/, "frontend must not claim unavailable L2 depth");
+assert.match(source, /L1 MICROSTRUCTURE/, "imbalance surface must not masquerade as a trade tape");
+assert.doesNotMatch(source, /<header>ORDER FLOW /, "frontend must not label L1 analytics as order-flow trades");
+assert.match(source, /Live 5-second OHLC chart with price and UTC time axes/, "market chart must expose price and UTC axes");
+assert.match(source, /className="lastPriceLine"/, "market chart must render the canonical current-price guide");
+assert.match(source, /5S UTC BUCKETS/, "chart must disclose its bucket construction");
+assert.match(source, /O \{usd\(last\.open\)\}/, "chart must expose current OHLC values from canonical candles");
 assert.match(source, /ValidationPanel/, "validation lab must remain integrated");
 assert.match(source, /function EdgeHistory/, "edge history must be rendered as an analytical visualization");
 assert.match(source, /function HawkesCascade/, "Hawkes state must be rendered as a cascade visualization");
@@ -72,6 +79,9 @@ assert.match(styles, /@media\(max-width:820px\)/, "terminal must include tablet 
 assert.match(visualStyles, /\.edgeViz/, "edge visualization must have dedicated styling");
 assert.match(visualStyles, /\.hawkesViz/, "Hawkes visualization must have dedicated styling");
 assert.match(visualStyles, /\.greeksVisual/, "Greeks visualization must have dedicated styling");
+assert.match(visualStyles, /\.axisLabel/, "institutional chart axes must have dedicated styling");
+assert.match(visualStyles, /\.lastPriceLine/, "current-price guide must have dedicated styling");
+assert.match(visualStyles, /\.chartMeta/, "chart OHLC metadata strip must have dedicated styling");
 assert.match(visualStyles, /@media\(min-width:821px\) and \(max-width:1360px\)/, "visual analytics must preserve landscape-tablet density");
 assert.match(design, /Expiry \/ Risk Field/, "durable design context must preserve signature field");
 assert.match(index, /\/src\/terminal\.tsx/, "terminal must be active entrypoint");
@@ -88,4 +98,4 @@ assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bu
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
 
-console.log("frontend visual-analytics contracts: ok");
+console.log("frontend institutional market contracts: ok");
