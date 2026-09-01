@@ -45,6 +45,7 @@ from .replay import (
 )
 from .research import metrics
 from .research import router as research_router
+from .risk_state import risk_snapshot
 from .settings import settings
 from .simulation_policy import authoritative_simulation_request
 from .websockets import hub
@@ -200,16 +201,7 @@ def edge(snapshot: MarketSnapshot) -> EdgeBreakdown:
 
 @app.get("/risk")
 def risk() -> dict[str, object]:
-    return {
-        "kill_switch": runtime.kill_switch,
-        "simulation_allowed": runtime.running
-        and runtime.kill_switch == KillSwitchState.ARMED,
-        "real_money_execution": False,
-        "minimum_net_edge": settings.minimum_net_edge,
-        "minimum_confidence": settings.minimum_confidence,
-        "max_notional": settings.max_notional,
-        "max_daily_drawdown": settings.max_daily_drawdown,
-    }
+    return risk_snapshot()
 
 
 @app.post("/v1/simulate", response_model=SimulationResult)
