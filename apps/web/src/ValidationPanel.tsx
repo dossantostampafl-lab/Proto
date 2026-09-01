@@ -76,8 +76,16 @@ export function ValidationPanel({ apiBase }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
 
-  useEffect(() => () => activeRequest.current?.abort(), []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      activeRequest.current?.abort();
+      activeRequest.current = null;
+    };
+  }, []);
 
   const sampleCount = useMemo(() => {
     if (!rawReturns.trim()) return 0;
@@ -89,8 +97,10 @@ export function ValidationPanel({ apiBase }: Props) {
     const controller = new AbortController();
     activeRequest.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS);
-    setBusy(true);
-    setError(null);
+    if (mounted.current) {
+      setBusy(true);
+      setError(null);
+    }
     try {
       const returns = parseReturns(rawReturns);
       const testSize = Math.max(2, Math.floor(returns.length / 4));
@@ -116,10 +126,11 @@ export function ValidationPanel({ apiBase }: Props) {
       });
       const body = (await response.json()) as ValidationReport & { detail?: string };
       if (!response.ok) throw new Error(body.detail ?? "Validation request failed.");
-      setReport(body);
+      if (mounted.current && activeRequest.current === controller) setReport(body);
     } catch (validationError) {
+      if (!mounted.current || activeRequest.current !== controller) return;
       if (controller.signal.aborted) {
-        if (activeRequest.current === controller) setError("Validation request timed out or was cancelled.");
+        setError("Validation request timed out or was cancelled.");
         return;
       }
       setReport(null);
@@ -128,7 +139,7 @@ export function ValidationPanel({ apiBase }: Props) {
       window.clearTimeout(timeout);
       if (activeRequest.current === controller) {
         activeRequest.current = null;
-        setBusy(false);
+        if (mounted.current) setBusy(false);
       }
     }
   }
