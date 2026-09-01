@@ -14,7 +14,10 @@ assert.match(runtime, /\/paper\/automation\/status/, "autopilot controller must 
 assert.match(runtime, /\/paper\/automation\/start/, "autopilot controller must start the server worker rather than executing decisions in-browser");
 assert.match(runtime, /\/paper\/automation\/stop/, "autopilot controller must stop the server worker");
 assert.match(runtime, /financial_connectivity !== false \|\| current\.data\.real_money_execution !== false/, "controller must fail closed if paper safety boundaries are not false");
-assert.match(runtime, /Continues on the server after this dashboard tab is closed/, "persistent server lifetime must be disclosed");
+assert.match(runtime, /Primary automation · continues on the server after this dashboard tab is closed/, "primary persistent server lifetime must be disclosed");
+assert.match(runtime, /host\.prepend\(section\)/, "autopilot must be the first control in the automation workspace");
+assert.match(runtime, /START PAPER AUTOPILOT/, "primary action must use clear paper-autopilot language");
+assert.match(runtime, /STOP PAPER AUTOPILOT/, "stop action must use clear paper-autopilot language");
 assert.match(runtime, /Persistent server task · simulation only · no exchange account · no financial connectivity · no real-money execution/, "autopilot must disclose the simulation-only boundary");
 assert.doesNotMatch(runtime, /\/live\/market-data|\/live\/analytics|\/v1\/simulate/, "browser controller must not run the trading decision/execution loop itself");
 assert.doesNotMatch(runtime, /setInterval\(\(\) => void executeCycle|document\.hidden|armedDirection/, "browser controller must not masquerade as a persistent automation worker");
