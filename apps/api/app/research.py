@@ -291,7 +291,7 @@ def prometheus_metrics() -> str:
         "# TYPE proto_ws_capacity_rejections_total counter",
         f"proto_ws_capacity_rejections_total {websocket['capacity_rejections']}",
         "# HELP proto_ws_oversized_messages_total Oversized WebSocket frames.",
-        "# TYPE proto_ws_oversized_messages_total gauge",
+        "# TYPE proto_ws_oversized_messages_total counter",
         f"proto_ws_oversized_messages_total {websocket['oversized_messages']}",
     ]
     for name, value in _portfolio_gauges().items():
