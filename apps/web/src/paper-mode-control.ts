@@ -5,6 +5,7 @@ type PaperStatus = {
   running: boolean;
   kill_switch: string;
   paper_execution_enabled: boolean;
+  autopilot_running?: boolean;
   financial_connectivity: boolean;
   real_money_execution: boolean;
 };
@@ -48,30 +49,41 @@ function syncExecutionHeader(status: PaperStatus | null) {
 }
 
 function mount() {
-  const host = document.querySelector<HTMLElement>(".automationBody>div:first-child");
+  const host = document.querySelector<HTMLElement>(".paperOrderConsole");
   if (!host || host.querySelector(".paperModeControl")) return false;
 
-  const box = document.createElement("div");
+  const box = document.createElement("section");
   box.className = "paperModeControl";
-  box.setAttribute("aria-label", "Paper automation runtime controls");
+  box.setAttribute("aria-label", "Manual paper runtime controls");
+
+  const identity = document.createElement("div");
+  identity.className = "paperModeIdentity";
+  const title = document.createElement("strong");
+  title.textContent = "MANUAL PAPER RUNTIME";
+  const help = document.createElement("small");
+  help.textContent = "Secondary control for Paper Order Console · autopilot manages its own runtime automatically";
+  identity.append(title, help);
 
   const state = document.createElement("div");
   state.className = "paperModeStatus";
   state.setAttribute("role", "status");
   state.setAttribute("aria-live", "polite");
 
+  const actions = document.createElement("div");
+  actions.className = "paperModeActions";
   const start = document.createElement("button");
   start.type = "button";
   start.className = "paperModeStart";
-  start.textContent = "ENABLE PAPER AUTOMATION";
+  start.textContent = "ENABLE MANUAL PAPER";
 
   const stop = document.createElement("button");
   stop.type = "button";
   stop.className = "paperModeStop";
-  stop.textContent = "STOP PAPER AUTOMATION";
+  stop.textContent = "STOP MANUAL PAPER";
+  actions.append(start, stop);
 
-  box.append(state, start, stop);
-  host.append(box);
+  box.append(identity, state, actions);
+  host.prepend(box);
 
   let busy = false;
 
@@ -88,8 +100,8 @@ function mount() {
     const enabled = safe && status.paper_execution_enabled;
     state.className = `paperModeStatus ${enabled ? "enabled" : "locked"}`;
     state.textContent = enabled
-      ? `PAPER AUTOMATION ENABLED · ${status.mode} · kill switch ${status.kill_switch}`
-      : `PAPER AUTOMATION OFF · ${status.mode} · live market feed remains read-only`;
+      ? `MANUAL PAPER READY · ${status.mode} · kill switch ${status.kill_switch}${status.autopilot_running ? " · AUTOPILOT ACTIVE" : ""}`
+      : `MANUAL PAPER OFF · ${status.mode} · public market feed remains read-only`;
     start.disabled = busy || enabled || !safe;
     stop.disabled = busy || !enabled;
   };
@@ -106,7 +118,7 @@ function mount() {
     start.disabled = true;
     stop.disabled = true;
     state.className = "paperModeStatus working";
-    state.textContent = "Enabling server-authoritative PAPER_TRADING runtime…";
+    state.textContent = "Enabling server-authoritative PAPER_TRADING for manual simulation…";
     const result = await request<PaperStatus>("/paper/start", "POST");
     busy = false;
     if (!result.ok || !result.data) {
@@ -122,7 +134,7 @@ function mount() {
     start.disabled = true;
     stop.disabled = true;
     state.className = "paperModeStatus working";
-    state.textContent = "Stopping simulated execution runtime…";
+    state.textContent = "Stopping manual simulated execution runtime…";
     const result = await request<PaperStatus>("/paper/stop", "POST");
     busy = false;
     if (!result.ok || !result.data) {
