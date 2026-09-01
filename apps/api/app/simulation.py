@@ -132,6 +132,15 @@ class PaperSimulator:
         self.risk = RiskEngine()
         self._reference_time_provider = reference_time_provider
 
+    def _reference_time(self, explicit: datetime | None) -> datetime:
+        clock = explicit
+        if clock is None and self._reference_time_provider is not None:
+            clock = self._reference_time_provider()
+        clock = clock or datetime.now(UTC)
+        if clock.tzinfo is None or clock.utcoffset() is None:
+            raise ValueError("simulation reference timestamp must be timezone-aware")
+        return clock
+
     def _validate_snapshot_time(
         self,
         request: SimulationRequest,
@@ -141,12 +150,10 @@ class PaperSimulator:
         observed_at = request.snapshot.observed_at
         if observed_at.tzinfo is None or observed_at.utcoffset() is None:
             return False, "snapshot timestamp must be timezone-aware"
-        clock = reference_time
-        if clock is None and self._reference_time_provider is not None:
-            clock = self._reference_time_provider()
-        clock = clock or datetime.now(UTC)
-        if clock.tzinfo is None or clock.utcoffset() is None:
-            return False, "simulation reference timestamp must be timezone-aware"
+        try:
+            clock = self._reference_time(reference_time)
+        except ValueError as error:
+            return False, str(error)
         age_seconds = (clock - observed_at).total_seconds()
         if age_seconds > self.config.max_snapshot_age_seconds:
             return False, "stale market snapshot"
@@ -186,6 +193,7 @@ class PaperSimulator:
         if not snapshot_time_valid:
             return SimulationResult(accepted=False, reason=snapshot_time_reason)
 
+        fill_timestamp = self._reference_time(reference_time)
         order = request.order
         snapshot = request.snapshot
         executable_price = snapshot.ask if order.side == Side.BUY else snapshot.bid
@@ -233,5 +241,6 @@ class PaperSimulator:
             fill_price=float(fill_price),
             fee=float(fee),
             slippage_bps=round(slippage_bps, 6),
+            filled_at=fill_timestamp,
         )
         return SimulationResult(accepted=True, reason="simulated fill", fill=fill)
