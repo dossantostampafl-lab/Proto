@@ -41,11 +41,13 @@ async function jsonRequest<T>(path: string, init?: RequestInit): Promise<{ ok: b
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
+    const headers = new Headers(init?.headers);
+    headers.set("Content-Type", "application/json");
     const response = await fetch(`${API_BASE}${path}`, {
       ...init,
       cache: "no-store",
       signal: controller.signal,
-      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      headers,
     });
     return { ok: response.ok, status: response.status, data: response.ok ? await response.json() as T : null };
   } catch {
@@ -224,8 +226,13 @@ function mountPaperOrderConsole() {
     text(status, "Submitting to backend risk gate and execution simulator…");
     try {
       const analytics = await jsonRequest<LiveAnalytics>(`/live/analytics/${symbol}`);
-      const volatility = analytics.ok && analytics.data && Number.isFinite(analytics.data.realized_volatility) ? Math.max(analytics.data.realized_volatility, 0) : 0;
-      const imbalance = analytics.ok && analytics.data && Number.isFinite(analytics.data.current_imbalance) ? Math.max(-1, Math.min(1, analytics.data.current_imbalance)) : 0;
+      if (!analytics.ok || !analytics.data || !Number.isFinite(analytics.data.realized_volatility) || !Number.isFinite(analytics.data.current_imbalance)) {
+        status.className = "paperResult error";
+        text(status, "Canonical live analytics are unavailable; simulation was not submitted.");
+        return;
+      }
+      const volatility = Math.max(analytics.data.realized_volatility, 0);
+      const imbalance = Math.max(-1, Math.min(1, analytics.data.current_imbalance));
       const marketId = `paper-${symbol.toLowerCase()}-usd`;
       const payload = {
         order: { market_id: marketId, asset: symbol, side, quantity: quantityValue, limit_price: limitValue },
@@ -238,7 +245,6 @@ function mountPaperOrderConsole() {
           ask_size: lastFrame.ask_size,
           volatility,
           imbalance,
-          market_probability: 0.5,
           observed_at: lastFrame.received_at || lastFrame.timestamp,
         },
         server_execution_permitted: true,
