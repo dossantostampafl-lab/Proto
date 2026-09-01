@@ -5,6 +5,8 @@ const source = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const auditStyles = await readFile(new URL("../src/audit.css", import.meta.url), "utf8");
 const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
+const dockerfile = await readFile(new URL("../../../Dockerfile", import.meta.url), "utf8");
+const railwayApp = await readFile(new URL("../../api/app/railway_app.py", import.meta.url), "utf8");
 
 assert.match(source, /lastSequence\.current\[f\.symbol\]/, "market-series dedupe must remain sequence-aware");
 assert.match(source, /f\.sequence<=lastSequence\.current\[f\.symbol\]/, "duplicate or regressed ticks must not append to chart history");
@@ -21,5 +23,9 @@ assert.match(auditStyles, /sourceTag\.research/, "explicit research source tag s
 assert.match(source, /ValidationPanel/, "validation lab must remain accessible from the main terminal");
 assert.doesNotMatch(index, /validation-root/, "the page must mount only one React application");
 assert.doesNotMatch(index, /validation\.tsx/, "validation must not mount as a second application");
+assert.match(dockerfile, /VITE_API_BASE_URL=""/, "single-origin deploy must not pin a generated Railway hostname");
+assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "frontend bundle must remain hostname-portable");
+assert.match(railwayApp, /Cache-Control.*no-store/, "dashboard HTML must not be served from stale cache");
+assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted Vite assets should be cached immutably");
 
 console.log("frontend runtime contracts: ok");

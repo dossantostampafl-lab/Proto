@@ -4,7 +4,9 @@ WORKDIR /web
 COPY apps/web/package*.json ./
 RUN npm ci
 COPY apps/web ./
-ENV VITE_API_BASE_URL="https://proto-production-5b0d.up.railway.app"
+# Single-origin deployment: the browser derives REST/WebSocket endpoints from
+# window.location.origin. Do not pin the Railway-generated hostname into the bundle.
+ENV VITE_API_BASE_URL=""
 RUN npm run build
 
 FROM python:3.13-slim
