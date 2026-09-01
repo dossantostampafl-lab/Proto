@@ -7,11 +7,12 @@ from pydantic import BaseModel, Field, model_validator
 
 from services.validation import superior_predictive_ability
 
-from .holdout_surface import router as holdout_router
+from .holdout_surface import evaluate_holdout, seal_holdout
 from .metrics_state import metrics
 
 router = APIRouter(prefix="/research/validation", tags=["research", "validation"])
-router.include_router(holdout_router)
+router.add_api_route("/holdout/seal", seal_holdout, methods=["POST"])
+router.add_api_route("/holdout/evaluate", evaluate_holdout, methods=["POST"])
 
 
 class DataSnoopingRequest(BaseModel):
