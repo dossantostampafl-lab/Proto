@@ -119,7 +119,6 @@ function bindSectionNavigation() {
   const topButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".topbar nav button"));
   const railButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".commandRail [data-command]"));
   const observed = new Set<HTMLElement>();
-  const topButtonHandlers = new Map<HTMLButtonElement, EventListener>();
 
   const setActive = (name: string) => {
     topButtons.forEach((button) => {
@@ -135,14 +134,6 @@ function bindSectionNavigation() {
       else button.removeAttribute("aria-current");
     });
   };
-
-  topButtons.forEach((button) => {
-    const name = button.textContent?.trim().toUpperCase();
-    if (!name || !COMMANDS.includes(name as (typeof COMMANDS)[number])) return;
-    const handler: EventListener = () => scrollToCommand(name);
-    topButtonHandlers.set(button, handler);
-    button.addEventListener("click", handler);
-  });
 
   const observer = new IntersectionObserver((entries) => {
     const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
@@ -178,8 +169,6 @@ function bindSectionNavigation() {
   return () => {
     observer.disconnect();
     sectionWatcher.disconnect();
-    topButtonHandlers.forEach((handler, button) => button.removeEventListener("click", handler));
-    topButtonHandlers.clear();
     observed.clear();
   };
 }
