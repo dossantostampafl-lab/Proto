@@ -15,10 +15,25 @@ from .main import app
 # frames. No account credentials or financial connectivity are introduced.
 app.include_router(live_router)
 
+_CONTENT_SECURITY_POLICY = "; ".join(
+    (
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "font-src 'self' data:",
+        "connect-src 'self' ws: wss:",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+    )
+)
+
 
 @app.middleware("http")
-async def dashboard_cache_policy(request: Request, call_next) -> Response:
-    """Keep the HTML shell fresh while allowing Vite fingerprinted assets to cache."""
+async def dashboard_http_policy(request: Request, call_next) -> Response:
+    """Apply cache and browser-security policy to the Railway web surface."""
     response = await call_next(request)
     path = request.url.path
     if path == "/" or path.endswith(".html"):
@@ -26,6 +41,14 @@ async def dashboard_cache_policy(request: Request, call_next) -> Response:
         response.headers["Pragma"] = "no-cache"
     elif path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
+    response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    )
     return response
 
 
