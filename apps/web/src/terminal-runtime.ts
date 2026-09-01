@@ -118,8 +118,8 @@ function bindDialog(dialog: HTMLElement) {
 function bindSectionNavigation() {
   const topButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".topbar nav button"));
   const railButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".commandRail [data-command]"));
-  const sections = Array.from(document.querySelectorAll<HTMLElement>("[data-section]"));
-  if (!sections.length) return () => {};
+  const observed = new Set<HTMLElement>();
+  const topButtonHandlers = new Map<HTMLButtonElement, EventListener>();
 
   const setActive = (name: string) => {
     topButtons.forEach((button) => {
@@ -135,24 +135,52 @@ function bindSectionNavigation() {
       else button.removeAttribute("aria-current");
     });
   };
-  setActive("COMMAND");
+
+  topButtons.forEach((button) => {
+    const name = button.textContent?.trim().toUpperCase();
+    if (!name || !COMMANDS.includes(name as (typeof COMMANDS)[number])) return;
+    const handler: EventListener = () => scrollToCommand(name);
+    topButtonHandlers.set(button, handler);
+    button.addEventListener("click", handler);
+  });
 
   const observer = new IntersectionObserver((entries) => {
     const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
     const name = visible?.target instanceof HTMLElement ? visible.target.dataset.section : undefined;
     if (name) setActive(name);
   }, { rootMargin: "-80px 0px -55% 0px", threshold: [0.08, 0.2, 0.45, 0.7] });
-  sections.forEach((section) => observer.observe(section));
 
-  const systemWatcher = new MutationObserver(() => {
+  const observeSection = (section: HTMLElement) => {
+    if (observed.has(section) || !section.dataset.section) return;
+    observed.add(section);
+    observer.observe(section);
+  };
+
+  document.querySelectorAll<HTMLElement>("[data-section]").forEach(observeSection);
+  setActive("COMMAND");
+
+  const sectionWatcher = new MutationObserver((records) => {
+    for (const record of records) {
+      record.addedNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        if (node.matches("[data-section]")) observeSection(node);
+        node.querySelectorAll<HTMLElement>("[data-section]").forEach(observeSection);
+      });
+    }
     const surface = document.querySelector<HTMLElement>(".operationalSurface");
-    if (surface && !surface.dataset.section) surface.dataset.section = "SYSTEM";
+    if (surface) {
+      if (!surface.dataset.section) surface.dataset.section = "SYSTEM";
+      observeSection(surface);
+    }
   });
-  systemWatcher.observe(document.getElementById("root") ?? document.body, { childList: true, subtree: true });
+  sectionWatcher.observe(document.getElementById("root") ?? document.body, { childList: true, subtree: true });
 
   return () => {
     observer.disconnect();
-    systemWatcher.disconnect();
+    sectionWatcher.disconnect();
+    topButtonHandlers.forEach((handler, button) => button.removeEventListener("click", handler));
+    topButtonHandlers.clear();
+    observed.clear();
   };
 }
 
