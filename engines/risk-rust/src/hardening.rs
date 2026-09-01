@@ -226,6 +226,33 @@ impl ReservationAwareRiskGate {
         Self::decision_from_risk(self.manager.evaluate(&adjusted))
     }
 
+    pub fn evaluate_with_volatility(
+        &self,
+        request: &RiskRequest,
+        market_key: &str,
+        asset_key: &str,
+        cluster_key: &str,
+        observed_volatility: Decimal,
+        max_volatility: Decimal,
+    ) -> GateDecision {
+        if !self.reconciled {
+            return GateDecision::Rejected(vec![GateRejection::NotReconciled]);
+        }
+
+        let adjusted = self.with_reserved_exposure(
+            request,
+            market_key,
+            asset_key,
+            cluster_key,
+            &ReservedExposure::default(),
+        );
+        Self::decision_from_risk(self.manager.evaluate_with_volatility(
+            &adjusted,
+            observed_volatility,
+            max_volatility,
+        ))
+    }
+
     /// Evaluate all candidates against one cumulative hypothetical exposure
     /// state. No reservation is committed here; callers reserve only after
     /// the entire batch clears.
@@ -257,6 +284,54 @@ impl ReservationAwareRiskGate {
             }
 
             cumulative.apply(&item);
+        }
+
+        if failures.is_empty() {
+            GateDecision::Approved
+        } else {
+            GateDecision::Rejected(failures)
+        }
+    }
+
+    /// Evaluate simultaneous candidates cumulatively while applying each
+    /// candidate's market-specific volatility ceiling.
+    pub fn evaluate_batch_with_volatility<'a, I>(&self, requests: I) -> GateDecision
+    where
+        I: IntoIterator<Item = VolatilityBatchRiskRequest<'a>>,
+    {
+        if !self.reconciled {
+            return GateDecision::Rejected(vec![GateRejection::NotReconciled]);
+        }
+
+        let mut cumulative = BatchExposure::default();
+        let mut failures = Vec::new();
+
+        for item in requests {
+            let batch_for_keys =
+                cumulative.for_keys(item.market_key, item.asset_key, item.cluster_key);
+            let adjusted = self.with_reserved_exposure(
+                item.request,
+                item.market_key,
+                item.asset_key,
+                item.cluster_key,
+                &batch_for_keys,
+            );
+
+            if let RiskDecision::Rejected(reasons) = self.manager.evaluate_with_volatility(
+                &adjusted,
+                item.observed_volatility,
+                item.max_volatility,
+            ) {
+                failures.push(GateRejection::Risk(reasons));
+                continue;
+            }
+
+            cumulative.apply(&BatchRiskRequest {
+                request: item.request,
+                market_key: item.market_key,
+                asset_key: item.asset_key,
+                cluster_key: item.cluster_key,
+            });
         }
 
         if failures.is_empty() {
@@ -300,6 +375,16 @@ pub struct BatchRiskRequest<'a> {
     pub market_key: &'a str,
     pub asset_key: &'a str,
     pub cluster_key: &'a str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct VolatilityBatchRiskRequest<'a> {
+    pub request: &'a RiskRequest,
+    pub market_key: &'a str,
+    pub asset_key: &'a str,
+    pub cluster_key: &'a str,
+    pub observed_volatility: Decimal,
+    pub max_volatility: Decimal,
 }
 
 #[cfg(test)]
@@ -454,5 +539,80 @@ mod tests {
             },
         ]);
         assert_eq!(decision, GateDecision::Approved);
+    }
+
+    #[test]
+    fn reservation_aware_gate_rejects_volatility_breach() {
+        let gate = ReservationAwareRiskGate::new_presumed_reconciled(manager());
+        let decision = gate.evaluate_with_volatility(
+            &request(10_000),
+            "btc-usd",
+            "btc",
+            "crypto",
+            Decimal::new(90, 2),
+            Decimal::new(60, 2),
+        );
+
+        assert!(matches!(
+            decision,
+            GateDecision::Rejected(reasons)
+                if reasons.iter().any(|reason| matches!(
+                    reason,
+                    GateRejection::Risk(inner)
+                        if inner.contains(&RejectionReason::VolatilityTooHigh)
+                ))
+        ));
+    }
+
+    #[test]
+    fn reservation_aware_volatility_gate_remains_fail_closed_before_reconciliation() {
+        let gate = ReservationAwareRiskGate::new(manager());
+        assert_eq!(
+            gate.evaluate_with_volatility(
+                &request(10_000),
+                "btc-usd",
+                "btc",
+                "crypto",
+                Decimal::new(20, 2),
+                Decimal::new(60, 2),
+            ),
+            GateDecision::Rejected(vec![GateRejection::NotReconciled])
+        );
+    }
+
+    #[test]
+    fn volatility_batch_rejects_only_breaching_candidate() {
+        let gate = ReservationAwareRiskGate::new_presumed_reconciled(manager());
+        let first = request(20_000);
+        let second = request(20_000);
+        let decision = gate.evaluate_batch_with_volatility([
+            VolatilityBatchRiskRequest {
+                request: &first,
+                market_key: "btc-usd",
+                asset_key: "btc",
+                cluster_key: "crypto-a",
+                observed_volatility: Decimal::new(40, 2),
+                max_volatility: Decimal::new(60, 2),
+            },
+            VolatilityBatchRiskRequest {
+                request: &second,
+                market_key: "eth-usd",
+                asset_key: "eth",
+                cluster_key: "crypto-b",
+                observed_volatility: Decimal::new(95, 2),
+                max_volatility: Decimal::new(60, 2),
+            },
+        ]);
+
+        assert!(matches!(
+            decision,
+            GateDecision::Rejected(reasons)
+                if reasons.len() == 1
+                    && reasons.iter().any(|reason| matches!(
+                        reason,
+                        GateRejection::Risk(inner)
+                            if inner.contains(&RejectionReason::VolatilityTooHigh)
+                    ))
+        ));
     }
 }
