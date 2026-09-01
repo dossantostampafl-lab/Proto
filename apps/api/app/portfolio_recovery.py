@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from .models import Asset, Fill, Side, SimulationOrder
 from .portfolio import PaperPortfolio
+
+
+def _restore_timestamp(value: object) -> datetime:
+    restored = datetime.fromisoformat(str(value))
+    if restored.tzinfo is None or restored.utcoffset() is None:
+        return restored.replace(tzinfo=UTC)
+    return restored.astimezone(UTC)
 
 
 async def recover_paper_portfolio(
@@ -23,7 +30,7 @@ async def recover_paper_portfolio(
         side = Side(str(entry["side"]))
         quantity = float(entry["filled_quantity"])
         fill_price = float(entry["fill_price"])
-        filled_at = datetime.fromisoformat(str(entry["filled_at"]))
+        filled_at = _restore_timestamp(entry["filled_at"])
         fill = Fill(
             order_id=order_id,
             market_id=market_id,
