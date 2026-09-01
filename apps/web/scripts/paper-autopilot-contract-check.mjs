@@ -33,6 +33,13 @@ assert.match(styles, /input:disabled/, "running server configuration must visibl
 assert.match(modeControl, /syncExecutionHeader/, "paper runtime controller must keep the topbar execution indicator authoritative");
 assert.match(modeControl, /EXEC PAPER/, "paper mode must be rendered explicitly in the topbar");
 assert.match(modeControl, /EXEC LIVE READ-ONLY/, "live monitoring must not be presented as executable simulation");
+assert.match(modeControl, /document\.querySelector<HTMLElement>\("\.paperOrderConsole"\)/, "manual runtime control must live inside the manual paper console rather than compete with the primary autopilot");
+assert.match(modeControl, /MANUAL PAPER RUNTIME/, "secondary manual runtime control must be explicitly identified");
+assert.match(modeControl, /ENABLE MANUAL PAPER/, "manual paper start action must not masquerade as the primary automation action");
+assert.match(modeControl, /STOP MANUAL PAPER/, "manual paper stop action must be explicit");
+assert.doesNotMatch(modeControl, /ENABLE PAPER AUTOMATION|STOP PAPER AUTOMATION/, "manual controls must not duplicate the primary autopilot language");
+assert.match(modeControl, /autopilot manages its own runtime automatically/, "manual control must explain the primary autopilot relationship");
+assert.match(modeStyles, /\.paperModeControl\{grid-column:1\/-1/, "manual runtime control must span the paper console rather than alter the command pipeline");
 assert.match(modeStyles, /execModeManaged:after/, "authoritative execution label must override the legacy static React text without visual flicker");
 
-console.log("frontend persistent paper-autopilot readiness contracts: ok");
+console.log("frontend persistent paper-autopilot readiness and control-hierarchy contracts: ok");
