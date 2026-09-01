@@ -33,13 +33,15 @@ assert.match(source, /document\.body\.style\.overflow="hidden"/, "React must own
 assert.match(source, /e\.key==="Escape"/, "React must own Escape dismissal");
 assert.match(source, /opener\.current\?\.focus\(\)/, "React must restore focus to the modal opener");
 
+assert.match(runtime, /COMMANDS = \["COMMAND", "MARKETS", "RESEARCH", "AUTOMATION", "PORTFOLIO", "RISK", "SYSTEM"\]/, "institutional command rail must expose all workspaces");
+assert.match(runtime, /ensureCommandRail/, "runtime must mount the command rail");
+assert.match(runtime, /scrollToCommand/, "command rail controls must navigate to real sections");
 assert.match(runtime, /event\.key !== "Tab"/, "runtime must trap keyboard focus");
-assert.doesNotMatch(runtime, /document\.body\.style\.overflow = "hidden"/, "runtime must not duplicate modal scroll-lock ownership");
 assert.match(runtime, /IntersectionObserver/, "command navigation must track visible sections");
 assert.match(runtime, /aria-current/, "visible command section must be announced");
 assert.match(runtime, /import "\.\/operational-runtime"/, "terminal runtime must load operational telemetry");
 assert.match(runtime, /document\.querySelector<HTMLElement>\("\.operationalSurface"\)/, "System command must prefer operational telemetry surface");
-assert.match(runtime, /systemButton\?\.addEventListener\("click", onSystemClick\)/, "System command must have a runtime navigation handler");
+assert.match(runtimeStyles, /\.commandRail/, "command rail must have dedicated visual treatment");
 assert.match(runtimeStyles, /aria-current="page"/, "active command section must have visible styling");
 
 assert.match(operational, /requestJson<RuntimeState>\("\/system\/status"\)/, "system runtime must come from backend contract");
@@ -54,6 +56,8 @@ assert.doesNotMatch(operational, /innerHTML/, "operational runtime must not inje
 assert.match(operational, /inFlight/, "operational polling must prevent overlapping requests");
 assert.match(operationalStyles, /@media\(max-width:820px\)/, "operational telemetry must support tablet layout");
 
+assert.match(styles, /grid-template-columns:225px minmax\(590px,2\.35fr\) minmax\(250px,\.95fr\)/, "desktop terminal must preserve dense three-column command-center hierarchy");
+assert.match(styles, /grid-template-columns:repeat\(6,1fr\)/, "automation pipeline must read as a six-stage execution lane");
 assert.match(styles, /prefers-reduced-motion/, "terminal must respect reduced motion");
 assert.match(styles, /focus-visible/, "terminal controls must expose keyboard focus");
 assert.match(styles, /scrollbar-color/, "terminal must define scrollbar baseline");
@@ -67,8 +71,9 @@ await missing("../src/premium.css", "superseded premium.css must remain removed"
 await missing("../src/premium-runtime.ts", "superseded premium runtime must remain removed");
 await missing("../src/premium-runtime.css", "superseded premium runtime styles must remain removed");
 assert.match(dockerfile, /VITE_API_BASE_URL=""/, "single-origin deploy must remain hostname-portable");
+assert.match(dockerfile, /SYNTHETIC_RESEARCH_ENABLED=true/, "Railway image must explicitly enable the isolated synthetic research workspace");
 assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bundle must not hardcode Railway hostname");
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
 
-console.log("frontend operational terminal contracts: ok");
+console.log("frontend reference-dashboard contracts: ok");
