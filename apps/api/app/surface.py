@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException
 
 from services.analytics.greeks import calculate_synthetic_greeks
+from services.analytics.pnl_attribution import PnLAttributionInput, attribute_pnl
 from services.hawkes.core import ExponentialHawkesEngine
 from services.market_data.core import (
     DataQualityMonitor,
@@ -226,6 +227,31 @@ def canonical_pnl() -> dict[str, object]:
         "unrealized_pnl": snapshot["total_unrealized_pnl"],
         "fees": snapshot["total_fees"],
         "pnl_after_fees": snapshot["total_pnl_after_fees"],
+    }
+
+
+@router.get("/pnl/attribution")
+def canonical_pnl_attribution() -> dict[str, object]:
+    snapshot = portfolio.snapshot()
+    execution_costs = snapshot["execution_costs"]
+    if not isinstance(execution_costs, dict):
+        raise RuntimeError("portfolio execution costs must be a mapping")
+
+    attribution = attribute_pnl(
+        PnLAttributionInput(
+            slippage=-float(execution_costs.get("slippage", 0.0)),
+            fees=-float(snapshot["total_fees"]),
+            observed_total_pnl=float(snapshot["total_pnl_after_fees"]),
+        )
+    )
+    return {
+        "mode": snapshot["mode"],
+        "source": "SIMULATION_PORTFOLIO",
+        "policy": "KNOWN_ACCOUNTING_COSTS_ONLY",
+        "known_components": ["fees", "slippage"],
+        "unresolved_components_are_residual": True,
+        "real_money_execution": False,
+        **attribution.model_dump(),
     }
 
 
