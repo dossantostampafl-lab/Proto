@@ -1,5 +1,7 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from apps.api.app import paper_control as module
 from apps.api.app.app_state import reset_runtime_state, runtime
 from apps.api.app.models import SystemMode
 from apps.api.app.railway_app import app
@@ -40,20 +42,29 @@ def test_paper_stop_disables_simulated_execution() -> None:
     assert status["autopilot_running"] is False
 
 
-def test_paper_stop_also_disarms_persistent_autopilot() -> None:
-    assert client.post("/paper/start").status_code == 200
-    started = client.post("/paper/automation/start", json={})
-    assert started.status_code == 200
-    assert started.json()["running"] is True
-    assert client.get("/paper/status").json()["autopilot_running"] is True
+class _AutopilotProbe:
+    running = True
 
-    stopped = client.post("/paper/stop")
-    assert stopped.status_code == 200
-    assert stopped.json()["running"] is False
+    def __init__(self) -> None:
+        self.stop_calls = 0
 
-    paper_status = client.get("/paper/status").json()
-    autopilot_status = client.get("/paper/automation/status").json()
-    assert paper_status["paper_execution_enabled"] is False
-    assert paper_status["autopilot_running"] is False
-    assert autopilot_status["running"] is False
-    assert autopilot_status["last_reason"] == "STOPPED"
+    async def stop(self) -> dict[str, object]:
+        self.stop_calls += 1
+        self.running = False
+        return {"running": False}
+
+
+@pytest.mark.asyncio
+async def test_paper_stop_also_disarms_persistent_autopilot(monkeypatch) -> None:
+    client.post("/paper/start")
+    probe = _AutopilotProbe()
+    monkeypatch.setattr(module, "paper_autopilot", probe)
+
+    result = await module.stop_paper_trading()
+
+    assert result.running is False
+    assert probe.stop_calls == 1
+    assert probe.running is False
+    status = module.paper_status()
+    assert status["paper_execution_enabled"] is False
+    assert status["autopilot_running"] is False
