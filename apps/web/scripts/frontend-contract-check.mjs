@@ -4,6 +4,7 @@ import { access, readFile } from "node:fs/promises";
 const source = await readFile(new URL("../src/terminal.tsx", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/terminal.css", import.meta.url), "utf8");
 const runtime = await readFile(new URL("../src/terminal-runtime.ts", import.meta.url), "utf8");
+const runtimeStyles = await readFile(new URL("../src/terminal-runtime.css", import.meta.url), "utf8");
 const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const dockerfile = await readFile(new URL("../../../Dockerfile", import.meta.url), "utf8");
 const railwayApp = await readFile(new URL("../../api/app/railway_app.py", import.meta.url), "utf8");
@@ -29,6 +30,9 @@ assert.match(source, /ValidationPanel/, "validation lab must remain integrated")
 assert.match(runtime, /event\.key !== "Tab"/, "validation modal must trap keyboard focus");
 assert.match(runtime, /event\.key === "Escape"/, "validation modal must support Escape");
 assert.match(runtime, /document\.body\.style\.overflow = "hidden"/, "validation modal must lock background scrolling");
+assert.match(runtime, /IntersectionObserver/, "command navigation must track visible sections");
+assert.match(runtime, /aria-current/, "visible command section must be announced");
+assert.match(runtimeStyles, /aria-current="page"/, "active command section must have visible styling");
 assert.match(styles, /prefers-reduced-motion/, "terminal must respect reduced motion");
 assert.match(styles, /focus-visible/, "terminal controls must expose keyboard focus");
 assert.match(styles, /scrollbar-color/, "terminal must define scrollbar baseline");
