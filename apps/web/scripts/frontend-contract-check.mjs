@@ -27,9 +27,11 @@ assert.match(source, /EXECUTION SIMULATOR/, "automation must terminate in simula
 assert.match(source, /No exchange-account connectivity or real-money execution path is exposed\./, "financial boundary must be explicit");
 assert.match(source, /L1 ORDER BOOK/, "frontend must not claim unavailable L2 depth");
 assert.match(source, /ValidationPanel/, "validation lab must remain integrated");
-assert.match(runtime, /event\.key !== "Tab"/, "validation modal must trap keyboard focus");
-assert.match(runtime, /event\.key === "Escape"/, "validation modal must support Escape");
-assert.match(runtime, /document\.body\.style\.overflow = "hidden"/, "validation modal must lock background scrolling");
+assert.match(source, /document\.body\.style\.overflow="hidden"/, "React must own modal scroll lock");
+assert.match(source, /e\.key==="Escape"/, "React must own Escape dismissal");
+assert.match(source, /opener\.current\?\.focus\(\)/, "React must restore focus to the modal opener");
+assert.match(runtime, /event\.key !== "Tab"/, "runtime must trap keyboard focus");
+assert.doesNotMatch(runtime, /document\.body\.style\.overflow = "hidden"/, "runtime must not duplicate modal scroll-lock ownership");
 assert.match(runtime, /IntersectionObserver/, "command navigation must track visible sections");
 assert.match(runtime, /aria-current/, "visible command section must be announced");
 assert.match(runtimeStyles, /aria-current="page"/, "active command section must have visible styling");
