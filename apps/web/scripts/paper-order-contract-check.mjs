@@ -9,6 +9,14 @@ assert.match(terminalRuntime, /import "\.\/paper-order-runtime"/, "terminal runt
 assert.match(runtime, /jsonRequest<RiskState>\("\/risk"\)/, "paper console must read the backend simulation gate");
 assert.match(runtime, /jsonRequest<RuntimeState>\("\/system\/status"\)/, "paper console must read the canonical execution runtime mode");
 assert.match(runtime, /jsonRequest<LiveBoundary>\("\/live\/status"\)/, "paper console must read the public-live financial boundary");
+assert.match(runtime, /LIVE_FRAME_TTL_MS = 7500/, "paper console must impose an explicit local quote freshness budget");
+assert.match(runtime, /function frameIsFresh\(/, "paper console must validate quote timestamps before mutation");
+assert.match(runtime, /liveBoundary\?\.running/, "paper console must require the public live monitor to be running");
+assert.match(runtime, /liveBoundary\.receiving_data/, "paper console must require the public live monitor to be receiving data");
+assert.match(runtime, /liveBoundary\.all_symbols_fresh \|\| liveBoundary\.fresh_symbols\?\.includes\(lastFrame\.symbol\)/, "paper console must require symbol freshness from authoritative live status");
+assert.match(runtime, /PUBLIC QUOTE STALE · no order was submitted/, "stale quote submission must fail closed before simulation");
+assert.match(runtime, /PUBLIC QUOTE BECAME STALE · simulation was not submitted/, "paper console must re-check freshness after analytics latency and before mutation");
+assert.match(runtime, /updateBookForSide\(\)/, "paper console must keep top-of-book size synchronized with the selected side");
 assert.match(runtime, /SIMULATION_MODES = new Set\(\["SIMULATION", "PAPER_TRADING"\]\)/, "paper console must permit mutation only in simulation execution modes");
 assert.match(runtime, /riskState\?\.simulation_allowed/, "paper console must obey backend simulation availability");
 assert.match(runtime, /liveBoundary\?\.financial_connectivity === false/, "paper console must require no financial connectivity");
@@ -34,4 +42,4 @@ assert.match(styles, /\.paperOrderConsole/, "paper order console must have dedic
 assert.match(styles, /@media\(max-width:620px\)/, "paper console must remain usable on narrow tablet/mobile layouts");
 assert.match(styles, /focus-visible/, "paper controls must retain visible keyboard focus");
 
-console.log("frontend paper-order authoritative-mode contracts: ok");
+console.log("frontend paper-order freshness and authoritative-mode contracts: ok");
