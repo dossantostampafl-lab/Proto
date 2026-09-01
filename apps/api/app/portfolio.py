@@ -101,7 +101,9 @@ class Position:
             ),
             "fees": _json_number(self.fees),
             "opened_at": self.opened_at.isoformat() if self.opened_at is not None else None,
-            "last_fill_at": self.last_fill_at.isoformat() if self.last_fill_at is not None else None,
+            "last_fill_at": (
+                self.last_fill_at.isoformat() if self.last_fill_at is not None else None
+            ),
             "position_age_seconds": _json_number(self.position_age_seconds(as_of=as_of)),
             "temporal_exposure_notional_seconds": _json_number(temporal_exposure),
         }
