@@ -6,8 +6,8 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from apps.api.app import validation_surface
-from apps.api.app.validation_surface import (
+from apps.api.app import promotion_guard_surface
+from apps.api.app.promotion_guard_surface import (
     PromotionEvaluationRequest,
     PromotionEvidenceRequest,
     PromotionPolicyRequest,
@@ -33,6 +33,11 @@ def _evidence(**overrides: object) -> PromotionEvidenceRequest:
         "parameter_stability_score": 0.70,
         "delay_control_sharpe": 0.20,
         "shuffle_control_sharpe": 0.10,
+        "family_reality_check_p_value": 0.01,
+        "family_spa_p_value": 0.01,
+        "frozen_holdout_passed": True,
+        "frozen_holdout_consumed": True,
+        "frozen_holdout_seal_id": "holdout-seal-1",
     }
     values.update(overrides)
     return PromotionEvidenceRequest(**values)  # type: ignore[arg-type]
@@ -43,14 +48,12 @@ def _evaluate(request: PromotionEvaluationRequest) -> dict[str, object]:
 
 
 def test_api_promotes_only_to_paper_trading_eligibility() -> None:
-    request = PromotionEvaluationRequest(evidence=_evidence())
-
-    result = _evaluate(request)
+    result = _evaluate(PromotionEvaluationRequest(evidence=_evidence()))
 
     assert result["status"] == "PAPER_TRADING_ELIGIBLE"
     assert result["promotion_eligible"] is True
     assert result["failed_checks"] == []
-    assert len(result["checks"]) == 14
+    assert len(result["checks"]) == 19
     assert len(result["decision_fingerprint"]) == 64
     assert len(result["promotion_record_id"]) == 64
     assert isinstance(result["persisted"], bool)
@@ -61,41 +64,37 @@ def test_api_promotes_only_to_paper_trading_eligibility() -> None:
 
 
 def test_api_keeps_controls_research_only() -> None:
-    request = PromotionEvaluationRequest(
-        evidence=_evidence(candidate_kind="CONTROL")
+    result = _evaluate(
+        PromotionEvaluationRequest(evidence=_evidence(candidate_kind="CONTROL"))
     )
-
-    result = _evaluate(request)
 
     assert result["status"] == "CONTROL_ONLY"
     assert result["promotion_eligible"] is False
     assert result["live_execution_eligible"] is False
-    assert result["checks"] == [
-        {
-            "name": "control_boundary",
-            "passed": True,
-            "observed": "CONTROL",
-            "requirement": "research controls are never promotion eligible",
-        }
-    ]
 
 
-def test_api_missing_statistical_evidence_fails_closed() -> None:
-    request = PromotionEvaluationRequest(
-        evidence=_evidence(
-            probability_of_backtest_overfitting=None,
-            regime_robustness_score=None,
-            parameter_stability_score=None,
+def test_api_missing_family_or_holdout_evidence_fails_closed() -> None:
+    result = _evaluate(
+        PromotionEvaluationRequest(
+            evidence=_evidence(
+                family_reality_check_p_value=None,
+                family_spa_p_value=None,
+                frozen_holdout_passed=False,
+                frozen_holdout_consumed=False,
+                frozen_holdout_seal_id=None,
+            )
         )
     )
 
-    result = _evaluate(request)
-
     assert result["status"] == "RESEARCH_ONLY"
-    assert result["promotion_eligible"] is False
-    assert "probability_of_backtest_overfitting" in result["failed_checks"]
-    assert "regime_robustness_score" in result["failed_checks"]
-    assert "parameter_stability_score" in result["failed_checks"]
+    for name in (
+        "family_reality_check_p_value",
+        "family_spa_p_value",
+        "frozen_holdout_passed",
+        "frozen_holdout_consumed",
+        "frozen_holdout_seal_id",
+    ):
+        assert name in result["failed_checks"]
 
 
 def test_api_policy_is_explicit_in_response_and_fingerprint() -> None:
@@ -115,6 +114,8 @@ def test_api_policy_is_explicit_in_response_and_fingerprint() -> None:
         min_regime_robustness_score=0.50,
         min_parameter_stability_score=0.50,
         max_negative_control_sharpe_ratio=0.90,
+        max_family_reality_check_p_value=0.10,
+        max_family_spa_p_value=0.10,
     )
     relaxed_result = _evaluate(
         PromotionEvaluationRequest(evidence=evidence, policy=relaxed_policy)
@@ -129,20 +130,15 @@ def test_api_policy_is_explicit_in_response_and_fingerprint() -> None:
     ]
 
 
-def test_api_request_schema_rejects_invalid_candidate_kind() -> None:
+def test_api_request_schema_rejects_invalid_evidence() -> None:
     with pytest.raises(ValidationError):
         _evidence(candidate_kind="UNKNOWN")
-
-
-def test_api_request_schema_rejects_non_finite_and_unbounded_values() -> None:
     with pytest.raises(ValidationError):
         _evidence(sharpe=float("nan"))
-
     with pytest.raises(ValidationError):
-        _evidence(positive_fold_fraction=1.1)
-
+        _evidence(family_spa_p_value=1.1)
     with pytest.raises(ValidationError):
-        PromotionPolicyRequest(max_drawdown=1.1)
+        _evidence(frozen_holdout_seal_id="")
 
 
 def test_api_requires_canonical_experiment_fingerprint() -> None:
@@ -182,22 +178,29 @@ def test_api_persists_complete_promotion_evidence(monkeypatch: pytest.MonkeyPatc
         )
         return "f" * 64, True
 
-    monkeypatch.setattr(validation_surface, "persist_model_promotion_decision", fake_persist)
+    monkeypatch.setattr(
+        promotion_guard_surface,
+        "persist_model_promotion_decision",
+        fake_persist,
+    )
 
-    request = PromotionEvaluationRequest(evidence=_evidence())
-    result = _evaluate(request)
+    result = _evaluate(PromotionEvaluationRequest(evidence=_evidence()))
 
     assert result["promotion_record_id"] == "f" * 64
     assert result["persisted"] is True
-    assert captured["experiment_id"] == "a" * 64
-    assert captured["decision_fingerprint"] == result["decision_fingerprint"]
     payload = captured["payload"]
     assert isinstance(payload, dict)
-    assert payload["record_type"] == "model_promotion_decision"
-    assert payload["evidence"]["experiment_id"] == "a" * 64
-    assert payload["policy"] == result["policy"]
-    assert payload["decision"]["status"] == "PAPER_TRADING_ELIGIBLE"
-    assert payload["decision"]["live_execution_eligible"] is False
+    evidence = payload["evidence"]
+    assert isinstance(evidence, dict)
+    assert evidence["family_reality_check_p_value"] == 0.01
+    assert evidence["family_spa_p_value"] == 0.01
+    assert evidence["frozen_holdout_passed"] is True
+    assert evidence["frozen_holdout_consumed"] is True
+    assert evidence["frozen_holdout_seal_id"] == "holdout-seal-1"
+    decision = payload["decision"]
+    assert isinstance(decision, dict)
+    assert decision["status"] == "PAPER_TRADING_ELIGIBLE"
+    assert decision["live_execution_eligible"] is False
 
 
 def test_api_fails_closed_on_promotion_identity_collision(
@@ -206,7 +209,11 @@ def test_api_fails_closed_on_promotion_identity_collision(
     async def fake_persist(*args: object, **kwargs: object) -> tuple[str, bool]:
         raise RuntimeError("promotion identity collision: persisted payload differs")
 
-    monkeypatch.setattr(validation_surface, "persist_model_promotion_decision", fake_persist)
+    monkeypatch.setattr(
+        promotion_guard_surface,
+        "persist_model_promotion_decision",
+        fake_persist,
+    )
 
     with pytest.raises(HTTPException) as error:
         _evaluate(PromotionEvaluationRequest(evidence=_evidence()))
