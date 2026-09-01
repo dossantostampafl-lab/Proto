@@ -22,18 +22,26 @@ def _paper_runtime() -> None:
     runtime.kill_switch = KillSwitchState.ARMED
 
 
-def _fresh_live(monkeypatch, symbol: str = "BTC") -> None:
-    monkeypatch.setattr(
-        module.live_monitor,
-        "status",
-        lambda: {
-            "running": True,
-            "receiving_data": True,
-            "fresh_symbols": [symbol],
-            "financial_connectivity": False,
-            "real_money_execution": False,
+def _fresh_status(symbol: str = "BTC") -> dict[str, object]:
+    return {
+        "running": True,
+        "receiving_data": True,
+        "source_message_fresh": True,
+        "feed_health": {"connected": True},
+        "symbol_health": {
+            symbol: {
+                "fresh": True,
+                "receipt_fresh": True,
+                "current_connection": True,
+            }
         },
-    )
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
+
+
+def _fresh_live(monkeypatch, symbol: str = "BTC") -> None:
+    monkeypatch.setattr(module.live_monitor, "status", lambda: _fresh_status(symbol))
 
 
 @pytest.mark.asyncio
@@ -63,17 +71,11 @@ async def test_autopilot_stale_live_data_blocks_submission(monkeypatch) -> None:
         quantity=0.001,
         max_spread_bps=20,
     )
-    monkeypatch.setattr(
-        module.live_monitor,
-        "status",
-        lambda: {
-            "running": True,
-            "receiving_data": True,
-            "fresh_symbols": [],
-            "financial_connectivity": False,
-            "real_money_execution": False,
-        },
-    )
+    stale = _fresh_status()
+    stale["symbol_health"] = {
+        "BTC": {"fresh": False, "receipt_fresh": False, "current_connection": True}
+    }
+    monkeypatch.setattr(module.live_monitor, "status", lambda: stale)
     monkeypatch.setattr(
         module.live_monitor,
         "snapshot",
@@ -91,6 +93,95 @@ async def test_autopilot_stale_live_data_blocks_submission(monkeypatch) -> None:
     assert state["last_reason"] == "WAITING_FOR_FRESH_LIVE_DATA"
     assert state["live_market_ready"] is False
     assert state["counters"]["submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_autopilot_source_and_generation_health_fail_closed(monkeypatch) -> None:
+    _paper_runtime()
+    service = PaperAutopilotService()
+    statuses: list[dict[str, object]] = []
+
+    disconnected = _fresh_status()
+    disconnected["feed_health"] = {"connected": False}
+    statuses.append(disconnected)
+
+    stale_messages = _fresh_status()
+    stale_messages["source_message_fresh"] = False
+    statuses.append(stale_messages)
+
+    stale_receipt = _fresh_status()
+    stale_receipt["symbol_health"] = {
+        "BTC": {"fresh": True, "receipt_fresh": False, "current_connection": True}
+    }
+    statuses.append(stale_receipt)
+
+    wrong_generation = _fresh_status()
+    wrong_generation["symbol_health"] = {
+        "BTC": {"fresh": True, "receipt_fresh": True, "current_connection": False}
+    }
+    statuses.append(wrong_generation)
+
+    for live_status in statuses:
+        monkeypatch.setattr(
+            module.live_monitor,
+            "status",
+            lambda live_status=live_status: live_status,
+        )
+        await service._cycle()  # noqa: SLF001
+        state = service.status()
+        assert state["last_reason"] == "WAITING_FOR_FRESH_LIVE_DATA"
+        assert state["live_market_ready"] is False
+        assert state["counters"]["submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_autopilot_rechecks_live_health_before_submission(monkeypatch) -> None:
+    _paper_runtime()
+    service = PaperAutopilotService()
+    service._config = PaperAutopilotConfig(  # noqa: SLF001
+        symbol="BTC",
+        imbalance_trigger=0.6,
+        cooldown_seconds=5,
+        quantity=0.001,
+        max_spread_bps=20,
+    )
+    now = datetime.now(UTC).isoformat()
+    frame = {
+        "symbol": "BTC",
+        "bid": 100.0,
+        "ask": 100.01,
+        "bid_size": 2.0,
+        "ask_size": 2.0,
+        "timestamp": now,
+        "received_at": now,
+    }
+    analytics = {"current_imbalance": 0.8, "realized_volatility": 0.02}
+    health_checks = 0
+
+    def status():
+        nonlocal health_checks
+        health_checks += 1
+        if health_checks == 1:
+            return _fresh_status()
+        degraded = _fresh_status()
+        degraded["source_message_fresh"] = False
+        return degraded
+
+    monkeypatch.setattr(module.live_monitor, "status", status)
+    monkeypatch.setattr(module.live_monitor, "snapshot", lambda symbol: frame)
+    monkeypatch.setattr(module.live_monitor, "analytics", lambda symbol: analytics)
+
+    async def fail_if_called(request):
+        raise AssertionError("simulator must not be called after live health degrades")
+
+    monkeypatch.setattr(module, "simulate", fail_if_called)
+
+    await service._cycle()  # noqa: SLF001
+
+    state = service.status()
+    assert state["last_reason"] == "LIVE_DATA_BECAME_STALE"
+    assert state["counters"]["submissions"] == 0
+    assert health_checks >= 2
 
 
 @pytest.mark.asyncio

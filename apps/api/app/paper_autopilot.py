@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from math import isfinite
@@ -134,12 +134,23 @@ class PaperAutopilotService:
 
     def _live_market_ready(self, symbol: str) -> bool:
         status = live_monitor.status()
-        fresh_symbols = status.get("fresh_symbols")
+        symbol_health = status.get("symbol_health")
+        health = symbol_health.get(symbol) if isinstance(symbol_health, Mapping) else None
+        source_health = status.get("feed_health")
+        source_connected = (
+            source_health.get("connected")
+            if isinstance(source_health, Mapping)
+            else None
+        )
         return bool(
             status.get("running")
             and status.get("receiving_data")
-            and isinstance(fresh_symbols, list)
-            and symbol in fresh_symbols
+            and status.get("source_message_fresh") is True
+            and source_connected is True
+            and isinstance(health, Mapping)
+            and health.get("fresh") is True
+            and health.get("receipt_fresh") is True
+            and health.get("current_connection") is True
             and status.get("financial_connectivity") is False
             and status.get("real_money_execution") is False
         )
@@ -233,6 +244,13 @@ class PaperAutopilotService:
         top_size = ask_size if side == "BUY" else bid_size
         if config.quantity > top_size:
             self._last_reason = "LIQUIDITY_GUARD"
+            return
+
+        # Re-check the authoritative public-feed health immediately before the
+        # simulator call so a disconnect/staleness transition during decision
+        # work fails closed instead of submitting from a superseded snapshot.
+        if not self._live_market_ready(config.symbol):
+            self._last_reason = "LIVE_DATA_BECAME_STALE"
             return
 
         market_id = f"autopilot-{config.symbol.lower()}-usd"
