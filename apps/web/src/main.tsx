@@ -1,785 +1,267 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-type Health = {
-  status: string;
-  mode: string;
-  version: string;
-  persistence_enabled: boolean;
-};
-
-type Position = {
-  asset: string;
-  quantity: number;
-  average_price: number;
-  mark_price: number | null;
-  market_value: number | null;
-  realized_pnl: number;
-  unrealized_pnl: number | null;
-  fees: number;
-  opened_at: string | null;
-  last_fill_at: string | null;
-  position_age_seconds: number;
-  temporal_exposure_notional_seconds: number;
-};
-
-type ExecutionCosts = {
-  fees: number;
-  slippage: number;
-  total: number;
-};
-
-type Portfolio = {
-  mode: string;
-  as_of: string | null;
-  positions: Position[];
-  open_position_count: number;
-  gross_exposure: number;
-  net_exposure: number;
-  max_asset_concentration: number;
-  exposure_by_asset: Record<string, number>;
-  temporal_exposure_notional_seconds: number;
-  max_position_age_seconds: number;
-  total_realized_pnl: number;
-  total_unrealized_pnl: number;
-  total_pnl_after_fees: number;
-  total_fees: number;
-  realized_pnl_high_watermark: number;
-  realized_drawdown: number;
-  turnover_notional: number;
-  execution_costs: ExecutionCosts;
-};
-
-type PnLAttribution = {
-  mode: string;
-  source: string;
-  policy: string;
-  known_components: string[];
-  unresolved_components_are_residual: boolean;
-  real_money_execution: boolean;
-  model_edge: number;
-  market_movement: number;
-  execution: number;
-  spread_capture: number;
-  slippage: number;
-  fees: number;
-  hedging: number;
-  timing: number;
-  residual: number;
-  attributed_total: number;
-  observed_total_pnl: number;
-};
-
-type FillEntry = {
-  order_id: string;
-  market_id: string;
-  asset: string;
-  side: string;
-  filled_quantity: number;
-  fill_price: number;
-  fee: number;
-  slippage_bps: number;
-  filled_at: string;
-};
-
-type FillJournal = {
-  mode: string;
-  count: number;
-  fills: FillEntry[];
-};
-
-type ReplayStatus = {
-  mode: string;
-  active: boolean;
-  paused: boolean;
-  speed: string;
-  cursor: number;
-  total_frames: number;
-  finished: boolean;
-  last_timestamp: string | null;
-};
-
-type ReplaySpeed = "1x" | "5x" | "10x" | "50x" | "100x" | "MAX";
-
-type MarketDataFrame = {
+type SymbolName = "BTC" | "ETH" | "SOL";
+type Health = { status: string; mode: string; version: string };
+type LiveFrame = {
   timestamp: string;
-  market_id: string;
-  symbol: string;
+  received_at?: string | null;
+  source_to_server_delta_ms?: number | null;
+  symbol: SymbolName;
   bid: number;
   ask: number;
   mid: number;
+  last?: number | null;
   spread: number;
-  market_probability: number;
-  volatility: number;
-};
-
-type OrderBookFrame = {
-  timestamp: string;
-  symbol: string;
-  best_bid: number;
-  best_ask: number;
+  volume_24h?: number | null;
   bid_size: number;
   ask_size: number;
-  mid_price: number;
-  spread: number;
-  imbalance: number;
+  sequence: number;
 };
-
+type LiveMarketResponse = { count: number; markets: LiveFrame[] };
+type LiveAnalytics = {
+  symbol: SymbolName;
+  sample_count: number;
+  first_mid: number;
+  last_mid: number;
+  simple_return: number;
+  log_return: number;
+  realized_volatility: number;
+  average_spread_bps: number;
+  current_spread_bps: number;
+  current_imbalance: number;
+  current_microprice: number;
+  observation_span_seconds: number;
+};
+type Portfolio = {
+  gross_exposure: number;
+  net_exposure: number;
+  total_pnl_after_fees: number;
+  realized_drawdown: number;
+  max_asset_concentration: number;
+  open_position_count: number;
+};
+type PnLAttribution = { fees: number; slippage: number; residual: number; observed_total_pnl: number };
 type LifecycleRow = {
   market_id: string;
   symbol: string;
-  source: string;
-  lifecycle_state: string;
-  resolution_state: string;
   market_probability: number;
   model_probability: number;
   confidence: number;
   uncertainty: number;
   net_edge: number;
   edge_decision: string;
-  liquidity_depth: number;
-  imbalance: number;
   expiry_horizon_minutes: number;
-  synthetic_expires_at: string;
-  real_money_execution: boolean;
 };
-
-type LifecycleResponse = {
-  source: string;
-  count: number;
-  markets: LifecycleRow[];
+type LifecycleResponse = { markets: LifecycleRow[] };
+type HawkesState = {
+  current_intensity: number;
+  baseline_intensity: number;
+  excitation: number;
+  branching_ratio: number;
+  event_probability: number;
 };
-
 type SyntheticGreeks = {
-  market_id: string;
-  symbol: string;
-  source: string;
   market_probability_delta: number;
   volatility_vega: number;
   imbalance_kappa: number;
   time_theta: number;
-  model_version: string;
-  feature_version: string;
 };
+type StreamEnvelope<T> = { type: string; data?: T };
 
-type HawkesState = {
-  symbol: string;
-  source: string;
-  event_count: number;
-  baseline_intensity: number;
-  current_intensity: number;
-  excitation: number;
-  decay: number;
-  branching_ratio: number;
-  event_probability: number;
-};
-
-type ExpiryPoint = {
-  market_id: string;
-  symbol: string;
-  expiry_horizon_minutes: number;
-  model_probability: number;
-  net_edge: number;
-  absolute_net_edge: number;
-};
-
-type ExpiryMap = {
-  source: string;
-  axes: {
-    radius: string;
-    height: string;
-    intensity: string;
-  };
-  points: ExpiryPoint[];
-};
-
-type StreamEnvelope<T> = {
-  type: string;
-  data?: T;
-};
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin;
 const WS_BASE = API_BASE.replace(/^http/, "ws");
-const REPLAY_SPEEDS: ReplaySpeed[] = ["1x", "5x", "10x", "50x", "100x", "MAX"];
-const STREAM_CHANNEL_COUNT = 5;
+const SYMBOLS: SymbolName[] = ["BTC", "ETH", "SOL"];
+const MAX_POINTS = 90;
 
-function formatNumber(value: number, digits = 2) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: digits,
-    minimumFractionDigits: digits,
-  }).format(value);
+function n(value: number | null | undefined, digits = 2) {
+  if (value == null || Number.isNaN(value)) return "—";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(value);
 }
-
-function formatPercent(value: number, digits = 2) {
-  return `${formatNumber(value * 100, digits)}%`;
+function pct(value: number | null | undefined, digits = 2) {
+  return value == null ? "—" : `${n(value * 100, digits)}%`;
+}
+function usd(value: number | null | undefined) {
+  return value == null ? "—" : `$${n(value, value >= 1000 ? 2 : 4)}`;
+}
+function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return <div className="chartEmpty">collecting live ticks…</div>;
+  const w = 680, h = 190;
+  const min = Math.min(...values), max = Math.max(...values), span = Math.max(max - min, 1e-9);
+  const points = values.map((v, i) => `${(i / (values.length - 1)) * w},${h - ((v - min) / span) * h}`).join(" ");
+  return <svg className="spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none"><polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" /></svg>;
+}
+function Meter({ value, min = -1, max = 1 }: { value: number; min?: number; max?: number }) {
+  const p = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+  return <div className="meter"><div style={{ width: `${p}%` }} /></div>;
 }
 
 function App() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [selected, setSelected] = useState<SymbolName>("BTC");
+  const [frames, setFrames] = useState<Record<SymbolName, LiveFrame | null>>({ BTC: null, ETH: null, SOL: null });
+  const [analytics, setAnalytics] = useState<Record<SymbolName, LiveAnalytics | null>>({ BTC: null, ETH: null, SOL: null });
+  const [history, setHistory] = useState<Record<SymbolName, number[]>>({ BTC: [], ETH: [], SOL: [] });
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
-  const [pnlAttribution, setPnlAttribution] = useState<PnLAttribution | null>(null);
-  const [journal, setJournal] = useState<FillJournal | null>(null);
-  const [replay, setReplay] = useState<ReplayStatus | null>(null);
-  const [marketData, setMarketData] = useState<MarketDataFrame | null>(null);
-  const [orderBook, setOrderBook] = useState<OrderBookFrame | null>(null);
+  const [pnl, setPnl] = useState<PnLAttribution | null>(null);
   const [lifecycle, setLifecycle] = useState<LifecycleResponse | null>(null);
-  const [greeks, setGreeks] = useState<SyntheticGreeks | null>(null);
   const [hawkes, setHawkes] = useState<HawkesState | null>(null);
-  const [expiryMap, setExpiryMap] = useState<ExpiryMap | null>(null);
-  const [streamOnline, setStreamOnline] = useState(false);
-  const [controlBusy, setControlBusy] = useState(false);
-  const [seekCursor, setSeekCursor] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [greeks, setGreeks] = useState<SyntheticGreeks | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<string>("—");
+  const sockets = useRef<WebSocket[]>([]);
+
+  const active = frames[selected];
+  const activeAnalytics = analytics[selected];
+  const activeLifecycle = lifecycle?.markets.find((row) => row.symbol === selected) ?? lifecycle?.markets[0] ?? null;
+
+  function ingest(frame: LiveFrame) {
+    setFrames((prev) => ({ ...prev, [frame.symbol]: frame }));
+    setHistory((prev) => ({ ...prev, [frame.symbol]: [...prev[frame.symbol], frame.mid].slice(-MAX_POINTS) }));
+    setLastUpdate(new Date().toLocaleTimeString());
+  }
 
   useEffect(() => {
     let cancelled = false;
-    let refreshTimer: number | undefined;
-    let reconnectTimer: number | undefined;
-    let activeSymbol: string | null = null;
-    const sockets = new Map<string, WebSocket>();
-    const openChannels = new Set<string>();
-
-    function syncStreamOnline() {
-      if (!cancelled) setStreamOnline(openChannels.size === STREAM_CHANNEL_COUNT);
-    }
-
-    async function fetchOptional<T>(path: string): Promise<T | null> {
-      try {
-        const response = await fetch(`${API_BASE}${path}`);
-        if (!response.ok) return null;
-        return (await response.json()) as T;
-      } catch {
-        return null;
-      }
-    }
-
     async function refresh() {
       try {
-        const responses = await Promise.all([
+        const [healthRes, liveRes, portfolioRes, pnlRes, lifecycleRes] = await Promise.all([
           fetch(`${API_BASE}/health`),
+          fetch(`${API_BASE}/live/market-data`),
           fetch(`${API_BASE}/v1/portfolio`),
-          fetch(`${API_BASE}/v1/fills?limit=8`),
-          fetch(`${API_BASE}/replay/status`),
           fetch(`${API_BASE}/pnl/attribution`),
+          fetch(`${API_BASE}/market-lifecycle`),
         ]);
-
-        if (responses.some((response) => !response.ok)) {
-          throw new Error("Core API returned a non-success response");
+        if (healthRes.ok) setHealth(await healthRes.json());
+        if (liveRes.ok) {
+          const body = (await liveRes.json()) as LiveMarketResponse;
+          body.markets.forEach(ingest);
         }
-
-        const [healthBody, portfolioBody, fillsBody, replayBody, attributionBody] =
-          await Promise.all([
-            responses[0].json() as Promise<Health>,
-            responses[1].json() as Promise<Portfolio>,
-            responses[2].json() as Promise<FillJournal>,
-            responses[3].json() as Promise<ReplayStatus>,
-            responses[4].json() as Promise<PnLAttribution>,
-          ]);
-
-        const lifecycleBody = await fetchOptional<LifecycleResponse>("/market-lifecycle");
-        const analyticsTarget =
-          lifecycleBody?.markets.find((row) => row.symbol === activeSymbol) ??
-          lifecycleBody?.markets[0] ??
-          null;
-        const [greeksBody, hawkesBody, expiryBody] = await Promise.all([
-          analyticsTarget
-            ? fetchOptional<SyntheticGreeks>(
-                `/analytics/greeks/${encodeURIComponent(analyticsTarget.market_id)}`,
-              )
-            : Promise.resolve(null),
-          analyticsTarget
-            ? fetchOptional<HawkesState>(`/hawkes/${encodeURIComponent(analyticsTarget.symbol)}`)
-            : Promise.resolve(null),
-          fetchOptional<ExpiryMap>("/analytics/expiry-map"),
-        ]);
-
-        if (!cancelled) {
-          setHealth(healthBody);
-          setPortfolio(portfolioBody);
-          setPnlAttribution(attributionBody);
-          setJournal(fillsBody);
-          setReplay(replayBody);
-          setSeekCursor(replayBody.cursor);
-          setLifecycle(lifecycleBody);
-          setGreeks(greeksBody);
-          setHawkes(hawkesBody);
-          setExpiryMap(expiryBody);
-          setError(null);
-        }
-      } catch (requestError) {
-        if (!cancelled) {
-          const message = requestError instanceof Error ? requestError.message : "Unknown API error";
-          setError(message);
-        }
-      }
+        if (portfolioRes.ok) setPortfolio(await portfolioRes.json());
+        if (pnlRes.ok) setPnl(await pnlRes.json());
+        if (lifecycleRes.ok) setLifecycle(await lifecycleRes.json());
+        const analyticsEntries = await Promise.all(SYMBOLS.map(async (symbol) => {
+          const r = await fetch(`${API_BASE}/live/analytics/${symbol}`);
+          return [symbol, r.ok ? await r.json() : null] as const;
+        }));
+        if (!cancelled) setAnalytics(Object.fromEntries(analyticsEntries) as Record<SymbolName, LiveAnalytics | null>);
+      } catch { /* WS remains primary once connected */ }
     }
-
-    function openSocket(channel: string, onMessage: (message: StreamEnvelope<unknown>) => void) {
-      const existing = sockets.get(channel);
-      if (
-        existing &&
-        (existing.readyState === WebSocket.CONNECTING || existing.readyState === WebSocket.OPEN)
-      ) {
-        return;
-      }
-
-      const socket = new WebSocket(`${WS_BASE}/ws/${channel}`);
-      sockets.set(channel, socket);
-      socket.onopen = () => {
-        if (sockets.get(channel) !== socket) return;
-        openChannels.add(channel);
-        syncStreamOnline();
-      };
-      socket.onmessage = (event) => {
-        try {
-          onMessage(JSON.parse(event.data as string) as StreamEnvelope<unknown>);
-        } catch {
-          // Periodic REST reconciliation remains authoritative after malformed transport frames.
-        }
-      };
-      socket.onerror = () => {
-        // Force a close so the channel-specific reconnect loop can replace this socket.
-        openChannels.delete(channel);
-        syncStreamOnline();
-        socket.close();
-      };
-      socket.onclose = () => {
-        if (sockets.get(channel) === socket) sockets.delete(channel);
-        openChannels.delete(channel);
-        syncStreamOnline();
-      };
-    }
-
-    function connectStreams() {
-      openSocket("portfolio", (message) => {
-        if (message.type === "portfolio" && message.data) {
-          setPortfolio(message.data as Portfolio);
-        }
-      });
-      openSocket("fills", (message) => {
-        if (message.type === "fill") void refresh();
-      });
-      openSocket("market-data", (message) => {
-        if (message.type === "market-data" && message.data) {
-          const frame = message.data as MarketDataFrame;
-          activeSymbol = frame.symbol;
-          setMarketData(frame);
-        }
-      });
-      openSocket("orderbook", (message) => {
-        if (message.type === "orderbook" && message.data) {
-          setOrderBook(message.data as OrderBookFrame);
-        }
-      });
-      openSocket("analytics", (message) => {
-        if (message.type === "runtime") void refresh();
-        if (message.type === "replay" && message.data) {
-          const status = {
-            mode: "HISTORICAL_REPLAY",
-            ...(message.data as Omit<ReplayStatus, "mode">),
-          };
-          setReplay(status);
-          setSeekCursor(status.cursor);
-        }
-      });
-    }
-
     void refresh();
-    connectStreams();
-    refreshTimer = window.setInterval(() => void refresh(), 30_000);
-    reconnectTimer = window.setInterval(() => {
-      if (!cancelled) connectStreams();
-    }, 5_000);
+    const timer = window.setInterval(() => void refresh(), 4000);
 
+    const channels = ["market-data", "orderbook", "analytics"];
+    const opened = new Set<string>();
+    sockets.current = channels.map((channel) => {
+      const ws = new WebSocket(`${WS_BASE}/ws/${channel}`);
+      ws.onopen = () => { opened.add(channel); setStreaming(opened.has("market-data")); };
+      ws.onclose = () => { opened.delete(channel); setStreaming(false); };
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data as string) as StreamEnvelope<unknown>;
+          if (channel === "market-data" && message.type === "market-data" && message.data) ingest(message.data as LiveFrame);
+        } catch { /* ignore malformed frames */ }
+      };
+      return ws;
+    });
     return () => {
       cancelled = true;
-      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
-      if (reconnectTimer !== undefined) window.clearInterval(reconnectTimer);
-      for (const socket of sockets.values()) socket.close();
-      sockets.clear();
-      openChannels.clear();
+      window.clearInterval(timer);
+      sockets.current.forEach((ws) => ws.close());
     };
   }, []);
 
-  async function replayControl(
-    action: "pause" | "resume" | "step" | "restart" | "reset" | "seek" | "speed",
-    payload?: object,
-  ) {
-    setControlBusy(true);
-    try {
-      const response = await fetch(`${API_BASE}/replay/${action}`, {
-        method: "POST",
-        headers: payload ? { "Content-Type": "application/json" } : undefined,
-        body: payload ? JSON.stringify(payload) : undefined,
-      });
-      const body = (await response.json()) as ReplayStatus & { detail?: string };
-      if (!response.ok) {
-        throw new Error(body.detail ?? `Replay ${action} failed`);
+  useEffect(() => {
+    if (!activeLifecycle) { setHawkes(null); setGreeks(null); return; }
+    let cancelled = false;
+    async function loadResearch() {
+      const [h, g] = await Promise.all([
+        fetch(`${API_BASE}/hawkes/${encodeURIComponent(selected)}`),
+        fetch(`${API_BASE}/analytics/greeks/${encodeURIComponent(activeLifecycle!.market_id)}`),
+      ]);
+      if (!cancelled) {
+        setHawkes(h.ok ? await h.json() : null);
+        setGreeks(g.ok ? await g.json() : null);
       }
-      setReplay(body);
-      setSeekCursor(body.cursor);
-      if (action === "step") {
-        const stepBody = body as ReplayStatus & { frame?: MarketDataFrame | null };
-        if (stepBody.frame) setMarketData(stepBody.frame);
-      }
-      setError(null);
-    } catch (controlError) {
-      setError(controlError instanceof Error ? controlError.message : "Replay control failed");
-    } finally {
-      setControlBusy(false);
     }
-  }
+    void loadResearch();
+    return () => { cancelled = true; };
+  }, [selected, activeLifecycle?.market_id]);
 
-  const metrics = [
-    {
-      label: "Mode",
-      value: health?.mode ?? "WAITING",
-      note: "Real execution disabled",
-    },
-    {
-      label: "API",
-      value: health?.status === "ok" ? "ONLINE" : "CONNECTING",
-      note: health ? `Version ${health.version}` : API_BASE,
-    },
-    {
-      label: "Stream",
-      value: streamOnline ? "STREAMING" : "RECONCILING",
-      note: streamOnline ? "All WebSocket channels online" : "REST fallback / channel recovery active",
-    },
-    {
-      label: "Replay",
-      value: replay?.active ? (replay.paused ? "PAUSED" : "RUNNING") : "IDLE",
-      note: replay?.active
-        ? `${replay.cursor}/${replay.total_frames} @ ${replay.speed}`
-        : "No replay session loaded",
-    },
-  ];
+  const change = useMemo(() => {
+    const values = history[selected];
+    return values.length > 1 ? values[values.length - 1] / values[0] - 1 : 0;
+  }, [history, selected]);
 
-  return (
-    <main className="shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">PROTO / PREDICTION MARKET QUANT ENGINE</p>
-          <h1>Research. Simulate. Measure edge.</h1>
-          <p className="subtitle">
-            Quantitative workspace for crypto and binary prediction-market research. The terminal
-            is intentionally restricted to simulation and paper-trading workflows.
-          </p>
-        </div>
-        <span className={error ? "status statusError" : "status"}>
-          {error ? "API OFFLINE" : health ? "SYSTEM ONLINE" : "CONNECTING"}
-        </span>
-      </header>
+  return <main className="terminal">
+    <header className="topbar">
+      <div><div className="brand">PROTO <span>QUANT ENGINE</span></div><div className="mode">PUBLIC READ-ONLY MARKET INTELLIGENCE · PAPER / REPLAY RESEARCH</div></div>
+      <div className="topStatus"><span className={streaming ? "dot live" : "dot"} />{streaming ? "STREAMING" : "RECONCILING"}<b>{lastUpdate}</b></div>
+    </header>
 
-      <section className="grid">
-        {metrics.map((metric) => (
-          <article className="card" key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{metric.value}</strong>
-            <small>{metric.note}</small>
-          </article>
-        ))}
-      </section>
+    <section className="ticker">
+      {SYMBOLS.map((symbol) => {
+        const f = frames[symbol], a = analytics[symbol];
+        return <button key={symbol} className={selected === symbol ? "tickerItem active" : "tickerItem"} onClick={() => setSelected(symbol)}>
+          <span>{symbol}-USD</span><strong>{f ? usd(f.mid) : "—"}</strong><em className={(a?.simple_return ?? 0) >= 0 ? "positive" : "negative"}>{a ? pct(a.simple_return) : "—"}</em>
+        </button>;
+      })}
+      <div className="tickerMeta">API {health?.status === "ok" ? "ONLINE" : "…"}<br/><small>{health?.version ?? ""}</small></div>
+    </section>
 
-      <section className="panel replayPanel">
-        <div>
-          <p className="eyebrow">HISTORICAL REPLAY</p>
-          <h2>Deterministic session control</h2>
-          <p className="panelNote">
-            Controls become active after a replay dataset is loaded through the backend.
-          </p>
-        </div>
-        <div className="replayControls" aria-label="Replay controls">
-          <label className="replayField">
-            <span>Speed</span>
-            <select
-              aria-label="Replay speed"
-              disabled={!replay?.active || controlBusy}
-              value={(replay?.speed ?? "1x") as ReplaySpeed}
-              onChange={(event) =>
-                void replayControl("speed", { speed: event.target.value as ReplaySpeed })
-              }
-            >
-              {REPLAY_SPEEDS.map((speed) => <option key={speed}>{speed}</option>)}
-            </select>
-          </label>
-          <label className="replayField">
-            <span>Cursor</span>
-            <input
-              aria-label="Replay cursor"
-              disabled={!replay?.active || controlBusy}
-              max={replay?.total_frames ?? 0}
-              min={0}
-              type="number"
-              value={seekCursor}
-              onChange={(event) => setSeekCursor(Number(event.target.value))}
-            />
-          </label>
-          <button
-            disabled={
-              !replay?.active || controlBusy || seekCursor < 0 || seekCursor > replay.total_frames
-            }
-            onClick={() => void replayControl("seek", { cursor: seekCursor })}
-          >
-            Seek
-          </button>
-          <button
-            disabled={!replay?.active || replay.paused || controlBusy}
-            onClick={() => void replayControl("pause")}
-          >
-            Pause
-          </button>
-          <button
-            disabled={!replay?.active || !replay.paused || replay.finished || controlBusy}
-            onClick={() => void replayControl("resume")}
-          >
-            Resume
-          </button>
-          <button
-            disabled={!replay?.active || replay.finished || controlBusy}
-            onClick={() => void replayControl("step")}
-          >
-            Step
-          </button>
-          <button
-            disabled={!replay?.active || controlBusy}
-            onClick={() => void replayControl("restart")}
-          >
-            Restart
-          </button>
-          <button
-            disabled={!replay?.active || controlBusy}
-            onClick={() => void replayControl("reset")}
-          >
-            Reset
-          </button>
-        </div>
-      </section>
+    <section className="dashboardGrid">
+      <article className="panel heroMarket">
+        <div className="panelHead"><span>01 / LIVE MARKET</span><b>{selected}-USD</b></div>
+        <div className="marketHeadline"><div><small>MID PRICE</small><h1>{active ? usd(active.mid) : "—"}</h1><div className={change >= 0 ? "positive" : "negative"}>{pct(change)} session</div></div><div className="quote"><span>BID<b>{active ? usd(active.bid) : "—"}</b></span><span>ASK<b>{active ? usd(active.ask) : "—"}</b></span><span>SPREAD<b>{activeAnalytics ? `${n(activeAnalytics.current_spread_bps, 3)} bp` : "—"}</b></span></div></div>
+        <Sparkline values={history[selected]} />
+        <div className="chartFooter"><span>{activeAnalytics?.sample_count ?? 0} ticks</span><span>{activeAnalytics ? `${n(activeAnalytics.observation_span_seconds, 0)}s window` : "—"}</span><span>latency {active?.source_to_server_delta_ms != null ? `${n(active.source_to_server_delta_ms, 1)}ms` : "—"}</span></div>
+      </article>
 
-      <section className="dataGrid marketGrid">
-        <article className="dataPanel">
-          <div className="panelTitle">
-            <p className="eyebrow">MODEL FEED / MARKET DATA</p>
-            <span>{marketData?.symbol ?? "WAITING"}</span>
-          </div>
-          <div className="quoteGrid">
-            <span>Bid <b>{marketData ? formatNumber(marketData.bid) : "—"}</b></span>
-            <span>Ask <b>{marketData ? formatNumber(marketData.ask) : "—"}</b></span>
-            <span>Mid <b>{marketData ? formatNumber(marketData.mid) : "—"}</b></span>
-            <span>Spread <b>{marketData ? formatNumber(marketData.spread, 4) : "—"}</b></span>
-            <span>Market P <b>{marketData ? formatPercent(marketData.market_probability) : "—"}</b></span>
-            <span>Vol <b>{marketData ? formatNumber(marketData.volatility, 4) : "—"}</b></span>
-          </div>
-        </article>
+      <article className="panel microstructure">
+        <div className="panelHead"><span>02 / MICROSTRUCTURE</span><b>L1</b></div>
+        <div className="metricLarge"><small>ORDER IMBALANCE</small><strong>{activeAnalytics ? n(activeAnalytics.current_imbalance, 4) : "—"}</strong></div>
+        <Meter value={activeAnalytics?.current_imbalance ?? 0} />
+        <div className="twoCol"><span>Bid size<b>{active ? n(active.bid_size, 5) : "—"}</b></span><span>Ask size<b>{active ? n(active.ask_size, 5) : "—"}</b></span><span>Microprice<b>{activeAnalytics ? usd(activeAnalytics.current_microprice) : "—"}</b></span><span>Volume 24h<b>{active?.volume_24h != null ? n(active.volume_24h, 2) : "—"}</b></span></div>
+        <div className="depthViz"><div className="bidDepth" style={{flex: Math.max(active?.bid_size ?? 0, .001)}}/><div className="askDepth" style={{flex: Math.max(active?.ask_size ?? 0, .001)}}/></div>
+      </article>
 
-        <article className="dataPanel">
-          <div className="panelTitle">
-            <p className="eyebrow">ORDER BOOK L1</p>
-            <span>{orderBook?.symbol ?? "WAITING"}</span>
-          </div>
-          <div className="quoteGrid">
-            <span>Bid size <b>{orderBook ? formatNumber(orderBook.bid_size, 4) : "—"}</b></span>
-            <span>Ask size <b>{orderBook ? formatNumber(orderBook.ask_size, 4) : "—"}</b></span>
-            <span>Best bid <b>{orderBook ? formatNumber(orderBook.best_bid) : "—"}</b></span>
-            <span>Best ask <b>{orderBook ? formatNumber(orderBook.best_ask) : "—"}</b></span>
-            <span>Imbalance <b>{orderBook ? formatNumber(orderBook.imbalance, 4) : "—"}</b></span>
-            <span>Spread <b>{orderBook ? formatNumber(orderBook.spread, 4) : "—"}</b></span>
-          </div>
-        </article>
-      </section>
+      <article className="panel modelPanel">
+        <div className="panelHead"><span>03 / PROBABILITY & EDGE</span><b>{activeLifecycle ? activeLifecycle.edge_decision : "RESEARCH"}</b></div>
+        <div className="probabilityRing"><div><strong>{activeLifecycle ? pct(activeLifecycle.model_probability, 1) : "—"}</strong><small>MODEL P</small></div></div>
+        <div className="twoCol"><span>Market P<b>{activeLifecycle ? pct(activeLifecycle.market_probability, 1) : "—"}</b></span><span>Net edge<b className={(activeLifecycle?.net_edge ?? 0) >= 0 ? "positive" : "negative"}>{activeLifecycle ? pct(activeLifecycle.net_edge, 2) : "—"}</b></span><span>Confidence<b>{activeLifecycle ? pct(activeLifecycle.confidence, 1) : "—"}</b></span><span>Uncertainty<b>{activeLifecycle ? pct(activeLifecycle.uncertainty, 1) : "—"}</b></span></div>
+      </article>
 
-      <section className="dataGrid">
-        <article className="dataPanel">
-          <div className="panelTitle">
-            <p className="eyebrow">MARKET LIFECYCLE / RESOLUTION GRID</p>
-            <span>{lifecycle?.source ?? "WAITING"}</span>
-          </div>
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Market</th>
-                  <th>State</th>
-                  <th>Resolution</th>
-                  <th>Market P</th>
-                  <th>Model P</th>
-                  <th>Net edge</th>
-                  <th>Expiry</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(lifecycle?.markets ?? []).map((row) => (
-                  <tr key={row.market_id}>
-                    <td>{row.symbol}</td>
-                    <td>{row.lifecycle_state}</td>
-                    <td>{row.resolution_state}</td>
-                    <td>{formatPercent(row.market_probability)}</td>
-                    <td>{formatPercent(row.model_probability)}</td>
-                    <td>{formatPercent(row.net_edge)}</td>
-                    <td>{row.expiry_horizon_minutes}m</td>
-                  </tr>
-                ))}
-                {(lifecycle?.markets.length ?? 0) === 0 && (
-                  <tr><td colSpan={7} className="empty">Waiting for lifecycle analytics.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
+      <article className="panel volatility">
+        <div className="panelHead"><span>04 / VOLATILITY</span><b>REALIZED</b></div>
+        <div className="metricLarge"><small>σ REALIZED</small><strong>{activeAnalytics ? pct(activeAnalytics.realized_volatility, 3) : "—"}</strong></div>
+        <div className="twoCol"><span>Return<b className={(activeAnalytics?.simple_return ?? 0) >= 0 ? "positive" : "negative"}>{activeAnalytics ? pct(activeAnalytics.simple_return, 3) : "—"}</b></span><span>Avg spread<b>{activeAnalytics ? `${n(activeAnalytics.average_spread_bps, 3)} bp` : "—"}</b></span><span>Log return<b>{activeAnalytics ? n(activeAnalytics.log_return, 6) : "—"}</b></span><span>Sequence<b>{active?.sequence ?? "—"}</b></span></div>
+      </article>
 
-        <article className="dataPanel">
-          <div className="panelTitle">
-            <p className="eyebrow">SYNTHETIC GREEKS FIELD / {greeks?.symbol ?? "—"}</p>
-            <span>{greeks?.source ?? "WAITING"}</span>
-          </div>
-          <div className="quoteGrid">
-            <span>Probability Δ <b>{greeks ? formatNumber(greeks.market_probability_delta, 6) : "—"}</b></span>
-            <span>Volatility ν <b>{greeks ? formatNumber(greeks.volatility_vega, 6) : "—"}</b></span>
-            <span>Imbalance κ <b>{greeks ? formatNumber(greeks.imbalance_kappa, 6) : "—"}</b></span>
-            <span>Time θ <b>{greeks ? formatNumber(greeks.time_theta, 6) : "—"}</b></span>
-            <span>Model <b>{greeks?.model_version ?? "—"}</b></span>
-            <span>Features <b>{greeks?.feature_version ?? "—"}</b></span>
-          </div>
-        </article>
-      </section>
+      <article className="panel hawkes">
+        <div className="panelHead"><span>05 / HAWKES CASCADE</span><b>EVENT INTENSITY</b></div>
+        <div className="pulseField"><div className="pulse p1"/><div className="pulse p2"/><div className="pulse p3"/><strong>{hawkes ? n(hawkes.current_intensity, 4) : "—"}</strong></div>
+        <div className="twoCol"><span>Baseline<b>{hawkes ? n(hawkes.baseline_intensity, 4) : "—"}</b></span><span>Excitation<b>{hawkes ? n(hawkes.excitation, 4) : "—"}</b></span><span>Branching<b>{hawkes ? n(hawkes.branching_ratio, 4) : "—"}</b></span><span>Event P<b>{hawkes ? pct(hawkes.event_probability, 2) : "—"}</b></span></div>
+      </article>
 
-      <section className="dataGrid">
-        <article className="dataPanel">
-          <div className="panelTitle">
-            <p className="eyebrow">HAWKES CASCADE / {hawkes?.symbol ?? "—"}</p>
-            <span>{hawkes?.source ?? "WAITING"}</span>
-          </div>
-          <div className="quoteGrid">
-            <span>Baseline λ <b>{hawkes ? formatNumber(hawkes.baseline_intensity, 6) : "—"}</b></span>
-            <span>Current λ <b>{hawkes ? formatNumber(hawkes.current_intensity, 6) : "—"}</b></span>
-            <span>Excitation <b>{hawkes ? formatNumber(hawkes.excitation, 6) : "—"}</b></span>
-            <span>Decay <b>{hawkes ? formatNumber(hawkes.decay, 6) : "—"}</b></span>
-            <span>Branching <b>{hawkes ? formatNumber(hawkes.branching_ratio, 6) : "—"}</b></span>
-            <span>Event P <b>{hawkes ? formatPercent(hawkes.event_probability) : "—"}</b></span>
-          </div>
-        </article>
+      <article className="panel greeks">
+        <div className="panelHead"><span>06 / SYNTHETIC GREEKS</span><b>FIELD</b></div>
+        <div className="greekGrid"><span>Δ<strong>{greeks ? n(greeks.market_probability_delta, 5) : "—"}</strong></span><span>ν<strong>{greeks ? n(greeks.volatility_vega, 5) : "—"}</strong></span><span>κ<strong>{greeks ? n(greeks.imbalance_kappa, 5) : "—"}</strong></span><span>θ<strong>{greeks ? n(greeks.time_theta, 5) : "—"}</strong></span></div>
+      </article>
 
-        <article className="dataPanel">
-          <div className="panelTitle">
-            <p className="eyebrow">EXPIRY TORUS DATA</p>
-            <span>{expiryMap?.source ?? "WAITING"}</span>
-          </div>
-          <div className="fillList">
-            {(expiryMap?.points ?? []).map((point) => (
-              <div className="fillRow" key={point.market_id}>
-                <div>
-                  <strong>{point.symbol} / {point.expiry_horizon_minutes}m</strong>
-                  <small>{point.market_id}</small>
-                </div>
-                <div className="fillNumbers">
-                  <span>Model {formatPercent(point.model_probability)}</span>
-                  <b>Edge {formatPercent(point.net_edge)}</b>
-                </div>
-              </div>
-            ))}
-            {(expiryMap?.points.length ?? 0) === 0 && (
-              <p className="empty">Waiting for expiry analytics.</p>
-            )}
-          </div>
-        </article>
-      </section>
+      <article className="panel portfolioPanel">
+        <div className="panelHead"><span>07 / PORTFOLIO & RISK</span><b>PAPER</b></div>
+        <div className="riskStrip"><span>Gross<b>{portfolio ? usd(portfolio.gross_exposure) : "—"}</b></span><span>Net<b>{portfolio ? usd(portfolio.net_exposure) : "—"}</b></span><span>P&L<b className={(portfolio?.total_pnl_after_fees ?? 0) >= 0 ? "positive" : "negative"}>{portfolio ? usd(portfolio.total_pnl_after_fees) : "—"}</b></span><span>Drawdown<b>{portfolio ? usd(portfolio.realized_drawdown) : "—"}</b></span><span>Concentration<b>{portfolio ? pct(portfolio.max_asset_concentration, 1) : "—"}</b></span><span>Positions<b>{portfolio?.open_position_count ?? 0}</b></span></div>
+      </article>
 
-      <section className="panel">
-        <div>
-          <p className="eyebrow">SIMULATED PORTFOLIO</p>
-          <h2>P&amp;L and exposure</h2>
-        </div>
-        <div className="summaryMetrics">
-          <span>Realized <b>{portfolio ? formatNumber(portfolio.total_realized_pnl) : "—"}</b></span>
-          <span>Unrealized <b>{portfolio ? formatNumber(portfolio.total_unrealized_pnl) : "—"}</b></span>
-          <span>Fees <b>{portfolio ? formatNumber(portfolio.total_fees) : "—"}</b></span>
-          <span>Net P&amp;L <b>{portfolio ? formatNumber(portfolio.total_pnl_after_fees) : "—"}</b></span>
-          <span>Gross exposure <b>{portfolio ? formatNumber(portfolio.gross_exposure) : "—"}</b></span>
-          <span>Net exposure <b>{portfolio ? formatNumber(portfolio.net_exposure) : "—"}</b></span>
-          <span>Concentration <b>{portfolio ? formatPercent(portfolio.max_asset_concentration) : "—"}</b></span>
-          <span>Drawdown <b>{portfolio ? formatNumber(portfolio.realized_drawdown) : "—"}</b></span>
-          <span>Turnover <b>{portfolio ? formatNumber(portfolio.turnover_notional) : "—"}</b></span>
-          <span>Slippage cost <b>{portfolio ? formatNumber(portfolio.execution_costs.slippage) : "—"}</b></span>
-          <span>Max position age <b>{portfolio ? `${formatNumber(portfolio.max_position_age_seconds, 1)}s` : "—"}</b></span>
-          <span>Temporal exposure <b>{portfolio ? formatNumber(portfolio.temporal_exposure_notional_seconds, 1) : "—"}</b></span>
-          <span>Attributed fees <b>{pnlAttribution ? formatNumber(pnlAttribution.fees) : "—"}</b></span>
-          <span>Attributed slippage <b>{pnlAttribution ? formatNumber(pnlAttribution.slippage) : "—"}</b></span>
-          <span>Unexplained residual <b>{pnlAttribution ? formatNumber(pnlAttribution.residual) : "—"}</b></span>
-        </div>
-      </section>
+      <article className="panel attribution">
+        <div className="panelHead"><span>08 / P&L ATTRIBUTION</span><b>CANONICAL</b></div>
+        <div className="riskStrip"><span>Observed<b>{pnl ? usd(pnl.observed_total_pnl) : "—"}</b></span><span>Fees<b>{pnl ? usd(pnl.fees) : "—"}</b></span><span>Slippage<b>{pnl ? usd(pnl.slippage) : "—"}</b></span><span>Residual<b>{pnl ? usd(pnl.residual) : "—"}</b></span></div>
+      </article>
+    </section>
 
-      <section className="dataGrid">
-        <article className="dataPanel">
-          <div className="panelTitle">
-            <p className="eyebrow">POSITIONS</p>
-            <span>{portfolio ? `${portfolio.open_position_count} open` : "WAITING"}</span>
-          </div>
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Asset</th>
-                  <th>Qty</th>
-                  <th>Avg</th>
-                  <th>Realized</th>
-                  <th>Fees</th>
-                  <th>Age</th>
-                  <th>Temporal N·s</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(portfolio?.positions ?? []).map((position) => (
-                  <tr key={position.asset}>
-                    <td>{position.asset}</td>
-                    <td>{formatNumber(position.quantity, 6)}</td>
-                    <td>{formatNumber(position.average_price)}</td>
-                    <td>{formatNumber(position.realized_pnl)}</td>
-                    <td>{formatNumber(position.fees)}</td>
-                    <td>{formatNumber(position.position_age_seconds, 1)}s</td>
-                    <td>{formatNumber(position.temporal_exposure_notional_seconds, 1)}</td>
-                  </tr>
-                ))}
-                {(portfolio?.positions.length ?? 0) === 0 && (
-                  <tr><td colSpan={7} className="empty">No simulated positions yet.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article className="dataPanel">
-          <div className="panelTitle">
-            <p className="eyebrow">FILL JOURNAL</p>
-            <span>{journal ? `Latest ${journal.count}` : "WAITING"}</span>
-          </div>
-          <div className="fillList">
-            {(journal?.fills ?? []).map((fill) => (
-              <div className="fillRow" key={fill.order_id}>
-                <div>
-                  <strong>{fill.asset} {fill.side}</strong>
-                  <small>{fill.market_id}</small>
-                </div>
-                <div className="fillNumbers">
-                  <span>{formatNumber(fill.filled_quantity, 6)}</span>
-                  <b>{formatNumber(fill.fill_price)}</b>
-                </div>
-              </div>
-            ))}
-            {(journal?.fills.length ?? 0) === 0 && (
-              <p className="empty">No simulated fills recorded.</p>
-            )}
-          </div>
-        </article>
-      </section>
-
-      {error && <p className="errorBanner">API connection: {error}</p>}
-    </main>
-  );
+    <footer><span>LIVE SOURCE: PUBLIC READ-ONLY</span><span>FINANCIAL CONNECTIVITY: DISABLED</span><span>REAL-MONEY EXECUTION: DISABLED</span></footer>
+  </main>;
 }
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
