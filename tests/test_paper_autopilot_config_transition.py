@@ -34,7 +34,7 @@ def fresh_status(symbol: str) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_running_symbol_update_resets_signal_consumption_but_keeps_cooldown(monkeypatch) -> None:
+async def test_symbol_update_resets_signal_but_keeps_cooldown(monkeypatch) -> None:
     service = PaperAutopilotService()
     service._config = PaperAutopilotConfig(symbol="BTC")  # noqa: SLF001
     service._armed_side = "BUY"  # noqa: SLF001
