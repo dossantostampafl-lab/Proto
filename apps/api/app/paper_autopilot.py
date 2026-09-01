@@ -103,6 +103,7 @@ class PaperAutopilotService:
             "mode": runtime.mode,
             "running": self.running,
             "paper_runtime_ready": self._paper_runtime_ready(),
+            "live_market_ready": self._live_market_ready(self._config.symbol),
             "kill_switch": runtime.kill_switch,
             "config": self._config.model_dump(mode="json"),
             "started_at": self._started_at.isoformat() if self._started_at else None,
@@ -131,6 +132,18 @@ class PaperAutopilotService:
             and simulation_execution_allowed()
         )
 
+    def _live_market_ready(self, symbol: str) -> bool:
+        status = live_monitor.status()
+        fresh_symbols = status.get("fresh_symbols")
+        return bool(
+            status.get("running")
+            and status.get("receiving_data")
+            and isinstance(fresh_symbols, list)
+            and symbol in fresh_symbols
+            and status.get("financial_connectivity") is False
+            and status.get("real_money_execution") is False
+        )
+
     async def _run(self) -> None:
         try:
             while True:
@@ -151,6 +164,10 @@ class PaperAutopilotService:
             return
 
         config = self._config
+        if not self._live_market_ready(config.symbol):
+            self._last_reason = "WAITING_FOR_FRESH_LIVE_DATA"
+            return
+
         frame = live_monitor.snapshot(config.symbol)
         analytics = live_monitor.analytics(config.symbol)
         if frame is None or analytics is None:
