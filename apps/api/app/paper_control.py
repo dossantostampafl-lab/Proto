@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from .app_state import replay_session, runtime
 from .models import KillSwitchState, RuntimeState, SystemMode
+from .paper_autopilot import paper_autopilot
 from .websockets import hub
 
 router = APIRouter(prefix="/paper", tags=["paper-control"])
@@ -33,7 +34,9 @@ async def start_paper_trading() -> RuntimeState:
 
 @router.post("/stop", response_model=RuntimeState)
 async def stop_paper_trading() -> RuntimeState:
-    """Stop paper execution without touching the public live monitor."""
+    """Stop paper execution and disarm its persistent server autopilot."""
+    if paper_autopilot.running:
+        await paper_autopilot.stop()
     runtime.running = False
     await hub.broadcast(
         "analytics",
@@ -53,6 +56,7 @@ def paper_status() -> dict[str, object]:
             and runtime.running
             and runtime.kill_switch == KillSwitchState.ARMED
         ),
+        "autopilot_running": paper_autopilot.running,
         "financial_connectivity": False,
         "real_money_execution": False,
     }
