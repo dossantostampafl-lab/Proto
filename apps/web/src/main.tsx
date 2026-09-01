@@ -18,6 +18,10 @@ type Position = {
   realized_pnl: number;
   unrealized_pnl: number | null;
   fees: number;
+  opened_at: string | null;
+  last_fill_at: string | null;
+  position_age_seconds: number;
+  temporal_exposure_notional_seconds: number;
 };
 
 type ExecutionCosts = {
@@ -28,12 +32,15 @@ type ExecutionCosts = {
 
 type Portfolio = {
   mode: string;
+  as_of: string | null;
   positions: Position[];
   open_position_count: number;
   gross_exposure: number;
   net_exposure: number;
   max_asset_concentration: number;
   exposure_by_asset: Record<string, number>;
+  temporal_exposure_notional_seconds: number;
+  max_position_age_seconds: number;
   total_realized_pnl: number;
   total_unrealized_pnl: number;
   total_pnl_after_fees: number;
@@ -42,6 +49,26 @@ type Portfolio = {
   realized_drawdown: number;
   turnover_notional: number;
   execution_costs: ExecutionCosts;
+};
+
+type PnLAttribution = {
+  mode: string;
+  source: string;
+  policy: string;
+  known_components: string[];
+  unresolved_components_are_residual: boolean;
+  real_money_execution: boolean;
+  model_edge: number;
+  market_movement: number;
+  execution: number;
+  spread_capture: number;
+  slippage: number;
+  fees: number;
+  hedging: number;
+  timing: number;
+  residual: number;
+  attributed_total: number;
+  observed_total_pnl: number;
 };
 
 type FillEntry = {
@@ -191,6 +218,7 @@ function formatPercent(value: number, digits = 2) {
 function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [pnlAttribution, setPnlAttribution] = useState<PnLAttribution | null>(null);
   const [journal, setJournal] = useState<FillJournal | null>(null);
   const [replay, setReplay] = useState<ReplayStatus | null>(null);
   const [marketData, setMarketData] = useState<MarketDataFrame | null>(null);
@@ -208,6 +236,7 @@ function App() {
     let cancelled = false;
     let refreshTimer: number | undefined;
     let reconnectTimer: number | undefined;
+    let activeSymbol: string | null = null;
     const sockets = new Map<string, WebSocket>();
     const openChannels = new Set<string>();
 
@@ -232,28 +261,43 @@ function App() {
           fetch(`${API_BASE}/v1/portfolio`),
           fetch(`${API_BASE}/v1/fills?limit=8`),
           fetch(`${API_BASE}/replay/status`),
+          fetch(`${API_BASE}/pnl/attribution`),
         ]);
 
         if (responses.some((response) => !response.ok)) {
           throw new Error("Core API returned a non-success response");
         }
 
-        const [healthBody, portfolioBody, fillsBody, replayBody] = await Promise.all([
-          responses[0].json() as Promise<Health>,
-          responses[1].json() as Promise<Portfolio>,
-          responses[2].json() as Promise<FillJournal>,
-          responses[3].json() as Promise<ReplayStatus>,
-        ]);
-        const [lifecycleBody, greeksBody, hawkesBody, expiryBody] = await Promise.all([
-          fetchOptional<LifecycleResponse>("/market-lifecycle"),
-          fetchOptional<SyntheticGreeks>("/analytics/greeks/btc-threshold"),
-          fetchOptional<HawkesState>("/hawkes/BTC"),
+        const [healthBody, portfolioBody, fillsBody, replayBody, attributionBody] =
+          await Promise.all([
+            responses[0].json() as Promise<Health>,
+            responses[1].json() as Promise<Portfolio>,
+            responses[2].json() as Promise<FillJournal>,
+            responses[3].json() as Promise<ReplayStatus>,
+            responses[4].json() as Promise<PnLAttribution>,
+          ]);
+
+        const lifecycleBody = await fetchOptional<LifecycleResponse>("/market-lifecycle");
+        const analyticsTarget =
+          lifecycleBody?.markets.find((row) => row.symbol === activeSymbol) ??
+          lifecycleBody?.markets[0] ??
+          null;
+        const [greeksBody, hawkesBody, expiryBody] = await Promise.all([
+          analyticsTarget
+            ? fetchOptional<SyntheticGreeks>(
+                `/analytics/greeks/${encodeURIComponent(analyticsTarget.market_id)}`,
+              )
+            : Promise.resolve(null),
+          analyticsTarget
+            ? fetchOptional<HawkesState>(`/hawkes/${encodeURIComponent(analyticsTarget.symbol)}`)
+            : Promise.resolve(null),
           fetchOptional<ExpiryMap>("/analytics/expiry-map"),
         ]);
 
         if (!cancelled) {
           setHealth(healthBody);
           setPortfolio(portfolioBody);
+          setPnlAttribution(attributionBody);
           setJournal(fillsBody);
           setReplay(replayBody);
           setSeekCursor(replayBody.cursor);
@@ -318,7 +362,9 @@ function App() {
       });
       openSocket("market-data", (message) => {
         if (message.type === "market-data" && message.data) {
-          setMarketData(message.data as MarketDataFrame);
+          const frame = message.data as MarketDataFrame;
+          activeSymbol = frame.symbol;
+          setMarketData(frame);
         }
       });
       openSocket("orderbook", (message) => {
@@ -584,7 +630,7 @@ function App() {
 
         <article className="dataPanel">
           <div className="panelTitle">
-            <p className="eyebrow">SYNTHETIC GREEKS FIELD / BTC</p>
+            <p className="eyebrow">SYNTHETIC GREEKS FIELD / {greeks?.symbol ?? "—"}</p>
             <span>{greeks?.source ?? "WAITING"}</span>
           </div>
           <div className="quoteGrid">
@@ -601,7 +647,7 @@ function App() {
       <section className="dataGrid">
         <article className="dataPanel">
           <div className="panelTitle">
-            <p className="eyebrow">HAWKES CASCADE / BTC</p>
+            <p className="eyebrow">HAWKES CASCADE / {hawkes?.symbol ?? "—"}</p>
             <span>{hawkes?.source ?? "WAITING"}</span>
           </div>
           <div className="quoteGrid">
@@ -655,6 +701,11 @@ function App() {
           <span>Drawdown <b>{portfolio ? formatNumber(portfolio.realized_drawdown) : "—"}</b></span>
           <span>Turnover <b>{portfolio ? formatNumber(portfolio.turnover_notional) : "—"}</b></span>
           <span>Slippage cost <b>{portfolio ? formatNumber(portfolio.execution_costs.slippage) : "—"}</b></span>
+          <span>Max position age <b>{portfolio ? `${formatNumber(portfolio.max_position_age_seconds, 1)}s` : "—"}</b></span>
+          <span>Temporal exposure <b>{portfolio ? formatNumber(portfolio.temporal_exposure_notional_seconds, 1) : "—"}</b></span>
+          <span>Attributed fees <b>{pnlAttribution ? formatNumber(pnlAttribution.fees) : "—"}</b></span>
+          <span>Attributed slippage <b>{pnlAttribution ? formatNumber(pnlAttribution.slippage) : "—"}</b></span>
+          <span>Unexplained residual <b>{pnlAttribution ? formatNumber(pnlAttribution.residual) : "—"}</b></span>
         </div>
       </section>
 
@@ -673,6 +724,8 @@ function App() {
                   <th>Avg</th>
                   <th>Realized</th>
                   <th>Fees</th>
+                  <th>Age</th>
+                  <th>Temporal N·s</th>
                 </tr>
               </thead>
               <tbody>
@@ -683,10 +736,12 @@ function App() {
                     <td>{formatNumber(position.average_price)}</td>
                     <td>{formatNumber(position.realized_pnl)}</td>
                     <td>{formatNumber(position.fees)}</td>
+                    <td>{formatNumber(position.position_age_seconds, 1)}s</td>
+                    <td>{formatNumber(position.temporal_exposure_notional_seconds, 1)}</td>
                   </tr>
                 ))}
                 {(portfolio?.positions.length ?? 0) === 0 && (
-                  <tr><td colSpan={5} className="empty">No simulated positions yet.</td></tr>
+                  <tr><td colSpan={7} className="empty">No simulated positions yet.</td></tr>
                 )}
               </tbody>
             </table>
