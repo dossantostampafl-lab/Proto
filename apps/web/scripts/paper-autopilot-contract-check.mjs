@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 const runtime = await readFile(new URL("../src/paper-autopilot.ts", import.meta.url), "utf8");
 const terminalRuntime = await readFile(new URL("../src/terminal-runtime.ts", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/paper-autopilot.css", import.meta.url), "utf8");
+const modeControl = await readFile(new URL("../src/paper-mode-control.ts", import.meta.url), "utf8");
+const modeStyles = await readFile(new URL("../src/paper-mode-control.css", import.meta.url), "utf8");
 
 assert.match(terminalRuntime, /import "\.\/paper-autopilot"/, "terminal runtime must load the paper autopilot controller");
 assert.match(runtime, /\/paper\/status/, "autopilot controller must inspect authoritative paper runtime status");
@@ -21,5 +23,9 @@ assert.match(styles, /\.paperAutopilot/, "autopilot must have dedicated visual t
 assert.match(styles, /@media\(max-width:620px\)/, "autopilot must support narrow tablet/mobile layouts");
 assert.match(styles, /focus-visible/, "autopilot controls must preserve keyboard focus");
 assert.match(styles, /input:disabled/, "running server configuration must visibly lock mutable inputs");
+assert.match(modeControl, /syncExecutionHeader/, "paper runtime controller must keep the topbar execution indicator authoritative");
+assert.match(modeControl, /EXEC PAPER/, "paper mode must be rendered explicitly in the topbar");
+assert.match(modeControl, /EXEC LIVE READ-ONLY/, "live monitoring must not be presented as executable simulation");
+assert.match(modeStyles, /execModeManaged:after/, "authoritative execution label must override the legacy static React text without visual flicker");
 
 console.log("frontend persistent paper-autopilot contracts: ok");
