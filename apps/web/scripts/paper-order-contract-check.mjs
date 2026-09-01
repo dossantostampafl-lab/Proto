@@ -6,10 +6,14 @@ const terminalRuntime = await readFile(new URL("../src/terminal-runtime.ts", imp
 const styles = await readFile(new URL("../src/paper-order-runtime.css", import.meta.url), "utf8");
 
 assert.match(terminalRuntime, /import "\.\/paper-order-runtime"/, "terminal runtime must load the paper order console");
-assert.match(runtime, /\/risk/, "paper console must read the authoritative runtime simulation gate");
-assert.match(runtime, /simulation_allowed/, "paper console must obey backend simulation availability");
-assert.match(runtime, /financial_connectivity === false/, "paper console must require the no-financial-connectivity boundary");
-assert.match(runtime, /real_money_execution === false/, "paper console must require the no-real-money boundary");
+assert.match(runtime, /jsonRequest<RiskState>\("\/risk"\)/, "paper console must read the backend simulation gate");
+assert.match(runtime, /jsonRequest<RuntimeState>\("\/system\/status"\)/, "paper console must read the canonical execution runtime mode");
+assert.match(runtime, /jsonRequest<LiveBoundary>\("\/live\/status"\)/, "paper console must read the public-live financial boundary");
+assert.match(runtime, /SIMULATION_MODES = new Set\(\["SIMULATION", "PAPER_TRADING"\]\)/, "paper console must permit mutation only in simulation execution modes");
+assert.match(runtime, /riskState\?\.simulation_allowed/, "paper console must obey backend simulation availability");
+assert.match(runtime, /liveBoundary\?\.financial_connectivity === false/, "paper console must require no financial connectivity");
+assert.match(runtime, /liveBoundary\.real_money_execution === false/, "paper console must require the public-live no-real-money boundary");
+assert.match(runtime, /riskState\.real_money_execution === false/, "paper console must require the risk no-real-money boundary");
 assert.match(runtime, /SIMULATOR LOCKED IN/, "disallowed runtime modes must be visible rather than presenting a fake enabled control");
 assert.match(runtime, /no order was submitted/, "mode-locked submission must fail closed before the simulation request");
 assert.doesNotMatch(runtime, /server_execution_permitted:\s*true/, "client must not pretend to authorize server execution");
