@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 12
     env:
       PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+      EXPECTED_PROTO_RELEASE: server-paper-autopilot-v1
     steps:
       - name: Validate deployed dashboard and live safety contracts
         shell: bash
@@ -37,6 +38,7 @@ jobs:
           from urllib.parse import urlparse
 
           origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
+          expected_release = os.environ["EXPECTED_PROTO_RELEASE"]
           attempts = 60
           delay = 10
           websocket_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -47,22 +49,14 @@ jobs:
                   headers={"User-Agent": "proto-production-smoke/1.0"},
               )
               with urllib.request.urlopen(req, timeout=10) as response:
-                  return response.status, dict(response.headers.items()), response.read()
+                  headers = {name.lower(): value for name, value in response.headers.items()}
+                  return response.status, headers, response.read()
 
           def json_get(path: str):
               status, headers, body = request(path)
               if status != 200:
                   raise AssertionError(f"{path} returned HTTP {status}")
               return headers, json.loads(body.decode("utf-8"))
-
-          def recv_exact(connection, size: int) -> bytes:
-              chunks = bytearray()
-              while len(chunks) < size:
-                  chunk = connection.recv(size - len(chunks))
-                  if not chunk:
-                      raise AssertionError("WebSocket closed before the expected frame completed")
-                  chunks.extend(chunk)
-              return bytes(chunks)
 
           def websocket_market_frame() -> dict[str, object]:
               parsed = urlparse(origin)
@@ -91,7 +85,10 @@ jobs:
                   connection.sendall(handshake.encode("ascii"))
                   header_bytes = bytearray()
                   while b"\r\n\r\n" not in header_bytes:
-                      header_bytes.extend(connection.recv(4096))
+                      chunk = connection.recv(4096)
+                      if not chunk:
+                          raise AssertionError("WebSocket closed during handshake")
+                      header_bytes.extend(chunk)
                       if len(header_bytes) > 32_768:
                           raise AssertionError("WebSocket handshake headers exceeded safety limit")
                   raw_headers, remainder = bytes(header_bytes).split(b"\r\n\r\n", 1)
@@ -110,7 +107,10 @@ jobs:
 
                   def take(size: int) -> bytes:
                       while len(buffered) < size:
-                          buffered.extend(connection.recv(max(4096, size - len(buffered))))
+                          chunk = connection.recv(max(4096, size - len(buffered)))
+                          if not chunk:
+                              raise AssertionError("WebSocket closed before frame completed")
+                          buffered.extend(chunk)
                       value = bytes(buffered[:size])
                       del buffered[:size]
                       return value
@@ -153,12 +153,17 @@ jobs:
                   html = root_body.decode("utf-8")
                   if '<div id="root"></div>' not in html:
                       raise AssertionError("dashboard React root is missing")
-                  if "no-store" not in root_headers.get("Cache-Control", ""):
+                  if "no-store" not in root_headers.get("cache-control", ""):
                       raise AssertionError("dashboard HTML is missing no-store cache policy")
-                  if not root_headers.get("Content-Security-Policy"):
+                  if not root_headers.get("content-security-policy"):
                       raise AssertionError("dashboard CSP header is missing")
-                  if root_headers.get("X-Frame-Options") != "DENY":
+                  if root_headers.get("x-frame-options") != "DENY":
                       raise AssertionError("dashboard frame protection is missing")
+                  deployed_release = root_headers.get("x-proto-release")
+                  if deployed_release != expected_release:
+                      raise AssertionError(
+                          f"deployment release mismatch: expected={expected_release!r} got={deployed_release!r}"
+                      )
 
                   _, health = json_get("/health")
                   if health.get("status") != "ok":
@@ -187,14 +192,22 @@ jobs:
                       raise AssertionError("BTC live quote violates bid <= mid <= ask")
 
                   _, analytics = json_get("/live/analytics/BTC")
-                  for field in ("realized_volatility", "current_spread_bps", "current_imbalance", "current_microprice"):
+                  for field in (
+                      "realized_volatility",
+                      "current_spread_bps",
+                      "current_imbalance",
+                      "current_microprice",
+                  ):
                       if analytics.get(field) is None:
                           raise AssertionError(f"BTC analytics missing {field}")
 
                   _, history = json_get("/live/history/BTC?limit=1")
                   if history.get("source") != "PUBLIC_READ_ONLY_PERSISTED":
                       raise AssertionError("persisted history provenance is not public-read-only")
-                  if history.get("financial_connectivity") is not False or history.get("real_money_execution") is not False:
+                  if (
+                      history.get("financial_connectivity") is not False
+                      or history.get("real_money_execution") is not False
+                  ):
                       raise AssertionError("persisted history violated financial safety boundary")
 
                   ws_message = websocket_market_frame()
@@ -213,11 +226,16 @@ jobs:
                   if mode not in known_modes:
                       raise AssertionError(f"unexpected runtime mode: {mode!r}")
                   if risk.get("mode") != mode:
-                      raise AssertionError(f"risk/runtime mode mismatch: risk={risk.get('mode')!r} runtime={mode!r}")
+                      raise AssertionError(
+                          f"risk/runtime mode mismatch: risk={risk.get('mode')!r} runtime={mode!r}"
+                      )
                   if paper.get("mode") != mode or autopilot.get("mode") != mode:
                       raise AssertionError("paper/autopilot runtime mode does not match /system/status")
                   for name, surface in (("risk", risk), ("paper", paper), ("autopilot", autopilot)):
-                      if surface.get("financial_connectivity") is not False or surface.get("real_money_execution") is not False:
+                      if (
+                          surface.get("financial_connectivity") is not False
+                          or surface.get("real_money_execution") is not False
+                      ):
                           raise AssertionError(f"{name} surface violated financial safety boundary")
 
                   expected_simulation_allowed = bool(
@@ -226,22 +244,29 @@ jobs:
                       and system.get("kill_switch") == "ARMED"
                   )
                   if risk.get("simulation_allowed") is not expected_simulation_allowed:
-                      raise AssertionError("risk simulation_allowed is inconsistent with authoritative runtime mode/state")
+                      raise AssertionError(
+                          "risk simulation_allowed is inconsistent with authoritative runtime mode/state"
+                      )
                   expected_paper_enabled = bool(
                       mode == "PAPER_TRADING"
                       and system.get("running") is True
                       and system.get("kill_switch") == "ARMED"
                   )
                   if paper.get("paper_execution_enabled") is not expected_paper_enabled:
-                      raise AssertionError("paper_execution_enabled is inconsistent with authoritative runtime state")
+                      raise AssertionError(
+                          "paper_execution_enabled is inconsistent with authoritative runtime state"
+                      )
                   if autopilot.get("paper_runtime_ready") is not expected_paper_enabled:
-                      raise AssertionError("autopilot paper_runtime_ready is inconsistent with authoritative runtime state")
+                      raise AssertionError(
+                          "autopilot paper_runtime_ready is inconsistent with authoritative runtime state"
+                      )
 
                   print(
                       "production smoke: ok",
                       json.dumps(
                           {
                               "origin": origin,
+                              "release": deployed_release,
                               "runtime_mode": mode,
                               "simulation_allowed": risk.get("simulation_allowed"),
                               "paper_execution_enabled": paper.get("paper_execution_enabled"),
@@ -255,7 +280,15 @@ jobs:
                       ),
                   )
                   break
-              except (AssertionError, KeyError, ValueError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as error:
+              except (
+                  AssertionError,
+                  KeyError,
+                  ValueError,
+                  json.JSONDecodeError,
+                  urllib.error.URLError,
+                  TimeoutError,
+                  OSError,
+              ) as error:
                   last_error = error
                   print(f"attempt {attempt}/{attempts} not ready: {type(error).__name__}: {error}")
                   if attempt == attempts:
