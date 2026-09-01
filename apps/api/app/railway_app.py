@@ -21,6 +21,11 @@ app.include_router(live_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
 
+# Deliberately static application-contract marker. Production smoke uses this to
+# distinguish "the endpoint responds" from "the expected dashboard generation
+# is actually deployed" without relying on provider-specific Railway metadata.
+_DASHBOARD_RELEASE = "server-paper-autopilot-v1"
+
 _CONTENT_SECURITY_POLICY = "; ".join(
     (
         "default-src 'self'",
@@ -39,7 +44,7 @@ _CONTENT_SECURITY_POLICY = "; ".join(
 
 @app.middleware("http")
 async def dashboard_http_policy(request: Request, call_next) -> Response:
-    """Apply cache and browser-security policy to the Railway web surface."""
+    """Apply cache, browser-security, and release policy to Railway responses."""
     response = await call_next(request)
     path = request.url.path
     if path == "/" or path.endswith(".html"):
@@ -55,6 +60,7 @@ async def dashboard_http_policy(request: Request, call_next) -> Response:
     response.headers["Permissions-Policy"] = (
         "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     )
+    response.headers["X-Proto-Release"] = _DASHBOARD_RELEASE
     return response
 
 
