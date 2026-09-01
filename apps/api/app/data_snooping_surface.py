@@ -9,10 +9,16 @@ from services.validation import superior_predictive_ability
 
 from .holdout_surface import evaluate_holdout, seal_holdout
 from .metrics_state import metrics
+from .promotion_guard_surface import promotion_evaluate_endpoint
 
 router = APIRouter(prefix="/research/validation", tags=["research", "validation"])
 router.add_api_route("/holdout/seal", seal_holdout, methods=["POST"])
 router.add_api_route("/holdout/evaluate", evaluate_holdout, methods=["POST"])
+router.add_api_route(
+    "/promotion/evaluate",
+    promotion_evaluate_endpoint,
+    methods=["POST"],
+)
 
 
 class DataSnoopingRequest(BaseModel):
