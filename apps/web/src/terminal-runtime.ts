@@ -10,14 +10,10 @@ const FOCUSABLE = [
 ].join(",");
 
 let cleanupDialog: (() => void) | null = null;
-let opener: HTMLElement | null = null;
 
 function bindDialog(dialog: HTMLElement) {
   if (dialog.dataset.runtimeBound === "true") return;
   dialog.dataset.runtimeBound = "true";
-  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  const previousOverflow = document.body.style.overflow;
-  document.body.style.overflow = "hidden";
 
   const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((node) => {
     const style = window.getComputedStyle(node);
@@ -29,14 +25,6 @@ function bindDialog(dialog: HTMLElement) {
   window.requestAnimationFrame(() => initial.focus());
 
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
-      const close = dialog.querySelector<HTMLButtonElement>(".validationClose");
-      if (close) {
-        event.preventDefault();
-        close.click();
-      }
-      return;
-    }
     if (event.key !== "Tab") return;
     const nodes = focusables();
     if (!nodes.length) {
@@ -59,11 +47,7 @@ function bindDialog(dialog: HTMLElement) {
   dialog.addEventListener("keydown", onKeyDown);
   cleanupDialog = () => {
     dialog.removeEventListener("keydown", onKeyDown);
-    document.body.style.overflow = previousOverflow;
-    const target = opener;
-    opener = null;
     cleanupDialog = null;
-    if (target && document.contains(target)) window.requestAnimationFrame(() => target.focus());
   };
 }
 
