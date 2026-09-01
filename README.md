@@ -27,15 +27,18 @@ Open `http://localhost:5173`. The API is available at `http://localhost:8000`.
 
 ## What is included
 
-- probability, calibration, Hawkes, feature, sizing, hedge, and P&L research primitives;
-- deterministic Rust risk and simulated execution engines;
-- simulated fills, portfolio accounting, optional PostgreSQL journal, and reconciliation;
-- replay start, pause, resume, step, seek, speed, restart, and reset controls;
-- WebSocket market data, order book, signal, risk, portfolio, fill, and analytics channels;
-- purged walk-forward, DSR, PBO, Monte Carlo, regime and parameter-stability validation;
+- probability, calibration, Hawkes, feature, sizing, hedge, Greeks, markout and P&L research primitives;
+- deterministic Rust risk gates with reservations, cumulative batch controls and volatility gating;
+- risk-admitted simulated execution: orders cannot become validated before the Rust risk gate approves them;
+- simulated fills, temporal portfolio exposure, P&L attribution, optional PostgreSQL journal, recovery and reconciliation;
+- replay start, pause, resume, step, seek, speed, restart and reset controls with deterministic replay/fill clocks;
+- WebSocket market data, order book, signal, risk, portfolio, fill and analytics channels;
+- multi-asset terminal telemetry for lifecycle, Greeks, Hawkes, expiry, positions, P&L and temporal exposure;
+- purged walk-forward, DSR, PBO, CPCV, White Reality Check, Hansen SPA, frozen holdout, Monte Carlo, regime and parameter-stability validation;
+- fail-closed model promotion requiring recorded validation evidence;
 - API-backed Validation Lab with no fabricated performance telemetry;
-- request IDs, runtime metrics, liveness, readiness, and bounded WebSocket fan-out;
-- Python, Rust, web, security, live-release, and Graphify CI gates.
+- request IDs, runtime/portfolio/temporal metrics, liveness, readiness and bounded WebSocket fan-out;
+- Python, Rust, web, security, live-release and Graphify CI gates.
 
 ## Safety modes
 
