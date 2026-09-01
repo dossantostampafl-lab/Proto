@@ -70,7 +70,11 @@ function ensureCommandRail() {
 
   const foot = document.createElement("div");
   foot.className = "railFoot";
-  foot.innerHTML = "<i></i><span>PROTO</span>";
+  const indicator = document.createElement("i");
+  indicator.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.textContent = "PROTO";
+  foot.append(indicator, label);
   rail.append(foot);
   document.body.append(rail);
 }
