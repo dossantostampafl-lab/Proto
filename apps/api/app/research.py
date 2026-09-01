@@ -248,6 +248,12 @@ def _portfolio_gauges() -> dict[str, float]:
         ),
         "portfolio_turnover_notional": float(snapshot.get("turnover_notional", 0.0)),
         "portfolio_slippage_cost": slippage,
+        "portfolio_temporal_exposure_notional_seconds": float(
+            snapshot.get("temporal_exposure_notional_seconds", 0.0)
+        ),
+        "portfolio_max_position_age_seconds": float(
+            snapshot.get("max_position_age_seconds", 0.0)
+        ),
     }
 
 
