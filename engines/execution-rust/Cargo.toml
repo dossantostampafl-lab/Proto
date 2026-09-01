@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+risk-rust = { path = "../risk-rust" }
 rust_decimal.workspace = true
 serde.workspace = true
 thiserror.workspace = true
