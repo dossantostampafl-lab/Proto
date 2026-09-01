@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/premium.tsx", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/premium.css", import.meta.url), "utf8");
@@ -9,6 +9,15 @@ const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const dockerfile = await readFile(new URL("../../../Dockerfile", import.meta.url), "utf8");
 const railwayApp = await readFile(new URL("../../api/app/railway_app.py", import.meta.url), "utf8");
 const design = await readFile(new URL("../../../DESIGN.md", import.meta.url), "utf8");
+
+async function assertMissing(relativePath, message) {
+  try {
+    await access(new URL(relativePath, import.meta.url));
+    assert.fail(message);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
 
 assert.match(source, /connection_generation/, "live frames must expose connection generation");
 assert.match(source, /lastCursor\.current\[f\.symbol\]/, "market-series dedupe must remain generation/sequence aware");
@@ -44,8 +53,12 @@ assert.match(styles, /focus-visible/, "premium controls must retain visible keyb
 assert.match(styles, /scrollbar-color/, "application scrollbars must have a global baseline");
 assert.match(design, /Expiry \/ Risk Field/, "durable design context must record the terminal signature");
 assert.doesNotMatch(index, /validation-root/, "the page must mount only one React application");
+assert.doesNotMatch(index, /\/src\/main\.tsx/, "legacy terminal entrypoint must not be referenced");
 assert.match(index, /\/src\/premium\.tsx/, "premium command dashboard must be the active application entrypoint");
 assert.match(index, /\/src\/premium-runtime\.ts/, "premium interaction runtime must load with the active dashboard");
+await assertMissing("../src/main.tsx", "legacy main.tsx must remain removed");
+await assertMissing("../src/styles.css", "legacy styles.css must remain removed");
+await assertMissing("../src/audit.css", "legacy audit.css must remain removed");
 assert.match(dockerfile, /VITE_API_BASE_URL=""/, "single-origin deploy must not pin a generated Railway hostname");
 assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "frontend bundle must remain hostname-portable");
 assert.match(railwayApp, /Cache-Control.*no-store/, "dashboard HTML must not be served from stale cache");
