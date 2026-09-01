@@ -1,0 +1,1 @@
+Operational telemetry resilience changes are covered by frontend-contract-check.mjs.
