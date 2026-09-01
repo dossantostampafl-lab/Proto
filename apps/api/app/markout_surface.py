@@ -16,7 +16,10 @@ from services.market_data.markout import (
     summarize_markouts,
 )
 
+from .sizing_surface import router as sizing_router
+
 router = APIRouter(tags=["research"])
+router.include_router(sizing_router)
 
 
 class ReplaySnapshotPoint(BaseModel):
