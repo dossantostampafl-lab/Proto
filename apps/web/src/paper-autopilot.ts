@@ -19,6 +19,7 @@ type AutopilotStatus = {
   mode: string;
   running: boolean;
   paper_runtime_ready: boolean;
+  live_market_ready: boolean;
   kill_switch: string;
   config: AutopilotConfig;
   started_at?: string | null;
@@ -242,8 +243,9 @@ function mountPaperAutopilot() {
     hydrateInputs(server);
     const safe = server.financial_connectivity === false && server.real_money_execution === false;
     active = safe && server.running;
-    stateBadge.className = `paperAutoBadge ${active ? "on" : "off"}`;
-    stateBadge.textContent = active ? "SERVER ACTIVE" : "OFF";
+    const decisionReady = active && server.paper_runtime_ready && server.live_market_ready;
+    stateBadge.className = `paperAutoBadge ${decisionReady ? "on" : "off"}`;
+    stateBadge.textContent = decisionReady ? "SERVER ACTIVE" : active ? "SERVER PAUSED" : "OFF";
     toggle.textContent = active ? "STOP PAPER AUTOPILOT" : "START PAPER AUTOPILOT";
     toggle.disabled = busy || !safe;
     setInputsDisabled(active || busy);
@@ -261,12 +263,15 @@ function mountPaperAutopilot() {
     counters.textContent = `cycles ${server.counters.cycles} · fills ${server.counters.accepted} · rejected ${server.counters.rejected}`;
 
     const reason = server.last_reason.replaceAll("_", " ");
-    if (active && server.paper_runtime_ready) {
+    if (active && !server.paper_runtime_ready) {
+      status.className = "paperAutoStatus locked";
+      status.textContent = `SERVER AUTOPILOT PAUSED · PAPER_TRADING runtime is not ready · ${reason}`;
+    } else if (active && !server.live_market_ready) {
+      status.className = "paperAutoStatus locked";
+      status.textContent = `SERVER AUTOPILOT PAUSED · ${server.config.symbol} public live feed is stale or unavailable · no simulated order will be submitted.`;
+    } else if (decisionReady) {
       status.className = server.last_reason.startsWith("RISK_REJECTED") ? "paperAutoStatus rejected" : server.last_reason === "SIMULATED_FILL" ? "paperAutoStatus accepted" : "paperAutoStatus watching";
       status.textContent = `SERVER AUTOPILOT ACTIVE · ${server.config.symbol} · ${reason}`;
-    } else if (active) {
-      status.className = "paperAutoStatus locked";
-      status.textContent = `SERVER AUTOPILOT PAUSED · ${reason} · enable PAPER_TRADING to resume decisions.`;
     } else {
       status.className = "paperAutoStatus idle";
       status.textContent = `Paper autopilot off · ${reason}`;

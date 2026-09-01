@@ -14,6 +14,10 @@ assert.match(runtime, /\/paper\/automation\/status/, "autopilot controller must 
 assert.match(runtime, /\/paper\/automation\/start/, "autopilot controller must start the server worker rather than executing decisions in-browser");
 assert.match(runtime, /\/paper\/automation\/stop/, "autopilot controller must stop the server worker");
 assert.match(runtime, /financial_connectivity !== false \|\| current\.data\.real_money_execution !== false/, "controller must fail closed if paper safety boundaries are not false");
+assert.match(runtime, /live_market_ready: boolean/, "frontend status contract must consume authoritative server live readiness");
+assert.match(runtime, /server\.paper_runtime_ready && server\.live_market_ready/, "active badge must require both paper runtime and fresh live-market readiness");
+assert.match(runtime, /SERVER PAUSED/, "running worker without decision readiness must be visibly paused rather than shown active");
+assert.match(runtime, /public live feed is stale or unavailable · no simulated order will be submitted/, "stale public feed must be disclosed as a no-submit state");
 assert.match(runtime, /Primary automation · continues on the server after this dashboard tab is closed/, "primary persistent server lifetime must be disclosed");
 assert.match(runtime, /host\.prepend\(section\)/, "autopilot must be the first control in the automation workspace");
 assert.match(runtime, /START PAPER AUTOPILOT/, "primary action must use clear paper-autopilot language");
@@ -31,4 +35,4 @@ assert.match(modeControl, /EXEC PAPER/, "paper mode must be rendered explicitly 
 assert.match(modeControl, /EXEC LIVE READ-ONLY/, "live monitoring must not be presented as executable simulation");
 assert.match(modeStyles, /execModeManaged:after/, "authoritative execution label must override the legacy static React text without visual flicker");
 
-console.log("frontend persistent paper-autopilot contracts: ok");
+console.log("frontend persistent paper-autopilot readiness contracts: ok");
