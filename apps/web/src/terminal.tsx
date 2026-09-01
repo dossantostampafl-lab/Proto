@@ -21,6 +21,7 @@ type Cursor = { generation: number; sequence: number };
 type Candle = { t: number; open: number; high: number; low: number; close: number };
 type CandleBook = Record<SymbolName, Candle[]>;
 type Envelope = { type: string; data?: unknown };
+type PendingLiveFrame = { frame: LiveFrame; generationChanged: boolean };
 
 const SYMBOLS: SymbolName[] = ["BTC", "ETH", "SOL"];
 const API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin;
@@ -33,6 +34,7 @@ const MAX_CANDLES = 96;
 const MAX_SERIES = 120;
 
 const emptyFrames = (): Record<SymbolName, LiveFrame | null> => ({ BTC: null, ETH: null, SOL: null });
+const emptyPending = (): Record<SymbolName, PendingLiveFrame | null> => ({ BTC: null, ETH: null, SOL: null });
 const emptyAnalytics = (): Record<SymbolName, LiveAnalytics | null> => ({ BTC: null, ETH: null, SOL: null });
 const emptyCursors = (): Record<SymbolName, Cursor> => ({ BTC: { generation: -1, sequence: -1 }, ETH: { generation: -1, sequence: -1 }, SOL: { generation: -1, sequence: -1 } });
 const emptyCandles = (): CandleBook => ({ BTC: [], ETH: [], SOL: [] });
@@ -82,9 +84,8 @@ function Spark({ values, tone = "info" }: { values: number[]; tone?: "info" | "g
 function CandleChart({ candles }: { candles: Candle[] }) {
   if (candles.length < 3) return <div className="empty">Building 5-second OHLC buckets from live ticks…</div>;
   const plot = { left: 14, right: 682, top: 18, bottom: 207 };
-  const lows = candles.map(c => c.low), highs = candles.map(c => c.high);
-  const rawLo = Math.min(...lows), rawHi = Math.max(...highs), rawSpan = Math.max(rawHi - rawLo, Math.abs(rawHi) * 0.00001, 1e-9);
-  const pad = rawSpan * 0.08;
+  const rawLo = Math.min(...candles.map(c => c.low)), rawHi = Math.max(...candles.map(c => c.high));
+  const rawSpan = Math.max(rawHi - rawLo, Math.abs(rawHi) * 0.00001, 1e-9), pad = rawSpan * 0.08;
   const lo = rawLo - pad, hi = rawHi + pad, span = hi - lo;
   const y = (v: number) => plot.bottom - (v - lo) / span * (plot.bottom - plot.top);
   const x = (i: number) => plot.left + i * (plot.right - plot.left) / Math.max(candles.length - 1, 1);
@@ -141,19 +142,31 @@ function App() {
   const [portfolio,setPortfolio]=useState<Portfolio|null>(null),[pnl,setPnl]=useState<PnL|null>(null),[lifecycle,setLifecycle]=useState<LifecycleResponse|null>(null);
   const [hawkes,setHawkes]=useState<Hawkes|null>(null),[greeks,setGreeks]=useState<Greeks|null>(null),[edgeSeries,setEdgeSeries]=useState(emptySeries),[hawkesSeries,setHawkesSeries]=useState(emptySeries);
   const [researchState,setResearchState]=useState<"checking"|"available"|"disabled"|"error">("checking"),[wsConnected,setWsConnected]=useState(false),[validationOpen,setValidationOpen]=useState(false),[now,setNow]=useState(Date.now());
-  const cursors=useRef(emptyCursors()),socket=useRef<WebSocket|null>(null),pending=useRef<Record<SymbolName,LiveFrame|null>>(emptyFrames()),flushTimer=useRef<number|null>(null),opener=useRef<HTMLElement|null>(null);
+  const cursors=useRef(emptyCursors()),socket=useRef<WebSocket|null>(null),pending=useRef<Record<SymbolName,PendingLiveFrame|null>>(emptyPending()),flushTimer=useRef<number|null>(null),opener=useRef<HTMLElement|null>(null);
 
   const ingest=(frame:LiveFrame)=>{
     if(!SYMBOLS.includes(frame.symbol)||!Number.isFinite(frame.mid)||frame.mid<=0||!Number.isFinite(frame.sequence)||!Number.isFinite(frame.connection_generation))return;
     const prev=cursors.current[frame.symbol];
     if(frame.connection_generation<prev.generation||(frame.connection_generation===prev.generation&&frame.sequence<=prev.sequence))return;
-    pending.current[frame.symbol]=frame;
+    const generationChanged=prev.generation>=0&&frame.connection_generation!==prev.generation;
+    cursors.current[frame.symbol]={generation:frame.connection_generation,sequence:frame.sequence};
+    pending.current[frame.symbol]={frame,generationChanged};
     if(flushTimer.current!==null)return;
-    flushTimer.current=window.setTimeout(()=>{const batch=pending.current;pending.current=emptyFrames();flushTimer.current=null;setFrames(old=>{const next={...old};SYMBOLS.forEach(s=>{const f=batch[s];if(f)next[s]=f;});return next;});setCandles(old=>{let next=old;SYMBOLS.forEach(s=>{const f=batch[s];if(!f)return;const prevCursor=cursors.current[s];const generationChanged=prevCursor.generation>=0&&f.connection_generation!==prevCursor.generation;cursors.current[s]={generation:f.connection_generation,sequence:f.sequence};next=upsertCandle(next,f,generationChanged);});return next;});},120);
+    flushTimer.current=window.setTimeout(()=>{
+      const batch=pending.current;pending.current=emptyPending();flushTimer.current=null;
+      setFrames(old=>{const next={...old};SYMBOLS.forEach(s=>{const staged=batch[s];if(staged)next[s]=staged.frame;});return next;});
+      setCandles(old=>{let next=old;SYMBOLS.forEach(s=>{const staged=batch[s];if(!staged)return;next=upsertCandle(next,staged.frame,staged.generationChanged);});return next;});
+    },120);
   };
 
   useEffect(()=>{const id=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(id);},[]);
-  useEffect(()=>{let cancelled=false,reconnect:number|null=null;const refresh=async()=>{const[h,s,m,p,pa,l,...aa]=await Promise.all([requestJson<Health>("/health"),requestJson<LiveStatus>("/live/status"),requestJson<LiveMarketResponse>("/live/market-data"),requestJson<Portfolio>("/v1/portfolio"),requestJson<PnL>("/pnl/attribution"),requestJson<LifecycleResponse>("/market-lifecycle"),...SYMBOLS.map(symbol=>requestJson<LiveAnalytics>(`/live/analytics/${symbol}`))]);if(cancelled)return;if(h.ok&&h.data)setHealth(h.data);if(s.ok&&s.data){setStatus(s.data);setStatusAt(Date.now());}if(m.ok&&m.data)m.data.markets.forEach(ingest);if(p.ok&&p.data)setPortfolio(p.data);if(pa.ok&&pa.data)setPnl(pa.data);if(l.ok&&l.data){setLifecycle(l.data);setResearchState("available");setEdgeSeries(old=>{const next={...old};SYMBOLS.forEach(sym=>{const row=l.data!.markets.find(x=>x.symbol===sym);if(row&&Number.isFinite(row.net_edge))next[sym]=append(next[sym],row.net_edge);});return next;});}else if(l.status===503){setLifecycle(null);setResearchState("disabled");}else if(l.status!==0)setResearchState("error");setAnalytics(old=>{const next={...old};aa.forEach((r,i)=>{if(r.ok&&r.data)next[SYMBOLS[i]]=r.data;});return next;});};const connect=()=>{if(cancelled)return;const ws=new WebSocket(`${WS_BASE}/ws/market-data`);socket.current=ws;ws.onopen=()=>!cancelled&&setWsConnected(true);ws.onmessage=e=>{try{const msg=JSON.parse(e.data as string) as Envelope;if(msg.type==="market-data"&&msg.data)ingest(msg.data as LiveFrame);}catch{}};ws.onerror=()=>ws.close();ws.onclose=()=>{if(!cancelled){setWsConnected(false);reconnect=window.setTimeout(connect,1500);}};};void refresh();connect();const id=window.setInterval(()=>void refresh(),REST_MS);return()=>{cancelled=true;window.clearInterval(id);if(reconnect!==null)window.clearTimeout(reconnect);if(flushTimer.current!==null)window.clearTimeout(flushTimer.current);socket.current?.close();};},[]);
+  useEffect(()=>{
+    let cancelled=false,reconnect:number|null=null,reconnectAttempt=0;
+    const refresh=async()=>{const[h,s,m,p,pa,l,...aa]=await Promise.all([requestJson<Health>("/health"),requestJson<LiveStatus>("/live/status"),requestJson<LiveMarketResponse>("/live/market-data"),requestJson<Portfolio>("/v1/portfolio"),requestJson<PnL>("/pnl/attribution"),requestJson<LifecycleResponse>("/market-lifecycle"),...SYMBOLS.map(symbol=>requestJson<LiveAnalytics>(`/live/analytics/${symbol}`))]);if(cancelled)return;if(h.ok&&h.data)setHealth(h.data);if(s.ok&&s.data){setStatus(s.data);setStatusAt(Date.now());}if(m.ok&&m.data)m.data.markets.forEach(ingest);if(p.ok&&p.data)setPortfolio(p.data);if(pa.ok&&pa.data)setPnl(pa.data);if(l.ok&&l.data){setLifecycle(l.data);setResearchState("available");setEdgeSeries(old=>{const next={...old};SYMBOLS.forEach(sym=>{const row=l.data!.markets.find(x=>x.symbol===sym);if(row&&Number.isFinite(row.net_edge))next[sym]=append(next[sym],row.net_edge);});return next;});}else if(l.status===503){setLifecycle(null);setResearchState("disabled");}else if(l.status!==0)setResearchState("error");setAnalytics(old=>{const next={...old};aa.forEach((r,i)=>{if(r.ok&&r.data)next[SYMBOLS[i]]=r.data;});return next;});};
+    const connect=()=>{if(cancelled)return;const ws=new WebSocket(`${WS_BASE}/ws/market-data`);socket.current=ws;ws.onopen=()=>{if(cancelled)return;reconnectAttempt=0;setWsConnected(true);};ws.onmessage=e=>{try{const msg=JSON.parse(e.data as string) as Envelope;if(msg.type==="market-data"&&msg.data)ingest(msg.data as LiveFrame);}catch{}};ws.onerror=()=>ws.close();ws.onclose=()=>{if(cancelled)return;setWsConnected(false);const delay=Math.min(15000,750*2**reconnectAttempt);reconnectAttempt=Math.min(reconnectAttempt+1,5);reconnect=window.setTimeout(connect,delay);};};
+    void refresh();connect();const id=window.setInterval(()=>void refresh(),REST_MS);
+    return()=>{cancelled=true;window.clearInterval(id);if(reconnect!==null)window.clearTimeout(reconnect);if(flushTimer.current!==null)window.clearTimeout(flushTimer.current);socket.current?.close();};
+  },[]);
 
   const markets=lifecycle?.markets??[],selectedMarkets=markets.filter(x=>x.symbol===selected),selectedMarket=selectedMarkets[0]??null,researchAvailable=researchState==="available";
   useEffect(()=>{if(!researchAvailable||!selectedMarket){setHawkes(null);setGreeks(null);return;}let cancelled=false;const load=async()=>{const[h,g]=await Promise.all([requestJson<Hawkes>(`/hawkes/${selected}`),requestJson<Greeks>(`/analytics/greeks/${encodeURIComponent(selectedMarket.market_id)}`)]);if(cancelled)return;if(h.ok&&h.data){setHawkes(h.data);setHawkesSeries(old=>({...old,[selected]:append(old[selected],h.data!.current_intensity)}));}else setHawkes(null);setGreeks(g.ok?g.data:null);};void load();const id=window.setInterval(()=>void load(),RESEARCH_MS);return()=>{cancelled=true;window.clearInterval(id);};},[researchAvailable,selected,selectedMarket?.market_id]);
