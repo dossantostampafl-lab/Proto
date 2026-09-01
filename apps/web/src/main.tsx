@@ -19,6 +19,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin;
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 const SYMBOLS: SymbolName[] = ["BTC", "ETH", "SOL"];
 const MAX_POINTS = 120;
+const RECONNECT_MS = 1500;
 
 function n(v: number | null | undefined, d = 2) {
   return v == null || Number.isNaN(v) ? "—" : new Intl.NumberFormat("en-US", { maximumFractionDigits: d, minimumFractionDigits: d }).format(v);
@@ -26,6 +27,7 @@ function n(v: number | null | undefined, d = 2) {
 function pct(v: number | null | undefined, d = 2) { return v == null ? "—" : `${n(v * 100, d)}%`; }
 function usd(v: number | null | undefined) { return v == null ? "—" : `$${n(v, v >= 1000 ? 2 : 4)}`; }
 function clamp(v: number, a = 0, b = 1) { return Math.max(a, Math.min(b, v)); }
+function utcClock() { return new Date().toISOString().slice(11, 19); }
 
 function Candles({ values }: { values: number[] }) {
   if (values.length < 8) return <div className="waiting">COLLECTING LIVE TICKS…</div>;
@@ -111,22 +113,25 @@ function App() {
   const [greeks, setGreeks] = useState<SyntheticGreeks | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [lastUpdate, setLastUpdate] = useState("—");
-  const sockets = useRef<WebSocket[]>([]);
+  const sockets = useRef<Map<string, WebSocket>>(new Map());
   const active = frames[selected];
   const a = analytics[selected];
   const markets = lifecycle?.markets ?? [];
-  const selectedMarket = markets.find((m) => m.symbol === selected) ?? markets[0] ?? null;
   const selectedMarkets = markets.filter((m) => m.symbol === selected);
+  const selectedMarket = selectedMarkets[0] ?? null;
   const edge = selectedMarket?.net_edge ?? 0;
 
   function ingest(f: LiveFrame) {
+    if (!SYMBOLS.includes(f.symbol) || !Number.isFinite(f.mid) || f.mid <= 0) return;
     setFrames((p) => ({ ...p, [f.symbol]: f }));
     setHistory((p) => ({ ...p, [f.symbol]: [...p[f.symbol], f.mid].slice(-MAX_POINTS) }));
-    setLastUpdate(new Date().toLocaleTimeString());
+    setLastUpdate(utcClock());
   }
 
   useEffect(() => {
     let cancelled = false;
+    const reconnectTimers = new Map<string, number>();
+
     async function refresh() {
       try {
         const [hr, lr, pr, pnr, mr] = await Promise.all([fetch(`${API_BASE}/health`), fetch(`${API_BASE}/live/market-data`), fetch(`${API_BASE}/v1/portfolio`), fetch(`${API_BASE}/pnl/attribution`), fetch(`${API_BASE}/market-lifecycle`)]);
@@ -137,27 +142,65 @@ function App() {
         if (mr.ok) setLifecycle(await mr.json());
         const entries = await Promise.all(SYMBOLS.map(async (symbol) => { const response = await fetch(`${API_BASE}/live/analytics/${symbol}`); return [symbol, response.ok ? await response.json() : null] as const; }));
         if (!cancelled) setAnalytics(Object.fromEntries(entries) as Record<SymbolName, LiveAnalytics | null>);
-      } catch { /* websocket keeps the live surface moving */ }
+      } catch { /* WebSocket and the next REST reconciliation attempt remain available. */ }
     }
+
+    function connect(channel: string) {
+      if (cancelled) return;
+      const current = sockets.current.get(channel);
+      if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) return;
+      const ws = new WebSocket(`${WS_BASE}/ws/${channel}`);
+      sockets.current.set(channel, ws);
+      ws.onopen = () => {
+        if (cancelled || sockets.current.get(channel) !== ws) return;
+        const pending = reconnectTimers.get(channel);
+        if (pending !== undefined) window.clearTimeout(pending);
+        reconnectTimers.delete(channel);
+        if (channel === "market-data") setStreaming(true);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data as string) as StreamEnvelope<unknown>;
+          if (channel === "market-data" && message.type === "market-data" && message.data) ingest(message.data as LiveFrame);
+        } catch { /* REST reconciliation remains authoritative after malformed frames. */ }
+      };
+      ws.onerror = () => ws.close();
+      ws.onclose = () => {
+        if (sockets.current.get(channel) === ws) sockets.current.delete(channel);
+        if (channel === "market-data") setStreaming(false);
+        if (!cancelled && !reconnectTimers.has(channel)) {
+          const id = window.setTimeout(() => {
+            reconnectTimers.delete(channel);
+            connect(channel);
+          }, RECONNECT_MS);
+          reconnectTimers.set(channel, id);
+        }
+      };
+    }
+
     void refresh();
     const timer = window.setInterval(() => void refresh(), 3000);
-    const opened = new Set<string>();
-    sockets.current = ["market-data", "orderbook", "analytics"].map((channel) => {
-      const ws = new WebSocket(`${WS_BASE}/ws/${channel}`);
-      ws.onopen = () => { opened.add(channel); if (channel === "market-data") setStreaming(true); };
-      ws.onclose = () => { opened.delete(channel); if (channel === "market-data") setStreaming(false); };
-      ws.onmessage = (event) => { try { const message = JSON.parse(event.data as string) as StreamEnvelope<unknown>; if (channel === "market-data" && message.type === "market-data" && message.data) ingest(message.data as LiveFrame); } catch { /* REST reconciliation remains available */ } };
-      return ws;
-    });
-    return () => { cancelled = true; window.clearInterval(timer); sockets.current.forEach((ws) => ws.close()); };
+    ["market-data", "orderbook", "analytics"].forEach(connect);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      reconnectTimers.forEach((id) => window.clearTimeout(id));
+      reconnectTimers.clear();
+      sockets.current.forEach((ws) => ws.close());
+      sockets.current.clear();
+    };
   }, []);
 
   useEffect(() => {
     if (!selectedMarket) { setHawkes(null); setGreeks(null); return; }
     let cancelled = false;
     async function load() {
-      const [h, g] = await Promise.all([fetch(`${API_BASE}/hawkes/${selected}`), fetch(`${API_BASE}/analytics/greeks/${encodeURIComponent(selectedMarket!.market_id)}`)]);
-      if (!cancelled) { setHawkes(h.ok ? await h.json() : null); setGreeks(g.ok ? await g.json() : null); }
+      try {
+        const [h, g] = await Promise.all([fetch(`${API_BASE}/hawkes/${selected}`), fetch(`${API_BASE}/analytics/greeks/${encodeURIComponent(selectedMarket!.market_id)}`)]);
+        if (!cancelled) { setHawkes(h.ok ? await h.json() : null); setGreeks(g.ok ? await g.json() : null); }
+      } catch {
+        if (!cancelled) { setHawkes(null); setGreeks(null); }
+      }
     }
     void load();
     const timer = window.setInterval(() => void load(), 4000);
@@ -168,11 +211,11 @@ function App() {
   const sessionReturn = useMemo(() => values.length > 1 ? values[values.length - 1] / values[0] - 1 : 0, [values]);
   const edgeSeries = useMemo(() => values.length < 2 ? [] : values.map((v, i) => i ? v / values[i - 1] - 1 : 0), [values]);
   const hawkesSeries = useMemo(() => edgeSeries.slice(-60).map((v, i) => Math.abs(v) * (1 + (hawkes?.current_intensity ?? 0)) * 10000 + i * 0.002), [edgeSeries, hawkes]);
-  const lifecycleForSymbol = selectedMarkets.length ? selectedMarkets : markets;
+  const lifecycleForSymbol = selectedMarkets;
 
   return <main className="terminal">
-    <header className="commandBar"><div className="logoBox">PQE</div><div className="commandTitle"><b>PROTO // QUANT TERMINAL</b><span>HFT DIRECTIONAL · HEDGE · FAIR PROBABILITY · PUBLIC READ-ONLY</span></div><div className="commandMetrics"><span>BTC <b>{frames.BTC ? usd(frames.BTC.mid) : "—"}</b></span><span>MKT P <b>{selectedMarket ? pct(selectedMarket.market_probability, 1) : "—"}</b></span><span>FAIR P <b>{selectedMarket ? pct(selectedMarket.model_probability, 1) : "—"}</b></span><span>EDGE <b className={edge >= 0 ? "positive" : "negative"}>{pct(edge, 2)}</b></span></div><div className="clock"><b>{lastUpdate}</b><span>{health?.status === "ok" ? "UTC/LIVE" : "SYNC"}</span></div></header>
-    <div className="alertTape"><span className="liveFlag">● LIVE FEED</span><div>EDGE FIRE · {selected} · MKT {selectedMarket ? pct(selectedMarket.market_probability, 0) : "—"} VS FAIR {selectedMarket ? pct(selectedMarket.model_probability, 0) : "—"} · EDGE {pct(edge, 2)} · VOL {a ? pct(a.realized_volatility, 2) : "—"} · SPREAD {a ? `${n(a.current_spread_bps, 2)}BP` : "—"}</div></div>
+    <header className="commandBar"><div className="logoBox">PQE</div><div className="commandTitle"><b>PROTO // QUANT TERMINAL</b><span>HFT DIRECTIONAL · HEDGE · FAIR PROBABILITY · PUBLIC READ-ONLY</span></div><div className="commandMetrics"><span>BTC <b>{frames.BTC ? usd(frames.BTC.mid) : "—"}</b></span><span>MKT P <b>{selectedMarket ? pct(selectedMarket.market_probability, 1) : "—"}</b></span><span>FAIR P <b>{selectedMarket ? pct(selectedMarket.model_probability, 1) : "—"}</b></span><span>EDGE <b className={edge >= 0 ? "positive" : "negative"}>{selectedMarket ? pct(edge, 2) : "—"}</b></span></div><div className="clock"><b>{lastUpdate}</b><span>{health?.status === "ok" ? "UTC/LIVE" : "SYNC"}</span></div></header>
+    <div className="alertTape"><span className="liveFlag">● LIVE FEED</span><div>EDGE FIRE · {selected} · MKT {selectedMarket ? pct(selectedMarket.market_probability, 0) : "—"} VS FAIR {selectedMarket ? pct(selectedMarket.model_probability, 0) : "—"} · EDGE {selectedMarket ? pct(edge, 2) : "—"} · VOL {a ? pct(a.realized_volatility, 2) : "—"} · SPREAD {a ? `${n(a.current_spread_bps, 2)}BP` : "—"}</div></div>
 
     <section className="topMatrix">
       <article className="frame portfolioBox"><div className="frameTitle">◆ PAPER PORTFOLIO <span>{streaming ? "ACTIVE" : "SYNC"}</span></div><div className="pnlHero" data-sign={(portfolio?.total_pnl_after_fees ?? 0) >= 0 ? "plus" : "minus"}>{portfolio ? usd(portfolio.total_pnl_after_fees) : "—"}</div><div className="tinyStats"><span>GROSS<b>{portfolio ? usd(portfolio.gross_exposure) : "—"}</b></span><span>NET<b>{portfolio ? usd(portfolio.net_exposure) : "—"}</b></span><span>POSITIONS<b>{portfolio?.open_position_count ?? 0}</b></span><span>DRAWDOWN<b>{portfolio ? usd(portfolio.realized_drawdown) : "—"}</b></span></div><div className="label">INVENTORY / FLOW</div><div className="bar"><i style={{ width: `${clamp(portfolio?.max_asset_concentration ?? 0) * 100}%` }} /></div><div className="label">SESSION MIX</div><div className="mix">{SYMBOLS.map((symbol) => <span key={symbol}>{symbol} {analytics[symbol] ? pct(Math.abs(analytics[symbol]!.simple_return) / (SYMBOLS.reduce((q, key) => q + Math.abs(analytics[key]?.simple_return ?? 0), 0) || 1), 0) : "—"}</span>)}</div><div className="paperFoot">REAL MONEY EXECUTION DISABLED</div></article>
@@ -180,12 +223,12 @@ function App() {
       <article className="frame marketBox"><div className="frameTitle">◆ {selected} SPOT · MODEL FEED <span>{streaming ? "LIVE" : "RECONCILING"}</span></div><div className="marketTop"><div><small>{selected}/USD · LIVE</small><strong>{active ? usd(active.mid) : "—"}</strong><em className={sessionReturn >= 0 ? "positive" : "negative"}>{pct(sessionReturn, 2)}</em></div><div className="symbolTabs">{SYMBOLS.map((symbol) => <button key={symbol} onClick={() => setSelected(symbol)} className={selected === symbol ? "active" : ""}>{symbol}</button>)}</div></div><Candles values={values} /><div className="bookRows"><div className="askRow"><span>ASK</span><b>{active ? usd(active.ask) : "—"}</b><i>{active ? n(active.ask_size, 5) : "—"}</i></div><div className="spreadRow">SPREAD {a ? `${n(a.current_spread_bps, 3)} BP` : "—"}</div><div className="bidRow"><span>BID</span><b>{active ? usd(active.bid) : "—"}</b><i>{active ? n(active.bid_size, 5) : "—"}</i></div></div></article>
 
       <div className="rightStack">
-        <article className="frame lifecycleBox"><div className="frameTitle">◆ MARKET LIFECYCLE · ENTRY → RESOLVE <span>{selectedMarkets.length} TRACKED</span></div><div className="lifeRows">{lifecycleForSymbol.slice(0, 6).map((m) => <div className="lifeRow" key={m.market_id}><span>{m.symbol}</span><div className="lifeTrack"><i style={{ left: `${clamp(m.market_probability) * 88}%` }} /><b style={{ left: `${clamp(m.model_probability) * 88}%` }} /></div><em className={m.net_edge >= 0 ? "positive" : "negative"}>{pct(m.net_edge, 1)}</em></div>)}{markets.length === 0 && <div className="waiting">WAITING FOR LIFECYCLE ANALYTICS</div>}</div></article>
+        <article className="frame lifecycleBox"><div className="frameTitle">◆ MARKET LIFECYCLE · ENTRY → RESOLVE <span>{selectedMarkets.length} TRACKED</span></div><div className="lifeRows">{lifecycleForSymbol.slice(0, 6).map((m) => <div className="lifeRow" key={m.market_id}><span>{m.symbol}</span><div className="lifeTrack"><i style={{ left: `${clamp(m.market_probability) * 88}%` }} /><b style={{ left: `${clamp(m.model_probability) * 88}%` }} /></div><em className={m.net_edge >= 0 ? "positive" : "negative"}>{pct(m.net_edge, 1)}</em></div>)}{selectedMarkets.length === 0 && <div className="waiting">NO {selected} RESEARCH MARKET LOADED</div>}</div></article>
         <article className="frame resolutionBox"><div className="frameTitle">◆ RESOLUTION GRID · LIVE EXPIRIES <span>{markets.length}</span></div><div className="resolutionGrid">{markets.slice(0, 18).map((m) => <div key={m.market_id} className={m.net_edge >= 0 ? "resCell pos" : "resCell neg"}><small>{m.symbol}</small><strong>{pct(m.model_probability, 0)}</strong><span>{n(m.expiry_horizon_minutes, 0)}m</span></div>)}{markets.length === 0 && Array.from({ length: 12 }).map((_, i) => <div key={i} className="resCell emptyCell">—</div>)}</div></article>
       </div>
     </section>
 
-    <section className="frame torusPanel"><div className="frameTitle">◆ EXPIRY TORUS <span>EDGE × TIME × PROBABILITY</span></div><div className="torusBody"><div className="expiryLadder">{lifecycleForSymbol.slice(0, 8).map((m) => <div key={m.market_id}><span>{n(m.expiry_horizon_minutes, 0)}m</span><div><i style={{ width: `${clamp(Math.abs(m.net_edge) * 20) * 100}%` }} /></div><b className={m.net_edge >= 0 ? "positive" : "negative"}>{pct(m.net_edge, 2)}</b></div>)}</div><Torus lifecycle={lifecycleForSymbol} edge={edge} /><div className="torusStats"><span>MARKETS<b>{markets.length}</b></span><span>MODEL P<b>{selectedMarket ? pct(selectedMarket.model_probability, 1) : "—"}</b></span><span>CONF<b>{selectedMarket ? pct(selectedMarket.confidence, 1) : "—"}</b></span><span>VOL<b>{a ? pct(a.realized_volatility, 2) : "—"}</b></span><span>IMBALANCE<b>{a ? n(a.current_imbalance, 3) : "—"}</b></span></div></div><div className="edgeTimeline"><AreaLine values={edgeSeries} positive={edge >= 0} /><div className="zeroAxis" /><div className="timelineLabel">NET EDGE / MICRO-RETURN FLOW</div></div></section>
+    <section className="frame torusPanel"><div className="frameTitle">◆ EXPIRY TORUS <span>EDGE × TIME × PROBABILITY</span></div><div className="torusBody"><div className="expiryLadder">{lifecycleForSymbol.slice(0, 8).map((m) => <div key={m.market_id}><span>{n(m.expiry_horizon_minutes, 0)}m</span><div><i style={{ width: `${clamp(Math.abs(m.net_edge) * 20) * 100}%` }} /></div><b className={m.net_edge >= 0 ? "positive" : "negative"}>{pct(m.net_edge, 2)}</b></div>)}</div><Torus lifecycle={lifecycleForSymbol} edge={edge} /><div className="torusStats"><span>MARKETS<b>{selectedMarkets.length}</b></span><span>MODEL P<b>{selectedMarket ? pct(selectedMarket.model_probability, 1) : "—"}</b></span><span>CONF<b>{selectedMarket ? pct(selectedMarket.confidence, 1) : "—"}</b></span><span>VOL<b>{a ? pct(a.realized_volatility, 2) : "—"}</b></span><span>IMBALANCE<b>{a ? n(a.current_imbalance, 3) : "—"}</b></span></div></div><div className="edgeTimeline"><AreaLine values={edgeSeries} positive={edge >= 0} /><div className="zeroAxis" /><div className="timelineLabel">NET EDGE / MICRO-RETURN FLOW</div></div></section>
 
     <section className="bottomMatrix"><article className="frame greeksBox"><div className="frameTitle">◆ GREEKS FIELD · THE GAMMA WALL <span>{selected}</span></div><GreeksField g={greeks} values={values} /><div className="greekStats"><span>Δ <b>{greeks ? n(greeks.market_probability_delta, 4) : "—"}</b></span><span>ν <b>{greeks ? n(greeks.volatility_vega, 4) : "—"}</b></span><span>κ <b>{greeks ? n(greeks.imbalance_kappa, 4) : "—"}</b></span><span>θ <b>{greeks ? n(greeks.time_theta, 4) : "—"}</b></span></div></article><article className="frame hawkesBox"><div className="frameTitle">◆ HAWKES CASCADE · SELF-EXCITING FLOW <span>{hawkes ? `λ ${n(hawkes.current_intensity, 3)}` : "WAIT"}</span></div><AreaLine values={hawkesSeries} positive={false} /><div className="cascadeLines">{[1, 0.72, 0.5, 0.34].map((k, i) => <div key={i}><i style={{ width: `${clamp((hawkes?.current_intensity ?? 0) * k, 0.05, 1) * 100}%` }} /></div>)}</div><div className="hawkesStats"><span>BASELINE<b>{hawkes ? n(hawkes.baseline_intensity, 4) : "—"}</b></span><span>EXCITATION<b>{hawkes ? n(hawkes.excitation, 4) : "—"}</b></span><span>BRANCHING<b>{hawkes ? n(hawkes.branching_ratio, 4) : "—"}</b></span><span>EVENT P<b>{hawkes ? pct(hawkes.event_probability, 1) : "—"}</b></span></div></article></section>
 
