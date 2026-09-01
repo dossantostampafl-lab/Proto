@@ -17,6 +17,12 @@ async function missing(path, message) { try { await access(new URL(path, import.
 
 assert.match(source, /connection_generation/, "live frames must expose connection generation");
 assert.match(source, /frame\.connection_generation===prev\.generation&&frame\.sequence<=prev\.sequence/, "dedupe must use generation and sequence");
+const cursorAdvance = source.indexOf("cursors.current[frame.symbol]={generation:frame.connection_generation,sequence:frame.sequence}");
+const pendingStage = source.indexOf("pending.current[frame.symbol]={frame,generationChanged}");
+assert(cursorAdvance >= 0 && pendingStage > cursorAdvance, "generation/sequence cursor must advance atomically before a frame enters the render batch");
+assert.match(source, /type PendingLiveFrame = \{ frame: LiveFrame; generationChanged: boolean \}/, "render batching must carry generation transition metadata");
+assert.match(source, /Math\.min\(15000,750\*2\*\*reconnectAttempt\)/, "websocket reconnect must use bounded exponential backoff");
+assert.match(source, /reconnectAttempt=0/, "successful websocket connections must reset reconnect backoff");
 assert.match(source, /STATUS_TTL_MS/, "live freshness must have a local success TTL");
 assert.match(source, /CANDLE_MS = 5000/, "live chart must use explicit time-bucket OHLC");
 assert.match(source, /Math\.floor\(sourceMs \/ CANDLE_MS\)/, "OHLC bucket must derive from source timestamp");
@@ -98,4 +104,4 @@ assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bu
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
 
-console.log("frontend institutional market contracts: ok");
+console.log("frontend live-ingest contracts: ok");
