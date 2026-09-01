@@ -87,3 +87,4 @@ jobs:
       - run: npm run typecheck
       - run: npm run contract-check
       - run: npm run build
+      - run: npm run bundle-check
