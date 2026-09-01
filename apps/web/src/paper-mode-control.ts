@@ -30,6 +30,23 @@ async function request<T>(path: string, method: "GET" | "POST" = "GET") {
   }
 }
 
+function syncExecutionHeader(status: PaperStatus | null) {
+  const indicator = document.querySelector<HTMLElement>(".systemState b:first-of-type");
+  if (!indicator) return;
+  indicator.classList.add("execModeManaged");
+  const label = !status
+    ? "EXEC UNKNOWN"
+    : status.mode === "PAPER_TRADING"
+      ? "EXEC PAPER"
+      : status.mode === "LIVE_MONITORING"
+        ? "EXEC LIVE READ-ONLY"
+        : status.mode === "HISTORICAL_REPLAY"
+          ? "EXEC REPLAY"
+          : "EXEC SIMULATION";
+  indicator.dataset.execLabel = label;
+  indicator.setAttribute("aria-label", label);
+}
+
 function mount() {
   const host = document.querySelector<HTMLElement>(".automationBody>div:first-child");
   if (!host || host.querySelector(".paperModeControl")) return false;
@@ -59,6 +76,7 @@ function mount() {
   let busy = false;
 
   const render = (status: PaperStatus | null, error?: string) => {
+    syncExecutionHeader(status);
     if (!status) {
       state.className = "paperModeStatus error";
       state.textContent = error ?? "Paper runtime status unavailable.";
@@ -95,7 +113,7 @@ function mount() {
       render(null, result.status === 0 ? "Could not reach paper runtime control." : `Paper start HTTP ${result.status}`);
       return;
     }
-    await refresh();
+    render(result.data);
   });
 
   stop.addEventListener("click", async () => {
@@ -107,14 +125,14 @@ function mount() {
     state.textContent = "Stopping simulated execution runtime…";
     const result = await request<PaperStatus>("/paper/stop", "POST");
     busy = false;
-    if (!result.ok) {
+    if (!result.ok || !result.data) {
       render(null, result.status === 0 ? "Could not reach paper runtime control." : `Paper stop HTTP ${result.status}`);
       return;
     }
-    await refresh();
+    render(result.data);
   });
 
-  const timer = window.setInterval(() => void refresh(), 3000);
+  const timer = window.setInterval(() => void refresh(), 2000);
   void refresh();
   window.addEventListener("beforeunload", () => window.clearInterval(timer), { once: true });
   return true;
