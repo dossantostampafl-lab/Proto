@@ -9,6 +9,7 @@ type Health = { status: string; mode: string; version: string };
 type LiveStatus = { running: boolean; receiving_data: boolean; complete: boolean; all_symbols_fresh: boolean; last_receipt_age_seconds: number | null; fresh_symbols: string[]; missing_symbols: string[]; stale_symbols: string[] };
 type LiveFrame = { timestamp: string; received_at?: string | null; symbol: SymbolName; bid: number; ask: number; mid: number; spread: number; bid_size: number; ask_size: number; sequence: number; connection_generation: number };
 type LiveMarketResponse = { count: number; markets: LiveFrame[] };
+type LiveHistoryResponse = { source?: string; symbol: SymbolName; count: number; history: LiveFrame[] };
 type LiveAnalytics = { symbol: SymbolName; sample_count: number; simple_return: number; realized_volatility: number; current_spread_bps: number; current_imbalance: number; current_microprice: number; observation_span_seconds: number };
 type Portfolio = { gross_exposure: number; net_exposure: number; total_pnl_after_fees: number; realized_drawdown: number; max_asset_concentration: number; open_position_count: number };
 type PnL = { fees: number; slippage: number; residual: number; observed_total_pnl: number };
@@ -21,7 +22,9 @@ type Cursor = { generation: number; sequence: number };
 type Candle = { t: number; open: number; high: number; low: number; close: number };
 type CandleBook = Record<SymbolName, Candle[]>;
 type Envelope = { type: string; data?: unknown };
-type PendingLiveFrame = { frame: LiveFrame; generationChanged: boolean };
+type PendingLiveFrame = { frame: LiveFrame };
+type HistoryAvailability = "checking" | "available" | "disabled" | "error";
+type HistoryState = Record<SymbolName, HistoryAvailability>;
 
 const SYMBOLS: SymbolName[] = ["BTC", "ETH", "SOL"];
 const API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin;
@@ -32,6 +35,7 @@ const RESEARCH_MS = 4000;
 const CANDLE_MS = 5000;
 const MAX_CANDLES = 96;
 const MAX_SERIES = 120;
+const HISTORY_LIMIT = 1000;
 
 const emptyFrames = (): Record<SymbolName, LiveFrame | null> => ({ BTC: null, ETH: null, SOL: null });
 const emptyPending = (): Record<SymbolName, PendingLiveFrame | null> => ({ BTC: null, ETH: null, SOL: null });
@@ -39,11 +43,13 @@ const emptyAnalytics = (): Record<SymbolName, LiveAnalytics | null> => ({ BTC: n
 const emptyCursors = (): Record<SymbolName, Cursor> => ({ BTC: { generation: -1, sequence: -1 }, ETH: { generation: -1, sequence: -1 }, SOL: { generation: -1, sequence: -1 } });
 const emptyCandles = (): CandleBook => ({ BTC: [], ETH: [], SOL: [] });
 const emptySeries = (): Record<SymbolName, number[]> => ({ BTC: [], ETH: [], SOL: [] });
+const emptyHistoryState = (): HistoryState => ({ BTC: "checking", ETH: "checking", SOL: "checking" });
 const clamp = (v: number, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 const num = (v: number | null | undefined, d = 2) => v == null || !Number.isFinite(v) ? "—" : new Intl.NumberFormat("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }).format(v);
 const usd = (v: number | null | undefined) => v == null ? "—" : `$${num(v, Math.abs(v) >= 1000 ? 2 : 4)}`;
 const pct = (v: number | null | undefined, d = 2) => v == null || !Number.isFinite(v) ? "—" : `${num(v * 100, d)}%`;
 const append = (xs: number[], v: number) => [...xs, v].slice(-MAX_SERIES);
+const frameTime = (frame: LiveFrame) => Date.parse(frame.received_at || frame.timestamp);
 
 async function requestJson<T>(path: string): Promise<ApiResult<T>> {
   const controller = new AbortController();
@@ -58,16 +64,32 @@ async function requestJson<T>(path: string): Promise<ApiResult<T>> {
   }
 }
 
-function upsertCandle(book: CandleBook, frame: LiveFrame, generationChanged: boolean): CandleBook {
-  const sourceMs = Date.parse(frame.received_at || frame.timestamp);
+function upsertCandle(book: CandleBook, frame: LiveFrame): CandleBook {
+  const sourceMs = frameTime(frame);
   if (!Number.isFinite(sourceMs)) return book;
   const bucket = Math.floor(sourceMs / CANDLE_MS) * CANDLE_MS;
-  const current = generationChanged ? [] : book[frame.symbol];
-  const next = [...current];
+  const next = [...book[frame.symbol]];
   const last = next[next.length - 1];
+  if (last && bucket < last.t) return book;
   if (!last || last.t !== bucket) next.push({ t: bucket, open: frame.mid, high: frame.mid, low: frame.mid, close: frame.mid });
   else next[next.length - 1] = { ...last, high: Math.max(last.high, frame.mid), low: Math.min(last.low, frame.mid), close: frame.mid };
   return { ...book, [frame.symbol]: next.slice(-MAX_CANDLES) };
+}
+
+function candleBookFromHistory(frames: LiveFrame[]): CandleBook {
+  let book = emptyCandles();
+  const sorted = [...frames]
+    .filter(frame => SYMBOLS.includes(frame.symbol) && Number.isFinite(frame.mid) && frame.mid > 0 && Number.isFinite(frameTime(frame)))
+    .sort((a, b) => frameTime(a) - frameTime(b));
+  sorted.forEach(frame => { book = upsertCandle(book, frame); });
+  return book;
+}
+
+function mergeCandleSeries(history: Candle[], live: Candle[]): Candle[] {
+  const byTime = new Map<number, Candle>();
+  history.forEach(candle => byTime.set(candle.t, candle));
+  live.forEach(candle => byTime.set(candle.t, candle));
+  return [...byTime.values()].sort((a, b) => a.t - b.t).slice(-MAX_CANDLES);
 }
 
 function Badge({ kind }: { kind: "live" | "research" | "paper" }) {
@@ -82,7 +104,7 @@ function Spark({ values, tone = "info" }: { values: number[]; tone?: "info" | "g
 }
 
 function CandleChart({ candles }: { candles: Candle[] }) {
-  if (candles.length < 3) return <div className="empty">Building 5-second OHLC buckets from live ticks…</div>;
+  if (candles.length < 3) return <div className="empty">Building 5-second OHLC buckets from public live ticks…</div>;
   const plot = { left: 14, right: 682, top: 18, bottom: 207 };
   const rawLo = Math.min(...candles.map(c => c.low)), rawHi = Math.max(...candles.map(c => c.high));
   const rawSpan = Math.max(rawHi - rawLo, Math.abs(rawHi) * 0.00001, 1e-9), pad = rawSpan * 0.08;
@@ -139,6 +161,7 @@ function GreeksPanel({ greeks }: { greeks: Greeks | null }) {
 function App() {
   const [health,setHealth]=useState<Health|null>(null),[status,setStatus]=useState<LiveStatus|null>(null),[statusAt,setStatusAt]=useState(0);
   const [selected,setSelected]=useState<SymbolName>("BTC"),[frames,setFrames]=useState(emptyFrames),[analytics,setAnalytics]=useState(emptyAnalytics),[candles,setCandles]=useState<CandleBook>(emptyCandles);
+  const [historyState,setHistoryState]=useState<HistoryState>(emptyHistoryState);
   const [portfolio,setPortfolio]=useState<Portfolio|null>(null),[pnl,setPnl]=useState<PnL|null>(null),[lifecycle,setLifecycle]=useState<LifecycleResponse|null>(null);
   const [hawkes,setHawkes]=useState<Hawkes|null>(null),[greeks,setGreeks]=useState<Greeks|null>(null),[edgeSeries,setEdgeSeries]=useState(emptySeries),[hawkesSeries,setHawkesSeries]=useState(emptySeries);
   const [researchState,setResearchState]=useState<"checking"|"available"|"disabled"|"error">("checking"),[wsConnected,setWsConnected]=useState(false),[validationOpen,setValidationOpen]=useState(false),[now,setNow]=useState(Date.now());
@@ -148,18 +171,41 @@ function App() {
     if(!SYMBOLS.includes(frame.symbol)||!Number.isFinite(frame.mid)||frame.mid<=0||!Number.isFinite(frame.sequence)||!Number.isFinite(frame.connection_generation))return;
     const prev=cursors.current[frame.symbol];
     if(frame.connection_generation<prev.generation||(frame.connection_generation===prev.generation&&frame.sequence<=prev.sequence))return;
-    const generationChanged=prev.generation>=0&&frame.connection_generation!==prev.generation;
     cursors.current[frame.symbol]={generation:frame.connection_generation,sequence:frame.sequence};
-    pending.current[frame.symbol]={frame,generationChanged};
+    pending.current[frame.symbol]={frame};
     if(flushTimer.current!==null)return;
     flushTimer.current=window.setTimeout(()=>{
       const batch=pending.current;pending.current=emptyPending();flushTimer.current=null;
       setFrames(old=>{const next={...old};SYMBOLS.forEach(s=>{const staged=batch[s];if(staged)next[s]=staged.frame;});return next;});
-      setCandles(old=>{let next=old;SYMBOLS.forEach(s=>{const staged=batch[s];if(!staged)return;next=upsertCandle(next,staged.frame,staged.generationChanged);});return next;});
+      setCandles(old=>{let next=old;SYMBOLS.forEach(s=>{const staged=batch[s];if(!staged)return;next=upsertCandle(next,staged.frame);});return next;});
     },120);
   };
 
   useEffect(()=>{const id=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(id);},[]);
+  useEffect(()=>{
+    let cancelled=false;
+    const bootstrap=async()=>{
+      const results=await Promise.all(SYMBOLS.map(symbol=>requestJson<LiveHistoryResponse>(`/live/history/${symbol}?limit=${HISTORY_LIMIT}`)));
+      if(cancelled)return;
+      const historical=emptyCandles();
+      const nextState=emptyHistoryState();
+      results.forEach((result,index)=>{
+        const symbol=SYMBOLS[index];
+        if(result.ok&&result.data){
+          historical[symbol]=candleBookFromHistory(result.data.history)[symbol];
+          nextState[symbol]="available";
+        }else if(result.status===503){
+          nextState[symbol]="disabled";
+        }else{
+          nextState[symbol]="error";
+        }
+      });
+      setHistoryState(nextState);
+      setCandles(old=>{const next={...old};SYMBOLS.forEach(symbol=>{next[symbol]=mergeCandleSeries(historical[symbol],old[symbol]);});return next;});
+    };
+    void bootstrap();
+    return()=>{cancelled=true;};
+  },[]);
   useEffect(()=>{
     let cancelled=false,reconnect:number|null=null,reconnectAttempt=0;
     const refresh=async()=>{const[h,s,m,p,pa,l,...aa]=await Promise.all([requestJson<Health>("/health"),requestJson<LiveStatus>("/live/status"),requestJson<LiveMarketResponse>("/live/market-data"),requestJson<Portfolio>("/v1/portfolio"),requestJson<PnL>("/pnl/attribution"),requestJson<LifecycleResponse>("/market-lifecycle"),...SYMBOLS.map(symbol=>requestJson<LiveAnalytics>(`/live/analytics/${symbol}`))]);if(cancelled)return;if(h.ok&&h.data)setHealth(h.data);if(s.ok&&s.data){setStatus(s.data);setStatusAt(Date.now());}if(m.ok&&m.data)m.data.markets.forEach(ingest);if(p.ok&&p.data)setPortfolio(p.data);if(pa.ok&&pa.data)setPnl(pa.data);if(l.ok&&l.data){setLifecycle(l.data);setResearchState("available");setEdgeSeries(old=>{const next={...old};SYMBOLS.forEach(sym=>{const row=l.data!.markets.find(x=>x.symbol===sym);if(row&&Number.isFinite(row.net_edge))next[sym]=append(next[sym],row.net_edge);});return next;});}else if(l.status===503){setLifecycle(null);setResearchState("disabled");}else if(l.status!==0)setResearchState("error");setAnalytics(old=>{const next={...old};aa.forEach((r,i)=>{if(r.ok&&r.data)next[SYMBOLS[i]]=r.data;});return next;});};
@@ -180,11 +226,11 @@ function App() {
   return <main className="terminal" data-section="COMMAND" data-feed={liveFresh?"live":"stale"}>
     <header className="topbar"><div className="brand"><span>P</span><div><b>PROTO</b><small>QUANT TERMINAL</small></div></div><nav aria-label="Primary">{sections.map(s=><button key={s} type="button" onClick={()=>go(s)}>{s}</button>)}</nav><div className="systemState"><em>FEED {liveFresh?"LIVE":"STALE"}</em><b>EXEC SIMULATION</b><b className={liveFresh?"good":"warn"}>● {liveFresh?"STREAMING":"RECONCILING"}</b><span>{new Date(now).toISOString().slice(11,19)} UTC</span></div></header>
 
-    <section className="marketStrip" data-section="MARKETS"><div className="stripLabel">LIVE MARKETS</div>{SYMBOLS.map(sym=>{const f=frames[sym],m=analytics[sym];return <button className={`marketTile ${selected===sym?"active":""}`} key={sym} onClick={()=>setSelected(sym)} type="button"><span><b>{sym}/USD</b><i className={(m?.simple_return??0)>=0?"good":"bad"}>{pct(m?.simple_return)}</i></span><strong>{f?usd(f.mid):"—"}</strong><small>spread {m?num(m.current_spread_bps,2):"—"} bp</small><Spark values={candles[sym].map(c=>c.close).slice(-30)} tone={(m?.simple_return??0)>=0?"good":"bad"}/></button>;})}<div className="feedTile"><Badge kind="live"/><b>{transport}</b><small>{wsConnected?"WebSocket primary · REST reconciliation":"WebSocket unavailable · REST reconciliation active"}</small><small>age {status?.last_receipt_age_seconds!=null?`${num(status.last_receipt_age_seconds,2)}s`:"—"}</small><small>gen {active?.connection_generation??"—"} · seq {active?.sequence??"—"}</small></div></section>
+    <section className="marketStrip" data-section="MARKETS"><div className="stripLabel">LIVE MARKETS</div>{SYMBOLS.map(sym=>{const f=frames[sym],m=analytics[sym];return <button className={`marketTile ${selected===sym?"active":""}`} key={sym} onClick={()=>setSelected(sym)} type="button"><span><b>{sym}/USD</b><i className={(m?.simple_return??0)>=0?"good":"bad"}>{pct(m?.simple_return)}</i></span><strong>{f?usd(f.mid):"—"}</strong><small>spread {m?num(m.current_spread_bps,2):"—"} bp</small><Spark values={candles[sym].map(c=>c.close).slice(-30)} tone={(m?.simple_return??0)>=0?"good":"bad"}/></button>;})}<div className="feedTile"><Badge kind="live"/><b>{transport}</b><small>{wsConnected?"WebSocket primary · REST reconciliation":"WebSocket unavailable · REST reconciliation active"}</small><small>history {historyState[selected].toUpperCase()}</small><small>age {status?.last_receipt_age_seconds!=null?`${num(status.last_receipt_age_seconds,2)}s`:"—"}</small><small>gen {active?.connection_generation??"—"} · seq {active?.sequence??"—"}</small></div></section>
 
     <section className="grid"><aside><article className="panel"><header>L1 ORDER BOOK <Badge kind="live"/></header>{active?<div className="book"><div className="ask"><span>ASK</span><b>{usd(active.ask)}</b><i>{num(active.ask_size,5)}</i></div><strong className="mid">{usd(active.mid)}</strong><div className="bid"><span>BID</span><b>{usd(active.bid)}</b><i>{num(active.bid_size,5)}</i></div></div>:<div className="empty">Waiting for live quote…</div>}</article><article className="panel"><header>L1 MICROSTRUCTURE <Badge kind="live"/></header><div className="flow"><div><i style={{left:`${clamp(((a?.current_imbalance??0)+1)/2)*100}%`}}/></div><strong>{a?num(a.current_imbalance,3):"—"}</strong><span>imbalance<b>{a?(a.current_imbalance>=0?"BID BIAS":"ASK BIAS"):"—"}</b></span><span>microprice<b>{a?usd(a.current_microprice):"—"}</b></span><span>realized vol<b>{a?pct(a.realized_volatility):"—"}</b></span><span>spread<b>{a?`${num(a.current_spread_bps,2)} bp`:"—"}</b></span><span>samples<b>{a?.sample_count??"—"}</b></span></div></article></aside>
 
-      <div className="center"><article className="panel chart"><header>{selected}/USD · LIVE 5S OHLC <Badge kind="live"/></header><div className="quote"><strong>{active?usd(active.mid):"—"}</strong><span>{transport} · public read-only ticks</span></div><CandleChart candles={candles[selected]}/></article><article className="panel research" data-section="RESEARCH"><header>EXPIRY / RISK FIELD <Badge kind="research"/></header>{researchAvailable?<><ResearchField rows={selectedMarkets} edge={edge}/><div className="metrics"><span>MARKET P<b>{selectedMarket?pct(selectedMarket.market_probability,1):"—"}</b></span><span>MODEL P<b>{selectedMarket?pct(selectedMarket.model_probability,1):"—"}</b></span><span>CONF<b>{selectedMarket?pct(selectedMarket.confidence,1):"—"}</b></span><span>UNCERTAINTY<b>{selectedMarket?pct(selectedMarket.uncertainty,1):"—"}</b></span></div></>:<div className="empty"><b>{researchState==="disabled"?"Research disabled in live deployment":"Research unavailable"}</b><span>Live public market telemetry remains independent.</span></div>}</article></div>
+      <div className="center"><article className="panel chart"><header>{selected}/USD · LIVE 5S OHLC <Badge kind="live"/></header><div className="quote"><strong>{active?usd(active.mid):"—"}</strong><span>{transport} · {historyState[selected]==="available"?"persisted bootstrap + live public ticks":"live public ticks"}</span></div><CandleChart candles={candles[selected]}/></article><article className="panel research" data-section="RESEARCH"><header>EXPIRY / RISK FIELD <Badge kind="research"/></header>{researchAvailable?<><ResearchField rows={selectedMarkets} edge={edge}/><div className="metrics"><span>MARKET P<b>{selectedMarket?pct(selectedMarket.market_probability,1):"—"}</b></span><span>MODEL P<b>{selectedMarket?pct(selectedMarket.model_probability,1):"—"}</b></span><span>CONF<b>{selectedMarket?pct(selectedMarket.confidence,1):"—"}</b></span><span>UNCERTAINTY<b>{selectedMarket?pct(selectedMarket.uncertainty,1):"—"}</b></span></div></>:<div className="empty"><b>{researchState==="disabled"?"Research disabled in live deployment":"Research unavailable"}</b><span>Live public market telemetry remains independent.</span></div>}</article></div>
 
       <aside className="analyticsRail"><article className="panel"><header>EDGE HISTORY <Badge kind="research"/></header>{researchAvailable?<><EdgeHistory values={edgeSeries[selected]} current={selectedMarket?.net_edge??null}/><div className="rows"><span>decision<b>{selectedMarket?.edge_decision??"—"}</b></span></div></>:<div className="empty compactEmpty">Research gate closed.</div>}</article><article className="panel"><header>HAWKES CASCADE <Badge kind="research"/></header>{researchAvailable?<HawkesCascade series={hawkesSeries[selected]} hawkes={hawkes}/>:<div className="empty compactEmpty">Research gate closed.</div>}</article><article className="panel"><header>SYNTHETIC GREEKS <Badge kind="research"/></header><GreeksPanel greeks={greeks}/></article></aside></section>
 

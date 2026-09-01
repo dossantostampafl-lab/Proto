@@ -12,15 +12,24 @@ const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const dockerfile = await readFile(new URL("../../../Dockerfile", import.meta.url), "utf8");
 const railwayApp = await readFile(new URL("../../api/app/railway_app.py", import.meta.url), "utf8");
 const design = await readFile(new URL("../../../DESIGN.md", import.meta.url), "utf8");
+const pyproject = await readFile(new URL("../../../pyproject.toml", import.meta.url), "utf8");
 
 async function missing(path, message) { try { await access(new URL(path, import.meta.url)); assert.fail(message); } catch (error) { if (error?.code !== "ENOENT") throw error; } }
 
 assert.match(source, /connection_generation/, "live frames must expose connection generation");
 assert.match(source, /frame\.connection_generation===prev\.generation&&frame\.sequence<=prev\.sequence/, "dedupe must use generation and sequence");
 const cursorAdvance = source.indexOf("cursors.current[frame.symbol]={generation:frame.connection_generation,sequence:frame.sequence}");
-const pendingStage = source.indexOf("pending.current[frame.symbol]={frame,generationChanged}");
+const pendingStage = source.indexOf("pending.current[frame.symbol]={frame}");
 assert(cursorAdvance >= 0 && pendingStage > cursorAdvance, "generation/sequence cursor must advance atomically before a frame enters the render batch");
-assert.match(source, /type PendingLiveFrame = \{ frame: LiveFrame; generationChanged: boolean \}/, "render batching must carry generation transition metadata");
+assert.match(source, /type PendingLiveFrame = \{ frame: LiveFrame \}/, "render batching must carry only accepted live frames");
+assert.doesNotMatch(source, /generationChanged \? \[\] : book\[frame\.symbol\]/, "websocket generation changes must not erase visible chart history");
+assert.match(source, /if \(last && bucket < last\.t\) return book/, "late historical buckets must not rewind the live chart");
+assert.match(source, /function candleBookFromHistory/, "persisted live ticks must bootstrap canonical 5-second OHLC candles");
+assert.match(source, /function mergeCandleSeries/, "persisted candles must merge with concurrently received live candles");
+assert.match(source, /\/live\/history\/\$\{symbol\}\?limit=\$\{HISTORY_LIMIT\}/, "frontend must read the canonical persisted live-history endpoint");
+assert.match(source, /HISTORY_LIMIT = 1000/, "history bootstrap must remain bounded by the backend query contract");
+assert.match(source, /"checking" \| "available" \| "disabled" \| "error"/, "history availability must be represented explicitly");
+assert.match(source, /persisted bootstrap \+ live public ticks/, "chart must disclose persisted history only after a successful history read");
 assert.match(source, /Math\.min\(15000,750\*2\*\*reconnectAttempt\)/, "websocket reconnect must use bounded exponential backoff");
 assert.match(source, /reconnectAttempt=0/, "successful websocket connections must reset reconnect backoff");
 assert.match(source, /STATUS_TTL_MS/, "live freshness must have a local success TTL");
@@ -111,8 +120,10 @@ await missing("../src/premium-runtime.ts", "superseded premium runtime must rema
 await missing("../src/premium-runtime.css", "superseded premium runtime styles must remain removed");
 assert.match(dockerfile, /VITE_API_BASE_URL=""/, "single-origin deploy must remain hostname-portable");
 assert.match(dockerfile, /SYNTHETIC_RESEARCH_ENABLED=true/, "Railway image must explicitly enable the isolated synthetic research workspace");
+assert.match(dockerfile, /PERSISTENCE_ENABLED=true/, "Railway image must enable the public read-only live-history journal");
+assert.match(pyproject, /"aiosqlite>=0\.21,<1"/, "runtime dependencies must include the async sqlite driver used by default live persistence");
 assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bundle must not hardcode Railway hostname");
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
 
-console.log("frontend operational-resilience contracts: ok");
+console.log("frontend history-bootstrap and operational-resilience contracts: ok");
