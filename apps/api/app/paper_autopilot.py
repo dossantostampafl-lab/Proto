@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from math import isfinite
 from time import monotonic
 from typing import Literal
 
@@ -59,7 +60,10 @@ class PaperAutopilotService:
             if not self._paper_runtime_ready():
                 raise HTTPException(
                     status_code=409,
-                    detail="PAPER_TRADING runtime must be running and armed before autopilot starts",
+                    detail=(
+                        "PAPER_TRADING runtime must be running and armed "
+                        "before autopilot starts"
+                    ),
                 )
             self._config = config
             if self.running:
@@ -165,7 +169,8 @@ class PaperAutopilotService:
             self._last_reason = "INVALID_LIVE_PAYLOAD"
             return
 
-        if not all(value == value and abs(value) != float("inf") for value in (bid, ask, bid_size, ask_size, imbalance, volatility)):
+        live_values = (bid, ask, bid_size, ask_size, imbalance, volatility)
+        if not all(isfinite(value) for value in live_values):
             self._errors += 1
             self._last_reason = "NON_FINITE_LIVE_PAYLOAD"
             return
@@ -199,7 +204,11 @@ class PaperAutopilotService:
             self._last_reason = "SIGNAL_ALREADY_CONSUMED"
             return
 
-        elapsed = monotonic() - self._last_action_monotonic if self._last_action_monotonic else float("inf")
+        elapsed = (
+            monotonic() - self._last_action_monotonic
+            if self._last_action_monotonic
+            else float("inf")
+        )
         if elapsed < config.cooldown_seconds:
             self._last_reason = "COOLDOWN"
             return
