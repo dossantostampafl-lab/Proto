@@ -1,0 +1,134 @@
+name: Production Smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-smoke-main
+  cancel-in-progress: true
+
+jobs:
+  railway-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+    steps:
+      - name: Validate deployed dashboard and live safety contracts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
+          attempts = 60
+          delay = 10
+
+          def request(path: str):
+              req = urllib.request.Request(
+                  f"{origin}{path}",
+                  headers={"User-Agent": "proto-production-smoke/1.0"},
+              )
+              with urllib.request.urlopen(req, timeout=10) as response:
+                  return response.status, dict(response.headers.items()), response.read()
+
+          def json_get(path: str):
+              status, headers, body = request(path)
+              if status != 200:
+                  raise AssertionError(f"{path} returned HTTP {status}")
+              return headers, json.loads(body.decode("utf-8"))
+
+          last_error: Exception | None = None
+          for attempt in range(1, attempts + 1):
+              try:
+                  root_status, root_headers, root_body = request("/")
+                  if root_status != 200:
+                      raise AssertionError(f"/ returned HTTP {root_status}")
+                  html = root_body.decode("utf-8")
+                  if '<div id="root"></div>' not in html:
+                      raise AssertionError("dashboard React root is missing")
+                  if "no-store" not in root_headers.get("Cache-Control", ""):
+                      raise AssertionError("dashboard HTML is missing no-store cache policy")
+                  if not root_headers.get("Content-Security-Policy"):
+                      raise AssertionError("dashboard CSP header is missing")
+                  if root_headers.get("X-Frame-Options") != "DENY":
+                      raise AssertionError("dashboard frame protection is missing")
+
+                  _, health = json_get("/health")
+                  if health.get("status") != "ok":
+                      raise AssertionError(f"health status is not ok: {health!r}")
+
+                  _, live = json_get("/live/status")
+                  if live.get("running") is not True:
+                      raise AssertionError("live monitor is not running")
+                  if live.get("receiving_data") is not True:
+                      raise AssertionError("live monitor is not receiving data")
+                  if live.get("complete") is not True:
+                      raise AssertionError("live symbol coverage is incomplete")
+                  if live.get("financial_connectivity") is not False:
+                      raise AssertionError("live surface violated no-financial-connectivity boundary")
+                  if live.get("real_money_execution") is not False:
+                      raise AssertionError("live surface violated no-real-money boundary")
+                  fresh = set(live.get("fresh_symbols") or [])
+                  if not {"BTC", "ETH", "SOL"}.issubset(fresh):
+                      raise AssertionError(f"live symbols are not all fresh: {sorted(fresh)!r}")
+
+                  _, market = json_get("/live/market-data/BTC")
+                  for field in ("bid", "ask", "mid", "sequence", "connection_generation"):
+                      if market.get(field) is None:
+                          raise AssertionError(f"BTC live snapshot missing {field}")
+                  if not (market["bid"] <= market["mid"] <= market["ask"]):
+                      raise AssertionError("BTC live quote violates bid <= mid <= ask")
+
+                  _, analytics = json_get("/live/analytics/BTC")
+                  for field in ("realized_volatility", "current_spread_bps", "current_imbalance", "current_microprice"):
+                      if analytics.get(field) is None:
+                          raise AssertionError(f"BTC analytics missing {field}")
+
+                  _, history = json_get("/live/history/BTC?limit=1")
+                  if history.get("source") != "PUBLIC_READ_ONLY_PERSISTED":
+                      raise AssertionError("persisted history provenance is not public-read-only")
+                  if history.get("financial_connectivity") is not False or history.get("real_money_execution") is not False:
+                      raise AssertionError("persisted history violated financial safety boundary")
+
+                  _, system = json_get("/system/status")
+                  _, risk = json_get("/risk")
+                  if risk.get("real_money_execution") is not False:
+                      raise AssertionError("risk surface did not report real-money execution false")
+                  if system.get("mode") not in {"SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY", "LIVE_MONITORING"}:
+                      raise AssertionError(f"unexpected runtime mode: {system.get('mode')!r}")
+
+                  print(
+                      "production smoke: ok",
+                      json.dumps(
+                          {
+                              "origin": origin,
+                              "runtime_mode": system.get("mode"),
+                              "live_generation": market.get("connection_generation"),
+                              "live_sequence": market.get("sequence"),
+                              "fresh_symbols": sorted(fresh),
+                          },
+                          sort_keys=True,
+                      ),
+                  )
+                  break
+              except (AssertionError, KeyError, ValueError, json.JSONDecodeError, urllib.error.URLError, TimeoutError) as error:
+                  last_error = error
+                  print(f"attempt {attempt}/{attempts} not ready: {type(error).__name__}: {error}")
+                  if attempt == attempts:
+                      raise
+                  time.sleep(delay)
+          else:
+              raise RuntimeError(f"production smoke exhausted retries: {last_error}")
+          PY
