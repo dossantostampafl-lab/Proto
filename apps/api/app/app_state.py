@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from .models import RuntimeState
+from datetime import UTC, datetime
+
+from .models import RuntimeState, SystemMode
 from .persistence import (
     AsyncSqlFillJournal,
     build_engine,
@@ -16,7 +18,14 @@ persistent_journal = (
     AsyncSqlFillJournal(persistence_engine) if persistence_engine is not None else None
 )
 runtime = RuntimeState()
-portfolio = PaperPortfolio()
+portfolio = PaperPortfolio(
+    reference_time_provider=lambda: (
+        replay_session.current_timestamp
+        if runtime.mode == SystemMode.HISTORICAL_REPLAY
+        and replay_session.current_timestamp is not None
+        else datetime.now(UTC)
+    )
+)
 register_portfolio_recovery_target(portfolio)
 replay_session = ReplaySession(on_timeline_reset=portfolio.reset)
 simulator = PaperSimulator(reference_time_provider=lambda: replay_session.current_timestamp)
