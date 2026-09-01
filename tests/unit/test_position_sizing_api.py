@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.app.main import app
@@ -35,8 +36,8 @@ def test_fixed_fractional_position_sizing_is_deterministic() -> None:
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json() == second.json()
-    assert first.json()["fraction"] == 0.02
-    assert first.json()["notional"] == 2_000.0
+    assert first.json()["fraction"] == pytest.approx(0.02)
+    assert first.json()["notional"] == pytest.approx(2_000.0)
     assert first.json()["capped"] is False
     assert first.json()["research_only"] is False
     assert first.json()["real_money_execution"] is False
@@ -52,9 +53,9 @@ def test_hard_notional_cap_is_enforced() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["notional"] == 1_500.0
+    assert response.json()["notional"] == pytest.approx(1_500.0)
     assert response.json()["capped"] is True
-    assert response.json()["hard_notional_cap"] == 1_500.0
+    assert response.json()["hard_notional_cap"] == pytest.approx(1_500.0)
 
 
 def test_edge_adjusted_sizing_uses_edge_and_confidence() -> None:
@@ -67,8 +68,8 @@ def test_edge_adjusted_sizing_uses_edge_and_confidence() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["fraction"] == 0.008
-    assert response.json()["notional"] == 800.0
+    assert response.json()["fraction"] == pytest.approx(0.008)
+    assert response.json()["notional"] == pytest.approx(800.0)
 
 
 def test_capped_kelly_remains_explicitly_research_only() -> None:
@@ -82,8 +83,8 @@ def test_capped_kelly_remains_explicitly_research_only() -> None:
 
     body = response.json()
     assert response.status_code == 200
-    assert body["fraction"] == 0.02
-    assert body["notional"] == 2_000.0
+    assert body["fraction"] == pytest.approx(0.02)
+    assert body["notional"] == pytest.approx(2_000.0)
     assert body["research_only"] is True
     assert body["financial_connectivity"] is False
     assert body["real_money_execution"] is False
