@@ -3,6 +3,7 @@ import { access, readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/terminal.tsx", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/terminal.css", import.meta.url), "utf8");
+const visualStyles = await readFile(new URL("../src/terminal-visuals.css", import.meta.url), "utf8");
 const runtime = await readFile(new URL("../src/terminal-runtime.ts", import.meta.url), "utf8");
 const runtimeStyles = await readFile(new URL("../src/terminal-runtime.css", import.meta.url), "utf8");
 const operational = await readFile(new URL("../src/operational-runtime.ts", import.meta.url), "utf8");
@@ -25,10 +26,16 @@ assert.match(source, /REST FALLBACK/, "transport fallback must be visible");
 assert.match(source, /LIVE PUBLIC/, "live provenance must be explicit");
 assert.match(source, /SYNTHETIC RESEARCH/, "research provenance must be explicit");
 assert.match(source, /PAPER \/ SIM/, "paper provenance must be explicit");
+assert.match(source, /FEED \{liveFresh\?"LIVE":"STALE"\}/, "feed mode must be visually separated from execution mode");
+assert.match(source, /EXEC SIMULATION/, "execution mode must be explicit and separate from live feed state");
 assert.match(source, /EXECUTION SIMULATOR/, "automation must terminate in simulated execution");
 assert.match(source, /No exchange-account connectivity or real-money execution path is exposed\./, "financial boundary must be explicit");
 assert.match(source, /L1 ORDER BOOK/, "frontend must not claim unavailable L2 depth");
 assert.match(source, /ValidationPanel/, "validation lab must remain integrated");
+assert.match(source, /function EdgeHistory/, "edge history must be rendered as an analytical visualization");
+assert.match(source, /function HawkesCascade/, "Hawkes state must be rendered as a cascade visualization");
+assert.match(source, /function GreeksPanel/, "synthetic Greeks must have dedicated visual encoding");
+assert.match(source, /riskFieldGradient/, "expiry risk field must preserve the torus-style signature visualization");
 assert.match(source, /document\.body\.style\.overflow="hidden"/, "React must own modal scroll lock");
 assert.match(source, /e\.key==="Escape"/, "React must own Escape dismissal");
 assert.match(source, /opener\.current\?\.focus\(\)/, "React must restore focus to the modal opener");
@@ -62,9 +69,14 @@ assert.match(styles, /prefers-reduced-motion/, "terminal must respect reduced mo
 assert.match(styles, /focus-visible/, "terminal controls must expose keyboard focus");
 assert.match(styles, /scrollbar-color/, "terminal must define scrollbar baseline");
 assert.match(styles, /@media\(max-width:820px\)/, "terminal must include tablet breakpoint");
+assert.match(visualStyles, /\.edgeViz/, "edge visualization must have dedicated styling");
+assert.match(visualStyles, /\.hawkesViz/, "Hawkes visualization must have dedicated styling");
+assert.match(visualStyles, /\.greeksVisual/, "Greeks visualization must have dedicated styling");
+assert.match(visualStyles, /@media\(min-width:821px\) and \(max-width:1360px\)/, "visual analytics must preserve landscape-tablet density");
 assert.match(design, /Expiry \/ Risk Field/, "durable design context must preserve signature field");
 assert.match(index, /\/src\/terminal\.tsx/, "terminal must be active entrypoint");
 assert.match(index, /\/src\/terminal-runtime\.ts/, "terminal runtime must be active");
+assert.match(index, /\/src\/terminal-visuals\.css/, "visual analytics stylesheet must be active");
 assert.doesNotMatch(index, /premium/, "active HTML must not reference superseded premium surface");
 await missing("../src/premium.tsx", "superseded premium.tsx must remain removed");
 await missing("../src/premium.css", "superseded premium.css must remain removed");
@@ -76,4 +88,4 @@ assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bu
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
 
-console.log("frontend reference-dashboard contracts: ok");
+console.log("frontend visual-analytics contracts: ok");
