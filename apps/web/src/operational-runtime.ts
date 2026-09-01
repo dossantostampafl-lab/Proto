@@ -51,6 +51,7 @@ function ensureSurface() {
   const footer = document.querySelector<HTMLElement>("footer[data-section='SYSTEM']");
   if (!footer) return null;
   surface = el("section", "operationalSurface");
+  surface.dataset.section = "SYSTEM";
   surface.setAttribute("aria-label", "Operational system telemetry");
   footer.before(surface);
   return surface;
