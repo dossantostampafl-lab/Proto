@@ -248,6 +248,12 @@ def _portfolio_gauges() -> dict[str, float]:
         ),
         "portfolio_turnover_notional": float(snapshot.get("turnover_notional", 0.0)),
         "portfolio_slippage_cost": slippage,
+        "portfolio_temporal_exposure_notional_seconds": float(
+            snapshot.get("temporal_exposure_notional_seconds", 0.0)
+        ),
+        "portfolio_max_position_age_seconds": float(
+            snapshot.get("max_position_age_seconds", 0.0)
+        ),
     }
 
 
@@ -285,7 +291,7 @@ def prometheus_metrics() -> str:
         "# TYPE proto_ws_capacity_rejections_total counter",
         f"proto_ws_capacity_rejections_total {websocket['capacity_rejections']}",
         "# HELP proto_ws_oversized_messages_total Oversized WebSocket frames.",
-        "# TYPE proto_ws_oversized_messages_total counter",
+        "# TYPE proto_ws_oversized_messages_total gauge",
         f"proto_ws_oversized_messages_total {websocket['oversized_messages']}",
     ]
     for name, value in _portfolio_gauges().items():
