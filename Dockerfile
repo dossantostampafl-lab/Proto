@@ -4,7 +4,7 @@ WORKDIR /web
 COPY apps/web/package*.json ./
 RUN npm ci
 COPY apps/web ./
-ENV VITE_API_BASE_URL=""
+ENV VITE_API_BASE_URL="https://proto-production-5b0d.up.railway.app"
 RUN npm run build
 
 FROM python:3.13-slim
