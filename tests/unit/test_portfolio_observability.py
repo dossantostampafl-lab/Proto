@@ -38,24 +38,26 @@ def test_runtime_metrics_embeds_canonical_portfolio_snapshot() -> None:
         assert snapshot["gross_exposure"] == 100.0
         assert snapshot["turnover_notional"] == 100.0
         assert snapshot["execution_costs"]["slippage"] == 0.1
+        assert snapshot["temporal_exposure_notional_seconds"] >= 0.0
+        assert snapshot["max_position_age_seconds"] >= 0.0
     finally:
         portfolio.reset()
 
 
-def test_portfolio_gauges_export_risk_pnl_and_execution_state() -> None:
+def test_portfolio_gauges_export_risk_pnl_execution_and_time_state() -> None:
     portfolio.reset()
     try:
         _apply_fill()
         gauges = _portfolio_gauges()
-        assert gauges == {
-            "portfolio_gross_exposure": 100.0,
-            "portfolio_net_exposure": 100.0,
-            "portfolio_total_pnl_after_fees": -0.1,
-            "portfolio_realized_drawdown": 0.1,
-            "portfolio_max_asset_concentration": 1.0,
-            "portfolio_turnover_notional": 100.0,
-            "portfolio_slippage_cost": 0.1,
-        }
+        assert gauges["portfolio_gross_exposure"] == 100.0
+        assert gauges["portfolio_net_exposure"] == 100.0
+        assert gauges["portfolio_total_pnl_after_fees"] == -0.1
+        assert gauges["portfolio_realized_drawdown"] == 0.1
+        assert gauges["portfolio_max_asset_concentration"] == 1.0
+        assert gauges["portfolio_turnover_notional"] == 100.0
+        assert gauges["portfolio_slippage_cost"] == 0.1
+        assert gauges["portfolio_temporal_exposure_notional_seconds"] >= 0.0
+        assert gauges["portfolio_max_position_age_seconds"] >= 0.0
     finally:
         portfolio.reset()
 
@@ -70,5 +72,10 @@ def test_prometheus_surface_contains_portfolio_gauges() -> None:
         assert "proto_portfolio_realized_drawdown 0.1" in output
         assert "proto_portfolio_turnover_notional 100.0" in output
         assert "proto_portfolio_slippage_cost 0.1" in output
+        assert "# TYPE proto_portfolio_temporal_exposure_notional_seconds gauge" in output
+        assert "proto_portfolio_temporal_exposure_notional_seconds " in output
+        assert "# TYPE proto_portfolio_max_position_age_seconds gauge" in output
+        assert "proto_portfolio_max_position_age_seconds " in output
+        assert "# TYPE proto_ws_oversized_messages_total counter" in output
     finally:
         portfolio.reset()
