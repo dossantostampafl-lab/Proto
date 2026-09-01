@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use risk_rust::hardening::{ExposureReservation, GateDecision, ReservationAwareRiskGate};
 use risk_rust::RiskRequest;
+use risk_rust::hardening::{ExposureReservation, GateDecision, ReservationAwareRiskGate};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -184,9 +184,7 @@ mod tests {
     fn admission_validates_and_reserves_capacity() {
         let risk = ReservationAwareRiskGate::new_presumed_reconciled(manager());
         let mut gate = ExecutionAdmissionGate::new(risk);
-        let decision = gate
-            .admit(candidate(50_000, Decimal::new(30, 2)))
-            .unwrap();
+        let decision = gate.admit(candidate(50_000, Decimal::new(30, 2))).unwrap();
 
         let AdmissionDecision::Approved { order, .. } = decision else {
             panic!("expected approved execution admission");
@@ -203,9 +201,7 @@ mod tests {
     fn high_volatility_cannot_create_validated_order() {
         let risk = ReservationAwareRiskGate::new_presumed_reconciled(manager());
         let mut gate = ExecutionAdmissionGate::new(risk);
-        let decision = gate
-            .admit(candidate(20_000, Decimal::new(60, 2)))
-            .unwrap();
+        let decision = gate.admit(candidate(20_000, Decimal::new(60, 2))).unwrap();
 
         assert!(matches!(
             decision,
@@ -223,9 +219,7 @@ mod tests {
     fn unreconciled_state_cannot_create_validated_order() {
         let risk = ReservationAwareRiskGate::new(manager());
         let mut gate = ExecutionAdmissionGate::new(risk);
-        let decision = gate
-            .admit(candidate(20_000, Decimal::new(20, 2)))
-            .unwrap();
+        let decision = gate.admit(candidate(20_000, Decimal::new(20, 2))).unwrap();
         assert_eq!(
             match decision {
                 AdmissionDecision::Rejected(decision) => decision,
@@ -239,14 +233,10 @@ mod tests {
     fn existing_reservation_blocks_second_order_before_fill() {
         let risk = ReservationAwareRiskGate::new_presumed_reconciled(manager());
         let mut gate = ExecutionAdmissionGate::new(risk);
-        let first = gate
-            .admit(candidate(70_000, Decimal::new(20, 2)))
-            .unwrap();
+        let first = gate.admit(candidate(70_000, Decimal::new(20, 2))).unwrap();
         assert!(matches!(first, AdmissionDecision::Approved { .. }));
 
-        let second = gate
-            .admit(candidate(10_000, Decimal::new(20, 2)))
-            .unwrap();
+        let second = gate.admit(candidate(10_000, Decimal::new(20, 2))).unwrap();
         assert!(matches!(
             second,
             AdmissionDecision::Rejected(GateDecision::Rejected(reasons))
