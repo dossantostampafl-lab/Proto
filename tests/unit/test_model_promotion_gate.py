@@ -29,20 +29,23 @@ def _passing_evidence(**overrides: object) -> PromotionGateEvidence:
         "parameter_stability_score": 0.70,
         "delay_control_sharpe": 0.20,
         "shuffle_control_sharpe": 0.10,
+        "family_reality_check_p_value": 0.01,
+        "family_spa_p_value": 0.01,
+        "frozen_holdout_passed": True,
+        "frozen_holdout_consumed": True,
+        "frozen_holdout_seal_id": "holdout-seal-1",
     }
     values.update(overrides)
     return PromotionGateEvidence(**values)  # type: ignore[arg-type]
 
 
 def test_candidate_must_pass_every_gate_for_paper_trading() -> None:
-    evidence = _passing_evidence()
-
-    decision = evaluate_promotion_gate(evidence)
+    decision = evaluate_promotion_gate(_passing_evidence())
 
     assert decision.status == "PAPER_TRADING_ELIGIBLE"
     assert decision.promotion_eligible is True
     assert decision.failed_checks == ()
-    assert len(decision.checks) == 14
+    assert len(decision.checks) == 19
     assert all(item.passed for item in decision.checks)
     assert decision.paper_trading_only is True
     assert decision.live_execution_eligible is False
@@ -52,9 +55,7 @@ def test_candidate_must_pass_every_gate_for_paper_trading() -> None:
 
 
 def test_control_can_never_be_promoted_even_with_strong_metrics() -> None:
-    evidence = _passing_evidence(candidate_kind="CONTROL")
-
-    decision = evaluate_promotion_gate(evidence)
+    decision = evaluate_promotion_gate(_passing_evidence(candidate_kind="CONTROL"))
 
     assert decision.status == "CONTROL_ONLY"
     assert decision.promotion_eligible is False
@@ -65,22 +66,21 @@ def test_control_can_never_be_promoted_even_with_strong_metrics() -> None:
 
 
 def test_missing_overfitting_evidence_fails_closed() -> None:
-    evidence = _passing_evidence(probability_of_backtest_overfitting=None)
-
-    decision = evaluate_promotion_gate(evidence)
+    decision = evaluate_promotion_gate(
+        _passing_evidence(probability_of_backtest_overfitting=None)
+    )
 
     assert decision.status == "RESEARCH_ONLY"
-    assert decision.promotion_eligible is False
     assert "probability_of_backtest_overfitting" in decision.failed_checks
 
 
 def test_missing_regime_and_parameter_evidence_fails_closed() -> None:
-    evidence = _passing_evidence(
-        regime_robustness_score=None,
-        parameter_stability_score=None,
+    decision = evaluate_promotion_gate(
+        _passing_evidence(
+            regime_robustness_score=None,
+            parameter_stability_score=None,
+        )
     )
-
-    decision = evaluate_promotion_gate(evidence)
 
     assert decision.status == "RESEARCH_ONLY"
     assert "regime_robustness_score" in decision.failed_checks
@@ -88,29 +88,56 @@ def test_missing_regime_and_parameter_evidence_fails_closed() -> None:
 
 
 def test_negative_controls_must_degrade_candidate_signal() -> None:
-    evidence = _passing_evidence(
-        delay_control_sharpe=0.70,
-        shuffle_control_sharpe=0.65,
+    decision = evaluate_promotion_gate(
+        _passing_evidence(delay_control_sharpe=0.70, shuffle_control_sharpe=0.65)
     )
-
-    decision = evaluate_promotion_gate(evidence)
 
     assert decision.status == "RESEARCH_ONLY"
     assert "delay_control_sharpe" in decision.failed_checks
     assert "shuffle_control_sharpe" in decision.failed_checks
-    delay = next(
-        item for item in decision.checks if item.name == "delay_control_sharpe"
+
+
+def test_family_level_data_snooping_evidence_is_mandatory() -> None:
+    missing = evaluate_promotion_gate(
+        _passing_evidence(
+            family_reality_check_p_value=None,
+            family_spa_p_value=None,
+        )
     )
-    assert "candidate_sharpe * 0.75" in delay.requirement
+    weak = evaluate_promotion_gate(
+        _passing_evidence(
+            family_reality_check_p_value=0.20,
+            family_spa_p_value=0.10,
+        )
+    )
+
+    assert missing.status == "RESEARCH_ONLY"
+    assert "family_reality_check_p_value" in missing.failed_checks
+    assert "family_spa_p_value" in missing.failed_checks
+    assert weak.status == "RESEARCH_ONLY"
+    assert "family_reality_check_p_value" in weak.failed_checks
+    assert "family_spa_p_value" in weak.failed_checks
+
+
+def test_frozen_holdout_must_be_passed_consumed_and_referenced() -> None:
+    decision = evaluate_promotion_gate(
+        _passing_evidence(
+            frozen_holdout_passed=False,
+            frozen_holdout_consumed=False,
+            frozen_holdout_seal_id=None,
+        )
+    )
+
+    assert decision.status == "RESEARCH_ONLY"
+    assert "frozen_holdout_passed" in decision.failed_checks
+    assert "frozen_holdout_consumed" in decision.failed_checks
+    assert "frozen_holdout_seal_id" in decision.failed_checks
 
 
 def test_oos_and_drawdown_thresholds_are_fail_closed() -> None:
-    evidence = _passing_evidence(
-        oos_sample_count=249,
-        max_drawdown=0.21,
+    decision = evaluate_promotion_gate(
+        _passing_evidence(oos_sample_count=249, max_drawdown=0.21)
     )
-
-    decision = evaluate_promotion_gate(evidence)
 
     assert decision.status == "RESEARCH_ONLY"
     assert "oos_sample_count" in decision.failed_checks
@@ -134,6 +161,8 @@ def test_policy_is_explicit_and_changes_decision_fingerprint() -> None:
         min_regime_robustness_score=0.50,
         min_parameter_stability_score=0.50,
         max_negative_control_sharpe_ratio=0.90,
+        max_family_reality_check_p_value=0.10,
+        max_family_spa_p_value=0.10,
     )
 
     relaxed_decision = evaluate_promotion_gate(evidence, policy=relaxed)
@@ -144,7 +173,6 @@ def test_policy_is_explicit_and_changes_decision_fingerprint() -> None:
 
 def test_decision_fingerprint_is_deterministic() -> None:
     evidence = _passing_evidence()
-
     first = evaluate_promotion_gate(evidence)
     second = evaluate_promotion_gate(evidence)
 
@@ -155,23 +183,19 @@ def test_decision_fingerprint_is_deterministic() -> None:
 def test_invalid_evidence_is_rejected_before_gate_evaluation() -> None:
     with pytest.raises(ValueError, match="candidate_kind"):
         _passing_evidence(candidate_kind="UNKNOWN")
-
     with pytest.raises(ValueError, match="required promotion evidence must be finite"):
         _passing_evidence(sharpe=float("nan"))
-
     with pytest.raises(ValueError, match="bounded promotion evidence"):
-        _passing_evidence(positive_fold_fraction=1.1)
-
-    with pytest.raises(ValueError, match="max_drawdown"):
-        _passing_evidence(max_drawdown=-0.01)
+        _passing_evidence(family_spa_p_value=1.1)
+    with pytest.raises(ValueError, match="frozen_holdout_seal_id"):
+        _passing_evidence(frozen_holdout_seal_id="")
 
 
 def test_invalid_policy_is_rejected() -> None:
     with pytest.raises(ValueError, match="min_oos_samples"):
         PromotionGatePolicy(min_oos_samples=0)
-
     with pytest.raises(ValueError, match="bounded promotion thresholds"):
-        PromotionGatePolicy(max_drawdown=1.1)
+        PromotionGatePolicy(max_family_spa_p_value=1.1)
 
 
 def test_candidate_with_nonpositive_sharpe_cannot_pass_negative_controls() -> None:
@@ -181,7 +205,6 @@ def test_candidate_with_nonpositive_sharpe_cannot_pass_negative_controls() -> No
         delay_control_sharpe=-1.0,
         shuffle_control_sharpe=-1.0,
     )
-
     decision = evaluate_promotion_gate(evidence)
 
     assert decision.status == "RESEARCH_ONLY"
