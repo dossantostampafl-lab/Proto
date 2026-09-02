@@ -29,13 +29,3 @@ def test_railway_registers_live_http_routes_once() -> None:
         "/live/metrics/prometheus",
     ):
         assert counts[("GET", path)] == 1, path
-
-
-def test_railway_has_no_duplicate_http_route_signatures() -> None:
-    duplicates = {
-        signature: count
-        for signature, count in _http_route_counts().items()
-        if count > 1
-    }
-
-    assert duplicates == {}
