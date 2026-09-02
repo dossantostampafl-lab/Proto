@@ -69,7 +69,10 @@ class OrchestrationSupervisor:
                     "schedule_interval_seconds": schedule.interval_seconds,
                 },
             )
-        while await self.brain.run_once(now=current) is not None:
+        # enqueue() timestamps persistence independently. Claim using the current
+        # database-facing clock rather than the pre-enqueue scheduling timestamp,
+        # otherwise a just-created row can be microseconds newer than `current`.
+        while await self.brain.run_once() is not None:
             pass
         self._ticks += 1
         self._last_error = None
