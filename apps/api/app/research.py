@@ -18,7 +18,6 @@ from .circuit_surface import router as circuit_router
 from .data_snooping_surface import router as data_snooping_router
 from .event_surface import router as event_router
 from .lifecycle import router as lifecycle_router
-from .live_routes import router as live_router
 from .markout_surface import router as markout_router
 from .metrics_state import metrics
 from .models import MarketSnapshot
@@ -37,7 +36,6 @@ router.include_router(safety_router)
 router.include_router(circuit_router)
 router.include_router(data_snooping_router)
 router.include_router(event_router)
-router.include_router(live_router)
 router.include_router(markout_router)
 router.include_router(validation_router)
 
