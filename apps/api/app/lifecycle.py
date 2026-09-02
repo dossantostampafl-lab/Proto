@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter
 
 from services.market_data.core import compute_orderbook_metrics
-from services.quant.core import compute_edge, estimate_probability
+from services.quant.core import compute_edge
 
-from .models import MarketSnapshot
 from .settings import settings
 from .surface import _MARKETS, _estimate, _require_synthetic_research, _tick
 
@@ -25,67 +24,6 @@ _UNAVAILABLE_EXECUTION_COSTS = (
     "hedge_cost",
     "latency_penalty",
 )
-
-
-@router.post("/edge/evaluate")
-def evaluate_edge_with_explicit_costs(
-    snapshot: MarketSnapshot,
-    fees: float | None = Query(default=None, ge=0.0),
-    slippage: float | None = Query(default=None, ge=0.0),
-    hedge_cost: float | None = Query(default=None, ge=0.0),
-    latency_penalty: float | None = Query(default=None, ge=0.0),
-) -> dict[str, object]:
-    provided = {
-        "fees": fees,
-        "slippage": slippage,
-        "hedge_cost": hedge_cost,
-        "latency_penalty": latency_penalty,
-    }
-    unavailable = [name for name, value in provided.items() if value is None]
-    if unavailable:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "status": "COSTS_UNAVAILABLE",
-                "cost_policy": "EXPLICIT_EXECUTION_COSTS_REQUIRED",
-                "unavailable_costs": unavailable,
-            },
-        )
-
-    estimate = estimate_probability(
-        market_probability=snapshot.market_probability,
-        volatility=snapshot.volatility,
-        imbalance=snapshot.imbalance,
-    )
-    spread_cost = max(snapshot.ask - snapshot.bid, 0.0) / max(
-        snapshot.ask + snapshot.bid,
-        1e-9,
-    )
-    uncertainty_penalty = estimate.uncertainty * 0.02
-    result = compute_edge(
-        model_probability=estimate.probability,
-        market_probability=snapshot.market_probability,
-        fees=float(fees),
-        slippage=float(slippage),
-        spread_cost=spread_cost,
-        hedge_cost=float(hedge_cost),
-        uncertainty_penalty=uncertainty_penalty,
-        latency_penalty=float(latency_penalty),
-        minimum_edge=settings.minimum_net_edge,
-    )
-    return {
-        **result.model_dump(),
-        "cost_policy": "EXPLICIT_EXECUTION_COSTS",
-        "costs_complete": True,
-        "known_costs": {
-            "fees": fees,
-            "slippage": slippage,
-            "spread_cost": spread_cost,
-            "hedge_cost": hedge_cost,
-            "latency_penalty": latency_penalty,
-            "uncertainty_penalty": uncertainty_penalty,
-        },
-    }
 
 
 def _row(market_id: str) -> dict[str, object]:
