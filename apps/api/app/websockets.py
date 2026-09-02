@@ -6,6 +6,14 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+_DEFAULT_ALLOWED_ORIGINS = frozenset(
+    {
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://proto-production-5b0d.up.railway.app",
+    }
+)
+
 
 class WebSocketHub:
     def __init__(
@@ -27,9 +35,7 @@ class WebSocketHub:
         self._max_connections_per_channel = max_connections_per_channel
         self._max_message_chars = max_message_chars
         self._send_timeout_seconds = send_timeout_seconds
-        self._allowed_origins = allowed_origins or frozenset(
-            {"http://localhost:5173", "http://127.0.0.1:5173"}
-        )
+        self._allowed_origins = allowed_origins or _DEFAULT_ALLOWED_ORIGINS
         self._broadcast_count = 0
         self._send_failures = 0
         self._origin_rejections = 0
