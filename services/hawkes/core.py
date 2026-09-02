@@ -54,7 +54,11 @@ class ExponentialHawkesEngine:
             raise ValueError("horizon must be positive")
         current_intensity = self.intensity(timestamp)
         excitation = current_intensity - self.mu
-        event_probability = 1.0 - exp(-current_intensity * horizon)
+        integrated_intensity = (
+            self.mu * horizon
+            + excitation * (1.0 - exp(-self.beta * horizon)) / self.beta
+        )
+        event_probability = 1.0 - exp(-integrated_intensity)
         return HawkesEstimate(
             baseline_intensity=self.mu,
             current_intensity=current_intensity,
