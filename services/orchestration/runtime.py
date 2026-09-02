@@ -176,9 +176,16 @@ class ProtoBrain:
         )
 
     async def heartbeat(self, run_id: str, *, now: datetime | None = None) -> JobRun:
+        run = await self.store.get(run_id)
+        if run is None:
+            raise KeyError(f"unknown job run: {run_id}")
+        spec = self.specs.get(run.job_name)
+        if spec is None:
+            raise KeyError(f"unregistered job: {run.job_name}")
         return await self.store.heartbeat(
             run_id,
             owner=self.worker_id,
+            lease_seconds=spec.lease_seconds,
             now=now or datetime.now(UTC),
         )
 
