@@ -25,7 +25,7 @@ app.include_router(paper_autopilot_router)
 # them to distinguish "the endpoint responds" from "the expected backend/UI
 # generation is actually deployed" without provider-specific Railway metadata.
 _DASHBOARD_RELEASE = "server-paper-autopilot-v1"
-_DASHBOARD_UI_RELEASE = "paper-autopilot-freshness-v2"
+_DASHBOARD_UI_RELEASE = "paper-controls-hierarchy-v3"
 
 _CONTENT_SECURITY_POLICY = "; ".join(
     (
