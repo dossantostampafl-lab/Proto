@@ -19,11 +19,10 @@ app.include_router(live_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
 
-# Static application-contract markers are advanced whenever the production
-# backend or browser bundle contract changes. Production verification must wait
-# for these exact values before accepting a healthy deployment, which prevents a
-# stale Railway image from satisfying smoke/UI checks after a main-branch merge.
-_DASHBOARD_RELEASE = "server-model-quality-v2"
+# Deliberately static application-contract markers. Production verification uses
+# them to distinguish "the endpoint responds" from "the expected backend/UI
+# generation is actually deployed" without provider-specific Railway metadata.
+_DASHBOARD_RELEASE = "server-paper-autopilot-v1"
 _DASHBOARD_UI_RELEASE = "model-quality-persisted-v4"
 
 _CONTENT_SECURITY_POLICY = "; ".join(
