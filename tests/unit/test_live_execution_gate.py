@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
 
 from services.live_execution import (
     ExecutionMode,
