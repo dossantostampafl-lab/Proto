@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import create_async_engine
 
