@@ -39,7 +39,9 @@ def build_job_catalog() -> dict[str, JobContract]:
                 JobCapability.QUANT_RESEARCH,
                 allowed_modes=frozenset({"SIMULATION", "HISTORICAL_REPLAY"}),
             ),
-            input_contract="versioned market/replay observations and explicit execution-cost inputs",
+            input_contract=(
+                "versioned market/replay observations and explicit execution-cost inputs"
+            ),
             output_contract="probability/fair-value/edge research result with lineage",
             completion_criteria=(
                 "input lineage persisted",
