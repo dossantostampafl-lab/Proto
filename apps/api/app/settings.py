@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     system_mode: str = "LIVE_MONITORING"
     synthetic_research_enabled: bool = False
     live_monitoring_autostart: bool = False
+    live_market_source: str = "COINBASE"
     live_persistence_enabled: bool = False
     live_history_retention_seconds: int = Field(default=86_400, ge=300, le=604_800)
     live_history_query_max: int = Field(default=1_000, ge=1, le=10_000)
@@ -72,6 +73,14 @@ class Settings(BaseSettings):
         except SafetyPolicyError as error:
             raise ValueError(str(error)) from error
         return value.strip().upper()
+
+    @field_validator("live_market_source")
+    @classmethod
+    def enforce_live_market_source(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in {"COINBASE", "BINANCE"}:
+            raise ValueError("live_market_source must be COINBASE or BINANCE")
+        return normalized
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
