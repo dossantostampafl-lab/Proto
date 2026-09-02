@@ -6,6 +6,8 @@ from fastapi import Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from .event_state import record_operational_event
+from .event_surface import router as event_router
 from .live_routes import router as live_router
 from .main import app
 from .paper_autopilot import router as paper_autopilot_router
@@ -14,8 +16,10 @@ from .paper_control import router as paper_control_router
 # Railway composes the public live surface at the application boundary. The
 # research router deliberately excludes /live so the live router and its lifespan
 # are registered exactly once in this process. Paper controls and the paper
-# autopilot remain internal simulation-only surfaces.
+# autopilot remain internal simulation-only surfaces. The event router exposes
+# runtime health plus the append-only operational audit journal.
 app.include_router(live_router)
+app.include_router(event_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
 
@@ -39,6 +43,49 @@ _CONTENT_SECURITY_POLICY = "; ".join(
         "form-action 'self'",
     )
 )
+
+_OPERATIONAL_EVENTS = {
+    "/simulation/start": "SIMULATION_STARTED",
+    "/simulation/stop": "SIMULATION_STOPPED",
+    "/simulation/reset": "SIMULATION_RESET",
+    "/v1/simulate": "SIMULATION_REQUEST_PROCESSED",
+    "/v1/portfolio/mark": "PORTFOLIO_MARK_UPDATED",
+    "/killswitch/trigger": "KILL_SWITCH_TRIGGERED",
+    "/killswitch/reset": "KILL_SWITCH_RESET",
+    "/replay/start": "REPLAY_STARTED",
+    "/replay/pause": "REPLAY_PAUSED",
+    "/replay/resume": "REPLAY_RESUMED",
+    "/replay/step": "REPLAY_STEPPED",
+    "/replay/restart": "REPLAY_RESTARTED",
+    "/replay/seek": "REPLAY_SEEKED",
+    "/replay/speed": "REPLAY_SPEED_UPDATED",
+    "/replay/reset": "REPLAY_RESET",
+    "/paper/start": "PAPER_TRADING_STARTED",
+    "/paper/stop": "PAPER_TRADING_STOPPED",
+    "/paper/automation/start": "PAPER_AUTOPILOT_STARTED",
+    "/paper/automation/stop": "PAPER_AUTOPILOT_STOPPED",
+}
+
+
+@app.middleware("http")
+async def operational_audit_policy(request: Request, call_next) -> Response:
+    """Record completed state-changing commands without inspecting private bodies."""
+    response = await call_next(request)
+    event_type = _OPERATIONAL_EVENTS.get(request.url.path) if request.method == "POST" else None
+    if event_type is not None:
+        await record_operational_event(
+            event_type=event_type,
+            source="railway-api",
+            payload={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "request_id": response.headers.get("X-Request-ID"),
+                "financial_connectivity": False,
+                "real_money_execution": False,
+            },
+        )
+    return response
 
 
 @app.middleware("http")
