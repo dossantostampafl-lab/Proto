@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -32,6 +34,10 @@ async def latest_calibration_metric(
                 continue
             if model_version is not None and payload.get("model_version") != model_version:
                 continue
+            if created_at.tzinfo is None or created_at.utcoffset() is None:
+                created_at = created_at.replace(tzinfo=UTC)
+            else:
+                created_at = created_at.astimezone(UTC)
             return {
                 **payload,
                 "computed_at": created_at.isoformat(),
