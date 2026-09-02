@@ -7,6 +7,11 @@ from .adapters import (
     MockPredictionMarketAdapter,
     SyntheticAdapter,
 )
+from .binance_live import BinancePublicFeedTimeoutError, BinancePublicMarketDataAdapter
+from .binance_public_feed import (
+    SUPPORTED_BINANCE_SYMBOLS,
+    parse_binance_public_ticker_message,
+)
 from .contracts import (
     BinaryContractSnapshot,
     BookLevel,
@@ -75,6 +80,8 @@ from .public_l2_live import CoinbasePublicL2StreamAdapter, PublicL2StreamHealth
 
 __all__ = [
     "BinaryContractSnapshot",
+    "BinancePublicFeedTimeoutError",
+    "BinancePublicMarketDataAdapter",
     "BookLevel",
     "CSVReplayAdapter",
     "Candle",
@@ -123,12 +130,14 @@ __all__ = [
     "PublicL2Update",
     "PublicMarketDataAdapter",
     "ResearchAsset",
+    "SUPPORTED_BINANCE_SYMBOLS",
     "SyntheticAdapter",
     "compute_fill_markout",
     "compute_orderbook_metrics",
     "evaluate_live_coverage",
     "live_readiness_failures",
     "load_public_l2_corpus",
+    "parse_binance_public_ticker_message",
     "parse_public_l2_message",
     "parse_public_ticker_message",
     "summarize_markouts",
