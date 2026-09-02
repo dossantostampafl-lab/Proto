@@ -85,7 +85,11 @@ class LiveExecutionGate:
             return self._deny("order exceeds approved risk notional limit")
 
         self._seen_idempotency_keys.add(order_intent.idempotency_key)
-        return LiveGateDecision(allowed=True, reason="all live execution gates satisfied", mode=config.mode)
+        return LiveGateDecision(
+            allowed=True,
+            reason="all live execution gates satisfied",
+            mode=config.mode,
+        )
 
     def _deny(self, reason: str) -> LiveGateDecision:
         return LiveGateDecision(allowed=False, reason=reason, mode=self._config.mode)
