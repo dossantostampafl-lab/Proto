@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from apps.api.app.main import app
 
 client = TestClient(app)
+PRODUCTION_ORIGIN = "https://proto-production-5b0d.up.railway.app"
 
 
 def test_websocket_channels_accept_and_respond_to_ping() -> None:
@@ -20,6 +21,22 @@ def test_websocket_channels_accept_and_respond_to_ping() -> None:
             assert subscribed == {"type": "subscribed", "channel": channel}
             websocket.send_text("ping")
             assert websocket.receive_json() == {"type": "pong", "channel": channel}
+
+
+def test_production_dashboard_origin_can_subscribe_to_live_market_data() -> None:
+    with client.websocket_connect(
+        "/ws/market-data",
+        headers={"origin": PRODUCTION_ORIGIN},
+    ) as websocket:
+        assert websocket.receive_json() == {
+            "type": "subscribed",
+            "channel": "market-data",
+        }
+        websocket.send_text("ping")
+        assert websocket.receive_json() == {
+            "type": "pong",
+            "channel": "market-data",
+        }
 
 
 def test_simulated_fill_is_broadcast_to_fill_channel() -> None:
