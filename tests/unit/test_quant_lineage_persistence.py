@@ -21,6 +21,11 @@ def _result():
             volatility=0.20,
             imbalance=0.2,
             liquidity_score=0.9,
+            fees=0.0,
+            slippage=0.0,
+            spread_cost=0.0,
+            hedge_cost=0.0,
+            latency_penalty=0.0,
             calibration_samples=(
                 CalibrationSample(probability=0.50, outcome=0),
                 CalibrationSample(probability=0.55, outcome=1),
@@ -142,7 +147,9 @@ async def test_quant_lineage_partial_collision_still_rolls_back_atomically() -> 
                 table = CANONICAL_TABLES[table_name]
                 rows = (
                     await connection.execute(
-                        select(table).where(table.c.correlation_id == result.correlation_id)
+                        select(table).where(
+                            table.c.correlation_id == result.correlation_id
+                        )
                     )
                 ).mappings().all()
                 assert rows == [], table_name

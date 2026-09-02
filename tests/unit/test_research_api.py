@@ -38,6 +38,11 @@ def test_quant_pipeline_endpoint_exposes_safe_research_lineage() -> None:
         "volatility": 0.24,
         "imbalance": 0.35,
         "liquidity_score": 0.8,
+        "fees": 0.0,
+        "slippage": 0.0,
+        "spread_cost": 0.0,
+        "hedge_cost": 0.0,
+        "latency_penalty": 0.0,
         "calibration_samples": [
             {"probability": 0.5, "outcome": 0},
             {"probability": 0.55, "outcome": 1},

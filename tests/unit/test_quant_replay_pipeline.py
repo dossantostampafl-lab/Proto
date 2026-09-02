@@ -14,6 +14,11 @@ def _frame(observed_at: str) -> dict[str, object]:
         "volatility": 0.25,
         "imbalance": 0.10,
         "liquidity_score": 0.90,
+        "fees": 0.0,
+        "slippage": 0.0,
+        "spread_cost": 0.0,
+        "hedge_cost": 0.0,
+        "latency_penalty": 0.0,
     }
 
 

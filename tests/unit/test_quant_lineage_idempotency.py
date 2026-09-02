@@ -23,6 +23,12 @@ async def test_quant_lineage_retry_is_idempotent_and_complete() -> None:
             market_probability=0.52,
             volatility=0.25,
             imbalance=0.10,
+            liquidity_score=1.0,
+            fees=0.0,
+            slippage=0.0,
+            spread_cost=0.0,
+            hedge_cost=0.0,
+            latency_penalty=0.0,
             calibration_samples=(CalibrationSample(probability=0.5, outcome=1),),
         )
     )

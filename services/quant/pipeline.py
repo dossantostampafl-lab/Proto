@@ -35,12 +35,12 @@ class QuantPipelineInput(BaseModel):
     market_probability: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
     volatility: float = Field(ge=0.0, allow_inf_nan=False)
     imbalance: float = Field(ge=-1.0, le=1.0, allow_inf_nan=False)
-    liquidity_score: float = Field(default=1.0, ge=0.0, le=1.0, allow_inf_nan=False)
-    fees: float = Field(default=0.001, ge=0.0, allow_inf_nan=False)
-    slippage: float = Field(default=0.001, ge=0.0, allow_inf_nan=False)
-    spread_cost: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
-    hedge_cost: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
-    latency_penalty: float = Field(default=0.0005, ge=0.0, allow_inf_nan=False)
+    liquidity_score: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    fees: float = Field(ge=0.0, allow_inf_nan=False)
+    slippage: float = Field(ge=0.0, allow_inf_nan=False)
+    spread_cost: float = Field(ge=0.0, allow_inf_nan=False)
+    hedge_cost: float = Field(ge=0.0, allow_inf_nan=False)
+    latency_penalty: float = Field(ge=0.0, allow_inf_nan=False)
     minimum_edge: float = Field(default=0.01, ge=0.0, allow_inf_nan=False)
     calibration_samples: tuple[CalibrationSample, ...] = ()
     calibration_bins: int = Field(default=10, ge=2, le=100)
@@ -173,8 +173,9 @@ def run_quant_pipeline(
     """Run the deterministic research/replay probability-to-edge pipeline.
 
     The function is pure with respect to external state. Replay callers provide
-    source timestamps, calibration observations, event times, and optional
-    hierarchical trend context, so no wall-clock data can leak into the result.
+    source timestamps, calibration observations, event times, and explicit
+    liquidity/execution-cost inputs, so no wall-clock or invented cost data can
+    leak into the result.
     """
     raw: ProbabilityEstimate = estimate_probability(
         market_probability=data.market_probability,
