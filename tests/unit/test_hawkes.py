@@ -29,6 +29,20 @@ def test_hawkes_event_excitation_decays_over_time() -> None:
     assert later.current_intensity > engine.mu
 
 
+def test_hawkes_event_probability_integrates_decaying_excitation() -> None:
+    engine = ExponentialHawkesEngine(mu=0.1, alpha=0.4, beta=2.0)
+    engine.record(1.0)
+
+    estimate = engine.estimate(timestamp=1.0, horizon=2.0)
+    integrated_intensity = 0.1 * 2.0 + 0.4 * (1.0 - math.exp(-4.0)) / 2.0
+    constant_intensity_approximation = 1.0 - math.exp(-0.5 * 2.0)
+
+    assert estimate.event_probability == pytest.approx(
+        1.0 - math.exp(-integrated_intensity)
+    )
+    assert estimate.event_probability < constant_intensity_approximation
+
+
 def test_hawkes_rejects_unstable_parameters() -> None:
     with pytest.raises(ValueError, match="stable process"):
         ExponentialHawkesEngine(mu=0.1, alpha=1.0, beta=1.0)
