@@ -19,8 +19,6 @@ class LiveReadinessEvidence(BaseModel):
     human_activation_recorded: bool = False
     canary_authorized: bool = False
     live_authorized: bool = False
-    withdrawals_enabled: bool = False
-    custody_implemented: bool = False
 
 
 class LiveReadinessClassification(BaseModel):
@@ -59,12 +57,7 @@ class LiveReadinessClassifier:
                 evidence.canary_authorized,
             )
         )
-        live_authorized = all(
-            (
-                canary_authorized,
-                evidence.live_authorized,
-            )
-        )
+        live_authorized = all((canary_authorized, evidence.live_authorized))
         return LiveReadinessClassification(
             proto_safe_scope="READY" if evidence.safe_scope_ready else "NOT_READY",
             live_execution_code="READY" if code_ready else "NOT_READY",
@@ -72,6 +65,6 @@ class LiveReadinessClassifier:
             shadow="VALIDATED" if evidence.shadow_validated else "NOT_VALIDATED",
             live_canary="AUTHORIZED" if canary_authorized else "BLOCKED",
             live_execution="AUTHORIZED" if live_authorized else "DISABLED",
-            withdrawals="ENABLED" if evidence.withdrawals_enabled else "DISABLED",
-            custody="IMPLEMENTED" if evidence.custody_implemented else "NOT IMPLEMENTED",
+            withdrawals="DISABLED",
+            custody="NOT IMPLEMENTED",
         )
