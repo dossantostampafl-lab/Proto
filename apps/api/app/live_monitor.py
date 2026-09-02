@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from services.analytics.live_market import calculate_live_market_analytics
 from services.events.runtime import EventRuntime
 from services.market_data import (
+    BinancePublicMarketDataAdapter,
     CoinbasePublicMarketDataAdapter,
     DataQualityIssue,
     DataQualityMonitor,
@@ -27,11 +28,18 @@ from .live_persistence_coordinator import LivePersistenceCoordinator
 from .live_sequence import LiveSequenceState
 from .metrics_state import metrics
 from .models import SystemMode
+from .settings import settings
 from .websockets import hub
 
 _HISTORY_LIMIT = 512
 _STALE_AFTER_SECONDS = 10.0
 _SOURCE_MESSAGE_STALE_SECONDS = 30.0
+
+
+def configured_public_market_adapter() -> PublicMarketDataAdapter:
+    if settings.live_market_source == "BINANCE":
+        return BinancePublicMarketDataAdapter()
+    return CoinbasePublicMarketDataAdapter()
 
 
 class LiveCryptoMonitor:
@@ -125,6 +133,7 @@ class LiveCryptoMonitor:
         )
         return {
             "source": "PUBLIC_READ_ONLY",
+            "provider": settings.live_market_source,
             "server_observed_at": now.isoformat(),
             **asdict(health),
             "message_fresh": message_fresh,
@@ -162,6 +171,7 @@ class LiveCryptoMonitor:
             **coverage,
             "source_message_fresh": bool(feed_health["message_fresh"]),
             "source": "PUBLIC_READ_ONLY",
+            "provider": settings.live_market_source,
             "feed_health": feed_health,
             "persistence": self.persistence_status(),
             "normalized_pipeline": asdict(self._normalized_pipeline.snapshot()),
@@ -371,4 +381,7 @@ class LiveCryptoMonitor:
         )
 
 
-live_monitor = LiveCryptoMonitor(normalized_event_runtime=event_runtime)
+live_monitor = LiveCryptoMonitor(
+    adapter=configured_public_market_adapter(),
+    normalized_event_runtime=event_runtime,
+)
