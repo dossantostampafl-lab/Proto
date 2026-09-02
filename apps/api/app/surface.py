@@ -71,6 +71,13 @@ _MARKETS: dict[str, SyntheticMarket] = {
     ),
 }
 
+_UNAVAILABLE_EXECUTION_COSTS = (
+    "fees",
+    "slippage",
+    "hedge_cost",
+    "latency_penalty",
+)
+
 
 def _require_synthetic_research() -> None:
     if settings.synthetic_research_enabled:
@@ -123,6 +130,14 @@ def _estimate(market: SyntheticMarket):
         volatility=market.volatility,
         imbalance=imbalance,
     )
+
+
+def _known_research_costs(market: SyntheticMarket, uncertainty: float) -> dict[str, float]:
+    tick = _tick(market)
+    return {
+        "spread_cost": max(tick.spread, 0.0) / max(tick.bid + tick.ask, 1e-9),
+        "uncertainty_penalty": uncertainty * 0.02,
+    }
 
 
 @router.get("/markets")
@@ -310,25 +325,29 @@ def probability_for_market(market_id: str) -> dict[str, object]:
 @router.get("/edge/{market_id}")
 def edge_for_market(market_id: str) -> dict[str, object]:
     market = _market(market_id)
-    tick = _tick(market)
     estimate = _estimate(market)
-    spread_cost = max(tick.spread, 0.0) / max(tick.bid + tick.ask, 1e-9)
-    edge = compute_edge(
+    known_costs = _known_research_costs(market, estimate.uncertainty)
+    partial_edge = compute_edge(
         model_probability=estimate.probability,
         market_probability=market.market_probability,
-        fees=0.001,
-        slippage=0.001,
-        spread_cost=spread_cost,
-        hedge_cost=0.001,
-        uncertainty_penalty=estimate.uncertainty * 0.02,
-        latency_penalty=0.0005,
+        fees=0.0,
+        slippage=0.0,
+        spread_cost=known_costs["spread_cost"],
+        hedge_cost=0.0,
+        uncertainty_penalty=known_costs["uncertainty_penalty"],
+        latency_penalty=0.0,
         minimum_edge=settings.minimum_net_edge,
     )
     return {
         "market_id": market.market_id,
         "symbol": market.symbol,
         "source": "SYNTHETIC_DEMO",
-        **edge.model_dump(),
+        **partial_edge.model_dump(exclude={"decision"}),
+        "decision": "COSTS_UNAVAILABLE",
+        "net_edge_is_partial": True,
+        "cost_policy": "PARTIAL_DERIVED_COSTS_ONLY",
+        "known_costs": known_costs,
+        "unavailable_costs": list(_UNAVAILABLE_EXECUTION_COSTS),
     }
 
 
@@ -337,16 +356,13 @@ def expected_value_for_market(market_id: str) -> dict[str, object]:
     market = _market(market_id)
     estimate = _estimate(market)
     contract_price = market.market_probability
+    known_costs = _known_research_costs(market, estimate.uncertainty)
     result = calculate_expected_value(
         win_probability=estimate.probability,
         profit_if_win=1.0 - contract_price,
         loss_if_lose=contract_price,
-        fees=0.001,
-        slippage=0.001,
-        spread_cost=0.001,
-        hedge_cost=0.001,
-        latency_cost=0.0005,
-        uncertainty_penalty=estimate.uncertainty * 0.02,
+        spread_cost=known_costs["spread_cost"],
+        uncertainty_penalty=known_costs["uncertainty_penalty"],
     )
     return {
         "market_id": market.market_id,
@@ -354,6 +370,11 @@ def expected_value_for_market(market_id: str) -> dict[str, object]:
         "source": "SYNTHETIC_DEMO",
         "contract_price": contract_price,
         **result.model_dump(),
+        "total_costs_complete": False,
+        "ev_after_costs_is_partial": True,
+        "cost_policy": "PARTIAL_DERIVED_COSTS_ONLY",
+        "known_costs": known_costs,
+        "unavailable_costs": list(_UNAVAILABLE_EXECUTION_COSTS),
     }
 
 

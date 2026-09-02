@@ -18,6 +18,13 @@ _EXPIRY_MINUTES = {
     "sol-threshold": 120,
 }
 
+_UNAVAILABLE_EXECUTION_COSTS = (
+    "fees",
+    "slippage",
+    "hedge_cost",
+    "latency_penalty",
+)
+
 
 def _row(market_id: str) -> dict[str, object]:
     _require_synthetic_research()
@@ -26,15 +33,19 @@ def _row(market_id: str) -> dict[str, object]:
     orderbook = compute_orderbook_metrics(tick)
     estimate = _estimate(market)
     spread_cost = max(tick.spread, 0.0) / max(tick.bid + tick.ask, 1e-9)
-    edge = compute_edge(
+    uncertainty_penalty = estimate.uncertainty * 0.02
+
+    # Only costs derivable from the synthetic quote/model are included here.
+    # Fees, slippage, hedge cost and latency are deliberately not invented.
+    partial_edge = compute_edge(
         model_probability=estimate.probability,
         market_probability=market.market_probability,
-        fees=0.001,
-        slippage=0.001,
+        fees=0.0,
+        slippage=0.0,
         spread_cost=spread_cost,
-        hedge_cost=0.001,
-        uncertainty_penalty=estimate.uncertainty * 0.02,
-        latency_penalty=0.0005,
+        hedge_cost=0.0,
+        uncertainty_penalty=uncertainty_penalty,
+        latency_penalty=0.0,
         minimum_edge=settings.minimum_net_edge,
     )
     expiry_minutes = _EXPIRY_MINUTES[market_id]
@@ -43,14 +54,21 @@ def _row(market_id: str) -> dict[str, object]:
         "market_id": market.market_id,
         "symbol": market.symbol,
         "source": "SYNTHETIC_DEMO",
-        "lifecycle_state": "EDGE_CANDIDATE" if edge.decision == "APPROVE_CANDIDATE" else "ANALYZED",
+        "lifecycle_state": "ANALYZED",
         "resolution_state": "PENDING",
         "market_probability": market.market_probability,
         "model_probability": estimate.probability,
         "confidence": estimate.confidence,
         "uncertainty": estimate.uncertainty,
-        "net_edge": edge.net_edge,
-        "edge_decision": edge.decision,
+        "net_edge": partial_edge.net_edge,
+        "net_edge_is_partial": True,
+        "edge_decision": "COSTS_UNAVAILABLE",
+        "cost_policy": "PARTIAL_DERIVED_COSTS_ONLY",
+        "known_costs": {
+            "spread_cost": spread_cost,
+            "uncertainty_penalty": uncertainty_penalty,
+        },
+        "unavailable_costs": list(_UNAVAILABLE_EXECUTION_COSTS),
         "liquidity_depth": orderbook.depth,
         "imbalance": orderbook.imbalance,
         "expiry_horizon_minutes": expiry_minutes,
@@ -83,6 +101,9 @@ def resolution_grid() -> dict[str, object]:
                 "market_probability": row["market_probability"],
                 "model_probability": row["model_probability"],
                 "net_edge": row["net_edge"],
+                "net_edge_is_partial": row["net_edge_is_partial"],
+                "edge_decision": row["edge_decision"],
+                "unavailable_costs": row["unavailable_costs"],
                 "expiry_horizon_minutes": row["expiry_horizon_minutes"],
             }
             for row in rows
@@ -95,10 +116,11 @@ def expiry_map() -> dict[str, object]:
     rows = [_row(market_id) for market_id in _MARKETS]
     return {
         "source": "SYNTHETIC_DEMO",
+        "edge_policy": "PARTIAL_DERIVED_COSTS_ONLY",
         "axes": {
             "radius": "expiry_horizon_minutes",
             "height": "model_probability",
-            "intensity": "absolute_net_edge",
+            "intensity": "absolute_partial_net_edge",
         },
         "points": [
             {
@@ -107,7 +129,8 @@ def expiry_map() -> dict[str, object]:
                 "expiry_horizon_minutes": row["expiry_horizon_minutes"],
                 "model_probability": row["model_probability"],
                 "net_edge": row["net_edge"],
-                "absolute_net_edge": abs(float(row["net_edge"])),
+                "net_edge_is_partial": row["net_edge_is_partial"],
+                "absolute_partial_net_edge": abs(float(row["net_edge"])),
             }
             for row in rows
         ],

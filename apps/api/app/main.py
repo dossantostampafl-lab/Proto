@@ -9,12 +9,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.quant.core import (
-    EdgeBreakdown,
-    ProbabilityEstimate,
-    compute_edge,
-    estimate_probability,
-)
+from services.quant.core import ProbabilityEstimate, compute_edge, estimate_probability
 
 from . import __version__
 from .app_state import (
@@ -162,15 +157,6 @@ def system_status() -> RuntimeState:
     return runtime
 
 
-@app.get("/markets")
-def markets() -> list[dict[str, str]]:
-    return [
-        {"id": "btc-threshold", "asset": "BTC", "state": "ANALYZED"},
-        {"id": "eth-threshold", "asset": "ETH", "state": "ANALYZED"},
-        {"id": "sol-threshold", "asset": "SOL", "state": "ANALYZED"},
-    ]
-
-
 @app.post("/probability/estimate", response_model=ProbabilityEstimate)
 def probability(snapshot: MarketSnapshot) -> ProbabilityEstimate:
     metrics.increment("probability_requests")
@@ -181,22 +167,62 @@ def probability(snapshot: MarketSnapshot) -> ProbabilityEstimate:
     )
 
 
-@app.post("/edge/evaluate", response_model=EdgeBreakdown)
-def edge(snapshot: MarketSnapshot) -> EdgeBreakdown:
+@app.post("/edge/evaluate")
+def evaluate_edge_with_explicit_costs(
+    snapshot: MarketSnapshot,
+    fees: float | None = Query(default=None, ge=0.0),
+    slippage: float | None = Query(default=None, ge=0.0),
+    hedge_cost: float | None = Query(default=None, ge=0.0),
+    latency_penalty: float | None = Query(default=None, ge=0.0),
+) -> dict[str, object]:
     metrics.increment("edge_requests")
+    provided = {
+        "fees": fees,
+        "slippage": slippage,
+        "hedge_cost": hedge_cost,
+        "latency_penalty": latency_penalty,
+    }
+    unavailable = [name for name, value in provided.items() if value is None]
+    if unavailable:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "COSTS_UNAVAILABLE",
+                "cost_policy": "EXPLICIT_EXECUTION_COSTS_REQUIRED",
+                "unavailable_costs": unavailable,
+            },
+        )
+
     estimate = probability(snapshot)
-    spread_cost = max(snapshot.ask - snapshot.bid, 0.0) / max(snapshot.ask + snapshot.bid, 1e-9)
-    return compute_edge(
+    spread_cost = max(snapshot.ask - snapshot.bid, 0.0) / max(
+        snapshot.ask + snapshot.bid,
+        1e-9,
+    )
+    uncertainty_penalty = estimate.uncertainty * 0.02
+    result = compute_edge(
         model_probability=estimate.probability,
         market_probability=snapshot.market_probability,
-        fees=0.001,
-        slippage=0.001,
+        fees=float(fees),
+        slippage=float(slippage),
         spread_cost=spread_cost,
-        hedge_cost=0.001,
-        uncertainty_penalty=estimate.uncertainty * 0.02,
-        latency_penalty=0.0005,
+        hedge_cost=float(hedge_cost),
+        uncertainty_penalty=uncertainty_penalty,
+        latency_penalty=float(latency_penalty),
         minimum_edge=settings.minimum_net_edge,
     )
+    return {
+        **result.model_dump(),
+        "cost_policy": "EXPLICIT_EXECUTION_COSTS",
+        "costs_complete": True,
+        "known_costs": {
+            "fees": fees,
+            "slippage": slippage,
+            "spread_cost": spread_cost,
+            "hedge_cost": hedge_cost,
+            "latency_penalty": latency_penalty,
+            "uncertainty_penalty": uncertainty_penalty,
+        },
+    }
 
 
 @app.get("/risk")

@@ -74,7 +74,7 @@ def test_canonical_portfolio_positions_and_pnl_use_simulation_state() -> None:
     assert pnl.json()["pnl_after_fees"] == portfolio.json()["total_pnl_after_fees"]
 
 
-def test_probability_and_edge_are_research_only() -> None:
+def test_probability_and_edge_are_research_only_with_partial_cost_provenance() -> None:
     probability = client.get("/probability/btc-threshold")
     edge = client.get("/edge/btc-threshold")
 
@@ -82,11 +82,21 @@ def test_probability_and_edge_are_research_only() -> None:
     assert edge.status_code == 200
     assert probability.json()["source"] == "SYNTHETIC_DEMO"
     assert 0.0 <= probability.json()["probability"] <= 1.0
-    assert edge.json()["decision"] in {"APPROVE_CANDIDATE", "REJECT"}
-    assert edge.json()["source"] == "SYNTHETIC_DEMO"
+    body = edge.json()
+    assert body["decision"] == "COSTS_UNAVAILABLE"
+    assert body["source"] == "SYNTHETIC_DEMO"
+    assert body["net_edge_is_partial"] is True
+    assert body["cost_policy"] == "PARTIAL_DERIVED_COSTS_ONLY"
+    assert set(body["known_costs"]) == {"spread_cost", "uncertainty_penalty"}
+    assert set(body["unavailable_costs"]) == {
+        "fees",
+        "slippage",
+        "hedge_cost",
+        "latency_penalty",
+    }
 
 
-def test_expected_value_surface_decomposes_binary_contract_value() -> None:
+def test_expected_value_surface_does_not_invent_execution_costs() -> None:
     response = client.get("/expected-value/btc-threshold")
     body = response.json()
 
@@ -94,6 +104,16 @@ def test_expected_value_surface_decomposes_binary_contract_value() -> None:
     assert body["source"] == "SYNTHETIC_DEMO"
     assert body["contract_price"] == 0.52
     assert body["total_costs"] >= 0.0
+    assert body["total_costs_complete"] is False
+    assert body["ev_after_costs_is_partial"] is True
+    assert body["cost_policy"] == "PARTIAL_DERIVED_COSTS_ONLY"
+    assert set(body["known_costs"]) == {"spread_cost", "uncertainty_penalty"}
+    assert set(body["unavailable_costs"]) == {
+        "fees",
+        "slippage",
+        "hedge_cost",
+        "latency_penalty",
+    }
     assert body["risk_adjusted_ev"] <= body["ev_after_costs"] <= body["ev"]
 
 
