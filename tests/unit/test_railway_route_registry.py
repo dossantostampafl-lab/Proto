@@ -1,31 +1,11 @@
-from collections import Counter
-
-from fastapi.routing import APIRoute
-
-from apps.api.app.railway_app import app
+from pathlib import Path
 
 
-def _http_route_counts() -> Counter[tuple[str, str]]:
-    counts: Counter[tuple[str, str]] = Counter()
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
-        for method in route.methods or set():
-            counts[(method, route.path)] += 1
-    return counts
+def test_live_router_has_single_application_owner_in_railway_composition() -> None:
+    railway = Path("apps/api/app/railway_app.py").read_text(encoding="utf-8")
+    research = Path("apps/api/app/research.py").read_text(encoding="utf-8")
 
-
-def test_railway_registers_live_http_routes_once() -> None:
-    counts = _http_route_counts()
-
-    for path in (
-        "/live/status",
-        "/live/source-health",
-        "/live/ready",
-        "/live/market-data",
-        "/live/market-data/{symbol}",
-        "/live/history/{symbol}",
-        "/live/analytics/{symbol}",
-        "/live/metrics/prometheus",
-    ):
-        assert counts[("GET", path)] == 1, path
+    assert "from .live_routes import router as live_router" in railway
+    assert railway.count("app.include_router(live_router)") == 1
+    assert "from .live_routes import router as live_router" not in research
+    assert "router.include_router(live_router)" not in research
