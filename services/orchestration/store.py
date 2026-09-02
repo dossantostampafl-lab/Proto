@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint, and_, or_, select, update
+from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint, and_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .runtime import JobCapability, JobRun, JobSpec, JobState, ProtoBrain
@@ -35,7 +35,9 @@ class JobRunRecord(OrchestrationBase):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     lease_owner: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -123,6 +125,10 @@ class SqlJobStore:
                 )
                 if existing is None:
                     raise
+                if existing.job_name != spec.name or existing.mode != mode:
+                    raise ValueError(
+                        "idempotency key already belongs to a different job contract"
+                    )
                 return existing.as_run()
             await session.refresh(record)
             return record.as_run()
@@ -163,7 +169,7 @@ class SqlJobStore:
                     state=JobState.RUNNING.value,
                     attempts=JobRunRecord.attempts + 1,
                     lease_owner=owner,
-                    lease_expires_at=now + __import__("datetime").timedelta(seconds=spec.lease_seconds),
+                    lease_expires_at=now + timedelta(seconds=spec.lease_seconds),
                     heartbeat_at=now,
                     updated_at=now,
                 )
@@ -175,16 +181,29 @@ class SqlJobStore:
             claimed = await session.get(JobRunRecord, record.id)
             return claimed.as_run() if claimed is not None else None
 
-    async def heartbeat(self, run_id: str, *, owner: str, now: datetime) -> JobRun:
+    async def heartbeat(
+        self,
+        run_id: str,
+        *,
+        owner: str,
+        lease_seconds: float,
+        now: datetime,
+    ) -> JobRun:
         async with self.session_factory() as session:
-            record = await self._owned_running(session, run_id, owner)
+            await self._owned_running(session, run_id, owner)
             await session.execute(
                 update(JobRunRecord)
                 .where(JobRunRecord.id == run_id)
-                .values(heartbeat_at=now, updated_at=now)
+                .values(
+                    heartbeat_at=now,
+                    lease_expires_at=now + timedelta(seconds=lease_seconds),
+                    updated_at=now,
+                )
             )
             await session.commit()
-            await session.refresh(record)
+            record = await session.get(JobRunRecord, run_id)
+            if record is None:
+                raise RuntimeError("job disappeared after heartbeat")
             return record.as_run()
 
     async def succeed(
@@ -232,7 +251,11 @@ class SqlJobStore:
     ) -> JobRun:
         async with self.session_factory() as session:
             record = await self._owned_running(session, run_id, owner)
-            state = JobState.DEAD_LETTER if record.attempts >= spec.max_attempts else JobState.RETRY_WAIT
+            state = (
+                JobState.DEAD_LETTER
+                if record.attempts >= spec.max_attempts
+                else JobState.RETRY_WAIT
+            )
             not_before = (
                 now
                 if state is JobState.DEAD_LETTER
@@ -309,7 +332,12 @@ class SqlJobStore:
             ).all()
             return [record.as_run() for record in records]
 
-    async def _owned_running(self, session: object, run_id: str, owner: str) -> JobRunRecord:
+    async def _owned_running(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        owner: str,
+    ) -> JobRunRecord:
         record = await session.scalar(
             select(JobRunRecord).where(
                 and_(
