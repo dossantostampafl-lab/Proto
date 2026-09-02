@@ -32,3 +32,13 @@ def test_settings_reject_unsafe_numeric_configuration(field: str, value: float) 
 def test_settings_accepts_safe_runtime_modes() -> None:
     for mode in ("SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY", "LIVE_MONITORING"):
         assert Settings(system_mode=mode).system_mode == mode
+
+
+def test_settings_normalizes_supported_live_market_sources() -> None:
+    assert Settings(live_market_source="coinbase").live_market_source == "COINBASE"
+    assert Settings(live_market_source="binance").live_market_source == "BINANCE"
+
+
+def test_settings_rejects_unknown_live_market_source() -> None:
+    with pytest.raises(ValidationError, match="COINBASE or BINANCE"):
+        Settings(live_market_source="account-exchange")
