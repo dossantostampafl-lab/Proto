@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from services.orchestration import JobCapability, JobSpec, JobState, ProtoBrain, SqlJobStore
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def store() -> SqlJobStore:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     job_store = SqlJobStore(engine)
@@ -42,6 +43,28 @@ async def test_enqueue_is_idempotent(store: SqlJobStore) -> None:
 
     assert first.id == second.id
     assert first.state is JobState.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_cannot_cross_job_contracts(store: SqlJobStore) -> None:
+    async def handler(payload: dict[str, object]) -> dict[str, object]:
+        return payload
+
+    brain = ProtoBrain(store=store, worker_id="worker-1")
+    brain.register(JobSpec("market-data", JobCapability.MARKET_DATA), handler)
+    brain.register(JobSpec("quant", JobCapability.QUANT_RESEARCH), handler)
+    await brain.enqueue(
+        "market-data",
+        idempotency_key="shared-key",
+        mode="LIVE_MONITORING",
+    )
+
+    with pytest.raises(ValueError, match="different job contract"):
+        await brain.enqueue(
+            "quant",
+            idempotency_key="shared-key",
+            mode="LIVE_MONITORING",
+        )
 
 
 @pytest.mark.asyncio
@@ -84,7 +107,7 @@ async def test_retry_uses_exponential_backoff_then_dead_letters(store: SqlJobSto
     )
     brain = ProtoBrain(store=store, worker_id="worker-1")
     brain.register(spec, handler)
-    queued = await brain.enqueue(
+    await brain.enqueue(
         "calibration",
         idempotency_key="cal:1",
         mode="HISTORICAL_REPLAY",
@@ -130,6 +153,29 @@ async def test_risk_gated_job_fails_closed_without_gate(store: SqlJobStore) -> N
     assert blocked is not None
     assert blocked.state is JobState.BLOCKED
     assert blocked.last_error == "risk gate unavailable"
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_renews_worker_lease(store: SqlJobStore) -> None:
+    async def handler(payload: dict[str, object]) -> dict[str, object]:
+        return payload
+
+    spec = JobSpec("observability", JobCapability.OBSERVABILITY, lease_seconds=10)
+    brain = ProtoBrain(store=store, worker_id="worker-a")
+    brain.register(spec, handler)
+    await brain.enqueue(
+        "observability",
+        idempotency_key="obs:1",
+        mode="LIVE_MONITORING",
+    )
+    t0 = datetime.now(UTC) + timedelta(seconds=1)
+    claimed = await store.claim_next(brain.specs, "worker-a", now=t0)
+    assert claimed is not None
+    assert claimed.lease_expires_at == t0 + timedelta(seconds=10)
+
+    heartbeat = await brain.heartbeat(claimed.id, now=t0 + timedelta(seconds=5))
+    assert heartbeat.heartbeat_at == t0 + timedelta(seconds=5)
+    assert heartbeat.lease_expires_at == t0 + timedelta(seconds=15)
 
 
 @pytest.mark.asyncio
