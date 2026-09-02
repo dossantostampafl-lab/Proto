@@ -158,7 +158,7 @@ class SqlJobStore:
                 return None
 
             spec = specs[record.job_name]
-            result = await session.execute(
+            statement = (
                 update(JobRunRecord)
                 .where(
                     JobRunRecord.id == record.id,
@@ -173,12 +173,14 @@ class SqlJobStore:
                     heartbeat_at=now,
                     updated_at=now,
                 )
+                .execution_options(synchronize_session=False)
             )
+            result = await session.execute(statement)
             if result.rowcount != 1:
                 await session.rollback()
                 return None
             await session.commit()
-            claimed = await session.get(JobRunRecord, record.id)
+            claimed = await session.get(JobRunRecord, record.id, populate_existing=True)
             return claimed.as_run() if claimed is not None else None
 
     async def heartbeat(
