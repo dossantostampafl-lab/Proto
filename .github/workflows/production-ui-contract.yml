@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 7
     env:
       PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
-      EXPECTED_UI_RELEASE: paper-controls-hierarchy-v3
+      EXPECTED_UI_RELEASE: model-quality-persisted-v4
     steps:
       - name: Verify deployed dashboard UI generation
         shell: bash
