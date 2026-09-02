@@ -98,7 +98,10 @@ class OrderManagementSystem:
             if filled_quantity > record.order_intent.quantity:
                 raise ValueError("filled quantity exceeds order quantity")
             record.filled_quantity = filled_quantity
-        if next_state == OrderState.FILLED and record.filled_quantity != record.order_intent.quantity:
+        if (
+            next_state == OrderState.FILLED
+            and record.filled_quantity != record.order_intent.quantity
+        ):
             raise ValueError("FILLED requires complete filled quantity")
         if external_order_id is not None:
             if record.external_order_id not in {None, external_order_id}:
