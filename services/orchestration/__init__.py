@@ -7,6 +7,7 @@ from .runtime import (
     ProtoBrain,
 )
 from .store import OrchestrationBase, SqlJobStore
+from .supervisor import OrchestrationSupervisor, PeriodicJob
 
 __all__ = [
     "CATALOG_VERSION",
@@ -17,6 +18,8 @@ __all__ = [
     "JobSpec",
     "JobState",
     "OrchestrationBase",
+    "OrchestrationSupervisor",
+    "PeriodicJob",
     "ProtoBrain",
     "SqlJobStore",
     "build_job_catalog",
