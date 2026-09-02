@@ -1,0 +1,96 @@
+name: Production Event Journal Contract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-event-journal-main
+  cancel-in-progress: true
+
+jobs:
+  railway-event-journal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+    steps:
+      - name: Verify deployed operational journal integrity
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
+          last_error = None
+
+          def get_json(path: str) -> dict:
+              request = urllib.request.Request(
+                  f"{origin}{path}",
+                  headers={
+                      "Cache-Control": "no-cache",
+                      "User-Agent": "proto-event-journal-contract/1.0",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=10) as response:
+                  if response.status != 200:
+                      raise AssertionError(f"{path} returned HTTP {response.status}")
+                  return json.loads(response.read().decode("utf-8"))
+
+          for attempt in range(1, 61):
+              try:
+                  ready = get_json("/events/ready")
+                  verify = get_json("/events/journal/verify")
+
+                  if ready.get("status") != "ready" or ready.get("ready") is not True:
+                      raise AssertionError(f"event runtime is not ready: {ready!r}")
+                  if verify.get("status") != "valid" or verify.get("chain_valid") is not True:
+                      raise AssertionError(f"operational journal hash-chain is invalid: {verify!r}")
+                  if int(verify.get("persistence_failures") or 0) != 0:
+                      raise AssertionError(
+                          f"operational journal persistence failures detected: {verify!r}"
+                      )
+                  if verify.get("persistence_enabled") is True:
+                      event_count = int(verify.get("event_count") or 0)
+                      persisted_count = int(verify.get("persisted_count") or 0)
+                      if persisted_count > event_count:
+                          raise AssertionError(
+                              "persisted audit count exceeds in-process journal count"
+                          )
+
+                  print(
+                      "production event journal contract: ok",
+                      json.dumps(
+                          {
+                              "event_count": verify.get("event_count"),
+                              "persisted_count": verify.get("persisted_count"),
+                              "persistence_enabled": verify.get("persistence_enabled"),
+                              "persistence_failures": verify.get("persistence_failures"),
+                          },
+                          sort_keys=True,
+                      ),
+                  )
+                  break
+              except (
+                  AssertionError,
+                  ValueError,
+                  json.JSONDecodeError,
+                  urllib.error.URLError,
+                  TimeoutError,
+              ) as error:
+                  last_error = error
+                  print(f"attempt {attempt}/60 not ready: {type(error).__name__}: {error}")
+                  if attempt == 60:
+                      raise
+                  time.sleep(5)
+          else:
+              raise RuntimeError(f"event journal contract exhausted retries: {last_error}")
+          PY
