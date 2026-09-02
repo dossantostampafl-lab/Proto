@@ -7,6 +7,8 @@ from services.market_data.adapters import (
     HistoricalReplayAdapter,
     SyntheticAdapter,
 )
+from services.market_data.binance_live import BinancePublicMarketDataAdapter
+from services.market_data.binance_public_feed import parse_binance_public_ticker_message
 from services.market_data.core import MarketTick
 from services.market_data.live import CoinbasePublicMarketDataAdapter
 from services.market_data.public_feed_parser import (
@@ -158,3 +160,72 @@ def test_public_adapter_accepts_only_read_only_crypto_products() -> None:
 
     with pytest.raises(ValueError):
         CoinbasePublicMarketDataAdapter(products=("DOGE-USD",))
+
+
+def _binance_payload(*, symbol: str = "BTCUSDT") -> dict[str, object]:
+    return {
+        "stream": f"{symbol.lower()}@ticker",
+        "data": {
+            "e": "24hrTicker",
+            "E": 1_788_360_959_000,
+            "s": symbol,
+            "c": "77171.52",
+            "b": "77171.51",
+            "B": "1.40",
+            "a": "77171.52",
+            "A": "0.50",
+            "v": "12345.6",
+        },
+    }
+
+
+def test_binance_public_ticker_parser_normalizes_supported_crypto() -> None:
+    ticks = parse_binance_public_ticker_message(_binance_payload())
+
+    assert len(ticks) == 1
+    tick = ticks[0]
+    assert tick.venue == "binance-public-spot"
+    assert tick.symbol == "BTC"
+    assert tick.sequence == 1_788_360_959_000
+    assert tick.timestamp == datetime.fromtimestamp(1_788_360_959, tz=UTC)
+    assert tick.bid == pytest.approx(77171.51)
+    assert tick.ask == pytest.approx(77171.52)
+    assert tick.bid_size == pytest.approx(1.4)
+    assert tick.ask_size == pytest.approx(0.5)
+
+
+def test_binance_public_ticker_parser_ignores_unsupported_symbol() -> None:
+    assert parse_binance_public_ticker_message(_binance_payload(symbol="DOGEUSDT")) == []
+
+
+def test_binance_public_ticker_parser_rejects_nonfinite_market_values() -> None:
+    payload = _binance_payload()
+    data = payload["data"]
+    assert isinstance(data, dict)
+    data["b"] = "nan"
+
+    with pytest.raises(PublicCryptoFeedError, match="bid must be finite"):
+        parse_binance_public_ticker_message(payload)
+
+
+def test_binance_public_adapter_is_anonymous_allowlisted_spot_only() -> None:
+    adapter = BinancePublicMarketDataAdapter(
+        products=("BTCUSDT", "ETHUSDT", "SOLUSDT")
+    )
+
+    assert adapter.symbols == ("BTC", "ETH", "SOL")
+    assert "btcusdt@ticker" in adapter.endpoint
+    assert "ethusdt@ticker" in adapter.endpoint
+    assert "solusdt@ticker" in adapter.endpoint
+    assert "api_key" not in adapter.endpoint.lower()
+
+    with pytest.raises(ValueError, match="unsupported Binance public products"):
+        BinancePublicMarketDataAdapter(products=("DOGEUSDT",))
+
+    with pytest.raises(ValueError, match="host is not allowlisted"):
+        BinancePublicMarketDataAdapter(endpoint_base="wss://example.com:9443/stream")
+
+    with pytest.raises(ValueError, match="must not contain credentials"):
+        BinancePublicMarketDataAdapter(
+            endpoint_base="wss://user:secret@stream.binance.com:9443/stream"
+        )
