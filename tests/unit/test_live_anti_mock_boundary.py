@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 LIVE_MODULES = (
     "apps/api/app/live_app.py",
