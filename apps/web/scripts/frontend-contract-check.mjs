@@ -28,10 +28,16 @@ assert.match(source, /SYNTHETIC RESEARCH/, "synthetic research provenance must b
 assert.match(source, /PAPER \/ SIM/, "paper/simulation provenance must be explicit");
 assert.match(source, /FINANCIAL CONNECTIVITY OFF/, "financial connectivity boundary must be visible");
 assert.match(source, /Prediction Market Quant Engine/, "approved product identity must be visible");
+assert.doesNotMatch(source, /KILL SWITCH.*ARMED \/ SAFE/, "dashboard must not invent an unqueried kill-switch state");
+assert.doesNotMatch(source, /LIMIT UTILIZATION/, "derived display score must not masquerade as a canonical risk limit");
+assert.match(source, /DISPLAY RISK SCORE/, "derived composite risk display must be labeled as display-only");
+assert.match(source, /L1 MICROSTRUCTURE/, "L1 bid-ask analytics must not masquerade as trade-tape order flow");
 
 assert.match(source, /requestJson<LiveStatus>\("\/live\/status"\)/, "dashboard must reconcile authoritative live status");
 assert.match(source, /requestJson<LiveMarketResponse>\("\/live\/market-data"\)/, "dashboard must read canonical public live market data");
 assert.match(source, /\/live\/analytics\/\$\{sym\}/, "dashboard must read canonical public microstructure analytics");
+assert.match(source, /\/live\/history\/\$\{sym\}\?limit=\$\{HISTORY_LIMIT\}/, "dashboard must bootstrap charts from canonical persisted public history");
+assert.match(source, /HISTORY_LIMIT = 1000/, "live-history bootstrap must remain bounded");
 assert.match(source, /requestJson<LifecycleResponse>\("\/market-lifecycle"\)/, "research lifecycle must come from isolated research endpoint");
 assert.match(source, /requestJson<Calibration>\("\/models\/calibration"\)/, "model calibration must come from persisted research lineage endpoint");
 assert.match(source, /requestJson<Portfolio>\("\/v1\/portfolio"\)/, "portfolio must come from canonical paper/simulation endpoint");
@@ -52,8 +58,8 @@ assert.match(source, /STREAMING|RECONCILING/, "transport state must remain visib
 for (const label of [
   "MARKET LIFECYCLE / RESOLUTION GRID",
   "PORTFOLIO STATUS",
-  "ORDER FLOW",
-  "RISK",
+  "L1 MICROSTRUCTURE",
+  "RISK / SAFETY",
   "EDGE TIMELINE",
   "P&L CURVE",
   "POSITIONS",
@@ -85,4 +91,4 @@ assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bu
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
 
-console.log("approved terminal provenance, transport, layout and deployment contracts: ok");
+console.log("approved terminal provenance, transport, semantics, layout and deployment contracts: ok");
