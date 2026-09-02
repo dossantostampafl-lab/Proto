@@ -6,6 +6,7 @@ from fastapi import Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from .event_surface import router as event_router
 from .live_routes import router as live_router
 from .main import app
 from .paper_autopilot import router as paper_autopilot_router
@@ -14,8 +15,10 @@ from .paper_control import router as paper_control_router
 # Railway composes the public live surface at the application boundary. The
 # research router deliberately excludes /live so the live router and its lifespan
 # are registered exactly once in this process. Paper controls and the paper
-# autopilot remain internal simulation-only surfaces.
+# autopilot remain internal simulation-only surfaces. The event router exposes
+# runtime health plus the append-only operational audit journal.
 app.include_router(live_router)
+app.include_router(event_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
 
