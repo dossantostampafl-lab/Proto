@@ -16,7 +16,8 @@ from services.market_data.core import (
 from services.quant.core import compute_edge, estimate_probability
 from services.quant.expected_value import calculate_expected_value
 
-from .app_state import portfolio
+from .app_state import persistence_engine, portfolio
+from .calibration_read import latest_calibration_metric
 from .settings import settings
 
 router = APIRouter(tags=["analytics-surface"])
@@ -295,18 +296,52 @@ def model_metrics() -> dict[str, object]:
 
 
 @router.get("/models/calibration")
-def model_calibration() -> dict[str, object]:
+async def model_calibration() -> dict[str, object]:
+    metric = await latest_calibration_metric(
+        persistence_engine,
+        model_version="baseline-logit-v0",
+    )
+    if metric is None:
+        return {
+            "model_version": "baseline-logit-v0",
+            "status": "NOT_COMPUTED",
+            "source": "PERSISTED_RESEARCH_LINEAGE",
+            "observation_count": 0,
+            "brier_score": None,
+            "log_loss": None,
+            "expected_calibration_error": None,
+            "maximum_calibration_error": None,
+            "reliability_curve": [],
+            "note": "No persisted labeled calibration evidence is available.",
+        }
+
+    bins = metric.get("bins", [])
+    reliability_curve = [
+        {
+            "lower_bound": item.get("lower"),
+            "upper_bound": item.get("upper"),
+            "count": item.get("count"),
+            "mean_prediction": item.get("mean_probability"),
+            "observed_frequency": item.get("observed_frequency"),
+            "absolute_gap": item.get("calibration_error"),
+        }
+        for item in bins
+        if isinstance(item, dict) and int(item.get("count", 0)) > 0
+    ] if isinstance(bins, list) else []
+
     return {
-        "model_version": "baseline-logit-v0",
-        "status": "NOT_COMPUTED",
-        "observation_count": 0,
-        "brier_score": None,
-        "log_loss": None,
-        "expected_calibration_error": None,
-        "note": (
-            "Submit labeled observations to /research/calibration to compute "
-            "calibration metrics."
-        ),
+        "model_version": metric.get("model_version", "baseline-logit-v0"),
+        "feature_version": metric.get("feature_version"),
+        "status": "COMPUTED",
+        "source": "PERSISTED_RESEARCH_LINEAGE",
+        "observation_count": metric.get("count", 0),
+        "brier_score": metric.get("brier_score"),
+        "log_loss": metric.get("log_loss"),
+        "expected_calibration_error": metric.get("expected_calibration_error"),
+        "maximum_calibration_error": metric.get("maximum_calibration_error"),
+        "reliability_curve": reliability_curve,
+        "observed_at": metric.get("observed_at"),
+        "computed_at": metric.get("computed_at"),
     }
 
 
