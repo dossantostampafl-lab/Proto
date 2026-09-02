@@ -6,6 +6,7 @@ from fastapi import Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from .event_state import record_operational_event
 from .event_surface import router as event_router
 from .live_routes import router as live_router
 from .main import app
@@ -42,6 +43,50 @@ _CONTENT_SECURITY_POLICY = "; ".join(
         "form-action 'self'",
     )
 )
+
+_OPERATIONAL_EVENTS = {
+    "/simulation/start": "SIMULATION_STARTED",
+    "/simulation/stop": "SIMULATION_STOPPED",
+    "/simulation/reset": "SIMULATION_RESET",
+    "/v1/simulate": "SIMULATION_REQUEST_PROCESSED",
+    "/v1/portfolio/mark": "PORTFOLIO_MARK_UPDATED",
+    "/killswitch/trigger": "KILL_SWITCH_TRIGGERED",
+    "/killswitch/reset": "KILL_SWITCH_RESET",
+    "/replay/start": "REPLAY_STARTED",
+    "/replay/pause": "REPLAY_PAUSED",
+    "/replay/resume": "REPLAY_RESUMED",
+    "/replay/step": "REPLAY_STEPPED",
+    "/replay/restart": "REPLAY_RESTARTED",
+    "/replay/seek": "REPLAY_SEEKED",
+    "/replay/speed": "REPLAY_SPEED_UPDATED",
+    "/replay/reset": "REPLAY_RESET",
+    "/paper/start": "PAPER_TRADING_STARTED",
+    "/paper/stop": "PAPER_TRADING_STOPPED",
+    "/paper/reset": "PAPER_TRADING_RESET",
+    "/paper/autopilot/start": "PAPER_AUTOPILOT_STARTED",
+    "/paper/autopilot/stop": "PAPER_AUTOPILOT_STOPPED",
+}
+
+
+@app.middleware("http")
+async def operational_audit_policy(request: Request, call_next) -> Response:
+    """Record completed state-changing commands without inspecting private bodies."""
+    response = await call_next(request)
+    event_type = _OPERATIONAL_EVENTS.get(request.url.path) if request.method == "POST" else None
+    if event_type is not None:
+        await record_operational_event(
+            event_type=event_type,
+            source="railway-api",
+            payload={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "request_id": response.headers.get("X-Request-ID"),
+                "financial_connectivity": False,
+                "real_money_execution": False,
+            },
+        )
+    return response
 
 
 @app.middleware("http")
