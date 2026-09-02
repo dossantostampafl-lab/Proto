@@ -41,7 +41,7 @@ def test_terminal_keeps_live_research_and_paper_provenance_explicit() -> None:
         'requestJson<LifecycleResponse>("/market-lifecycle")',
         'requestJson<Hawkes>(`/hawkes/${selected}`)',
         '"SYNTHETIC RESEARCH"',
-        '"SYNTHETIC GREEKS"',
+        "SYNTHETIC GREEKS",
     )
     required_paper = (
         '"PAPER / SIM"',
