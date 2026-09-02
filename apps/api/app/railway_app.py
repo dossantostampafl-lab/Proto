@@ -10,6 +10,7 @@ from .event_state import record_operational_event
 from .event_surface import router as event_router
 from .live_routes import router as live_router
 from .main import app
+from .orchestration_surface import router as orchestration_router
 from .paper_autopilot import router as paper_autopilot_router
 from .paper_control import router as paper_control_router
 
@@ -17,16 +18,19 @@ from .paper_control import router as paper_control_router
 # research router deliberately excludes /live so the live router and its lifespan
 # are registered exactly once in this process. Paper controls and the paper
 # autopilot remain internal simulation-only surfaces. The event router exposes
-# runtime health plus the append-only operational audit journal.
+# runtime health plus the append-only operational audit journal. The orchestration
+# router is deliberately read-only: it exposes contracts/readiness but no endpoint
+# capable of starting arbitrary jobs.
 app.include_router(live_router)
 app.include_router(event_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
+app.include_router(orchestration_router)
 
 # Deliberately static application-contract markers. Production verification uses
 # them to distinguish "the endpoint responds" from "the expected backend/UI
 # generation is actually deployed" without provider-specific Railway metadata.
-_DASHBOARD_RELEASE = "server-paper-autopilot-v1"
+_DASHBOARD_RELEASE = "proto-brain-control-plane-v1"
 _DASHBOARD_UI_RELEASE = "model-quality-persisted-v4"
 
 _CONTENT_SECURITY_POLICY = "; ".join(
