@@ -119,18 +119,16 @@ function bindDialog(dialog: HTMLElement) {
 }
 
 function bindSectionNavigation() {
-  const topButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".topbar nav button"));
-  const railButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".commandRail [data-command]"));
   const observed = new Set<HTMLElement>();
 
   const setActive = (name: string) => {
-    topButtons.forEach((button) => {
+    document.querySelectorAll<HTMLButtonElement>(".topbar nav button").forEach((button) => {
       const active = button.textContent?.trim().toUpperCase() === name;
       button.classList.toggle("active", active);
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     });
-    railButtons.forEach((button) => {
+    document.querySelectorAll<HTMLButtonElement>(".commandRail [data-command]").forEach((button) => {
       const active = button.dataset.command === name;
       button.classList.toggle("active", active);
       if (active) button.setAttribute("aria-current", "page");
