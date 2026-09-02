@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import insert
 
-from services.events import EventJournal, EventRuntime
+from services.events import EventJournal, EventRuntime, JournalEvent
 
 from .app_state import persistence_engine
 from .schema_registry import CANONICAL_TABLES
@@ -24,7 +25,7 @@ _persisted_count = 0
 _persistence_failures = 0
 
 
-def _event_payload(event: object) -> dict[str, object]:
+def _event_payload(event: JournalEvent) -> dict[str, object]:
     return {
         "event_id": str(event.event_id),
         "timestamp": event.timestamp.isoformat(),
@@ -34,6 +35,20 @@ def _event_payload(event: object) -> dict[str, object]:
         "payload": event.payload,
         "previous_hash": event.previous_hash,
         "hash": event.hash,
+    }
+
+
+def _snapshot_payload(event: Mapping[str, object]) -> dict[str, object]:
+    timestamp = event["timestamp"]
+    return {
+        "event_id": str(event["event_id"]),
+        "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp),
+        "event_type": str(event["event_type"]),
+        "source": str(event["source"]),
+        "correlation_id": str(event["correlation_id"]),
+        "payload": event["payload"],
+        "previous_hash": str(event["previous_hash"]),
+        "hash": str(event["hash"]),
     }
 
 
@@ -105,7 +120,7 @@ def operational_journal_snapshot(*, limit: int = 100) -> dict[str, object]:
         "persistence_enabled": persistence_engine is not None,
         "persisted_count": _persisted_count,
         "persistence_failures": _persistence_failures,
-        "events": [_event_payload(event) for event in selected],
+        "events": [_snapshot_payload(event) for event in selected],
     }
 
 
