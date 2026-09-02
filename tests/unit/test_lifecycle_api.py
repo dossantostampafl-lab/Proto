@@ -12,6 +12,59 @@ def enable_synthetic_research(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "synthetic_research_enabled", True)
 
 
+def _edge_snapshot() -> dict[str, object]:
+    return {
+        "symbol": "BTC",
+        "market_id": "btc-research",
+        "bid": 60_000.0,
+        "ask": 60_010.0,
+        "bid_size": 4.2,
+        "ask_size": 3.8,
+        "volatility": 0.28,
+        "imbalance": 0.05,
+        "market_probability": 0.52,
+    }
+
+
+def test_edge_evaluate_rejects_missing_execution_costs() -> None:
+    response = client.post("/edge/evaluate", json=_edge_snapshot())
+    body = response.json()
+
+    assert response.status_code == 422
+    assert body["detail"]["status"] == "COSTS_UNAVAILABLE"
+    assert body["detail"]["cost_policy"] == "EXPLICIT_EXECUTION_COSTS_REQUIRED"
+    assert set(body["detail"]["unavailable_costs"]) == {
+        "fees",
+        "slippage",
+        "hedge_cost",
+        "latency_penalty",
+    }
+
+
+def test_edge_evaluate_uses_only_explicit_execution_costs() -> None:
+    response = client.post(
+        "/edge/evaluate",
+        params={
+            "fees": 0.0004,
+            "slippage": 0.0002,
+            "hedge_cost": 0.0,
+            "latency_penalty": 0.0001,
+        },
+        json=_edge_snapshot(),
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["cost_policy"] == "EXPLICIT_EXECUTION_COSTS"
+    assert body["costs_complete"] is True
+    assert body["known_costs"]["fees"] == 0.0004
+    assert body["known_costs"]["slippage"] == 0.0002
+    assert body["known_costs"]["hedge_cost"] == 0.0
+    assert body["known_costs"]["latency_penalty"] == 0.0001
+    assert body["known_costs"]["spread_cost"] > 0.0
+    assert body["known_costs"]["uncertainty_penalty"] >= 0.0
+
+
 def test_market_lifecycle_is_computed_from_synthetic_research_inputs() -> None:
     response = client.get("/market-lifecycle")
     body = response.json()
