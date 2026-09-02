@@ -147,7 +147,9 @@ async def test_quant_lineage_partial_collision_still_rolls_back_atomically() -> 
                 table = CANONICAL_TABLES[table_name]
                 rows = (
                     await connection.execute(
-                        select(table).where(table.c.correlation_id == result.correlation_id
+                        select(table).where(
+                            table.c.correlation_id == result.correlation_id
+                        )
                     )
                 ).mappings().all()
                 assert rows == [], table_name
