@@ -118,7 +118,7 @@ class SqlJobStore:
             session.add(record)
             try:
                 await session.commit()
-            except IntegrityError:
+            except IntegrityError as exc:
                 await session.rollback()
                 existing = await session.scalar(
                     select(JobRunRecord).where(JobRunRecord.idempotency_key == idempotency_key)
@@ -128,7 +128,7 @@ class SqlJobStore:
                 if existing.job_name != spec.name or existing.mode != mode:
                     raise ValueError(
                         "idempotency key already belongs to a different job contract"
-                    )
+                    ) from exc
                 return existing.as_run()
             await session.refresh(record)
             return record.as_run()
