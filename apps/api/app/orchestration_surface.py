@@ -1,15 +1,35 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter
 
 from services.orchestration.registry import CATALOG_VERSION, JOB_CATALOG
 
 from .app_state import orchestration_store, persistence_engine
+from .orchestration_state import orchestration_supervisor
 from .persistence import database_ready
 from .safety_policy import policy_snapshot
 from .settings import settings
 
-router = APIRouter(prefix="/orchestration", tags=["orchestration"])
+
+@asynccontextmanager
+async def orchestration_lifespan(_: APIRouter) -> AsyncIterator[None]:
+    if orchestration_supervisor is not None:
+        await orchestration_supervisor.start()
+    try:
+        yield
+    finally:
+        if orchestration_supervisor is not None:
+            await orchestration_supervisor.stop()
+
+
+router = APIRouter(
+    prefix="/orchestration",
+    tags=["orchestration"],
+    lifespan=orchestration_lifespan,
+)
 
 
 @router.get("/status")
@@ -19,6 +39,17 @@ async def orchestration_status() -> dict[str, object]:
     )
     safety = policy_snapshot(settings.system_mode)
     safe_scope_ready = orchestration_store is not None and persistence_ready
+    supervisor_status = (
+        orchestration_supervisor.status()
+        if orchestration_supervisor is not None
+        else {
+            "running": False,
+            "registered_jobs": [],
+            "scheduled_jobs": [],
+            "financial_connectivity": False,
+            "real_money_execution": False,
+        }
+    )
 
     return {
         "catalog_version": CATALOG_VERSION,
@@ -37,6 +68,7 @@ async def orchestration_status() -> dict[str, object]:
             "configured": orchestration_store is not None,
             "persistence_ready": persistence_ready,
         },
+        "supervisor": supervisor_status,
         "readiness": {
             "ready_safe_scope": safe_scope_ready,
             "live_ready": False,
