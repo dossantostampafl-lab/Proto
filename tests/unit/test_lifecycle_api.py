@@ -26,6 +26,18 @@ def _edge_snapshot() -> dict[str, object]:
     }
 
 
+def test_explicit_cost_edge_route_is_the_canonical_application_owner() -> None:
+    candidates = [
+        route
+        for route in app.routes
+        if getattr(route, "path", None) == "/edge/evaluate"
+        and "POST" in getattr(route, "methods", set())
+    ]
+
+    assert candidates
+    assert candidates[0].endpoint.__name__ == "evaluate_edge_with_explicit_costs"
+
+
 def test_edge_evaluate_rejects_missing_execution_costs() -> None:
     response = client.post("/edge/evaluate", json=_edge_snapshot())
     body = response.json()
