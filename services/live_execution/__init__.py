@@ -1,5 +1,13 @@
 """Disabled-by-default live execution control primitives."""
 
+from .adapters import (
+    AdapterCapabilities,
+    AdapterDescriptor,
+    AdapterEnvironment,
+    AdapterRegistry,
+    BrokerExchangeAdapter,
+    ShadowExecutionAdapter,
+)
 from .contracts import (
     ExecutionEvent,
     ExecutionEventState,
@@ -10,6 +18,11 @@ from .contracts import (
 )
 from .gate import LiveExecutionConfig, LiveExecutionGate, LiveGateDecision
 from .oms import OrderManagementSystem, OrderRecord, OrderState
+from .readiness import (
+    LiveReadinessClassification,
+    LiveReadinessClassifier,
+    LiveReadinessEvidence,
+)
 from .reconciliation import (
     NormalizedAccountState,
     ReconciliationEngine,
@@ -26,6 +39,11 @@ from .risk import (
 
 __all__ = [
     "AccountRiskSnapshot",
+    "AdapterCapabilities",
+    "AdapterDescriptor",
+    "AdapterEnvironment",
+    "AdapterRegistry",
+    "BrokerExchangeAdapter",
     "DeterministicPreTradeRiskEngine",
     "ExecutionEvent",
     "ExecutionEventState",
@@ -33,6 +51,9 @@ __all__ = [
     "LiveExecutionConfig",
     "LiveExecutionGate",
     "LiveGateDecision",
+    "LiveReadinessClassification",
+    "LiveReadinessClassifier",
+    "LiveReadinessEvidence",
     "NormalizedAccountState",
     "OrderIntent",
     "OrderManagementSystem",
@@ -44,6 +65,7 @@ __all__ = [
     "ReconciliationSeverity",
     "RiskDecision",
     "RiskLimits",
+    "ShadowExecutionAdapter",
     "SignalRiskSnapshot",
     "TradeIntent",
 ]
