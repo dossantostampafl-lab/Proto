@@ -42,6 +42,14 @@ def configured_public_market_adapter() -> PublicMarketDataAdapter:
     return CoinbasePublicMarketDataAdapter()
 
 
+def _public_adapter_provider(adapter: PublicMarketDataAdapter) -> str:
+    if isinstance(adapter, BinancePublicMarketDataAdapter):
+        return "BINANCE"
+    if isinstance(adapter, CoinbasePublicMarketDataAdapter):
+        return "COINBASE"
+    return "CUSTOM"
+
+
 class LiveCryptoMonitor:
     def __init__(
         self,
@@ -52,6 +60,7 @@ class LiveCryptoMonitor:
         normalized_event_runtime: EventRuntime | None = None,
     ) -> None:
         self._adapter = adapter or CoinbasePublicMarketDataAdapter()
+        self._provider = _public_adapter_provider(self._adapter)
         self._quality = DataQualityMonitor(stale_after_seconds=_STALE_AFTER_SECONDS)
         self._normalized_pipeline = MarketDataPipeline(
             event_runtime=normalized_event_runtime,
@@ -133,7 +142,7 @@ class LiveCryptoMonitor:
         )
         return {
             "source": "PUBLIC_READ_ONLY",
-            "provider": settings.live_market_source,
+            "provider": self._provider,
             "server_observed_at": now.isoformat(),
             **asdict(health),
             "message_fresh": message_fresh,
@@ -171,7 +180,7 @@ class LiveCryptoMonitor:
             **coverage,
             "source_message_fresh": bool(feed_health["message_fresh"]),
             "source": "PUBLIC_READ_ONLY",
-            "provider": settings.live_market_source,
+            "provider": self._provider,
             "feed_health": feed_health,
             "persistence": self.persistence_status(),
             "normalized_pipeline": asdict(self._normalized_pipeline.snapshot()),
