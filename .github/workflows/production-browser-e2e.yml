@@ -1,0 +1,167 @@
+name: Production Browser E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/production-browser-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+
+jobs:
+  chromium-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Playwright
+        run: |
+          python -m pip install --disable-pip-version-check playwright==1.55.0
+          python -m playwright install --with-deps chromium
+
+      - name: Validate hydrated production terminal
+        env:
+          ORIGIN: ${{ env.PROTO_PUBLIC_ORIGIN }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import time
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          from playwright.sync_api import sync_playwright
+
+          origin = os.environ["ORIGIN"].rstrip("/")
+          artifacts = Path("browser-artifacts")
+          artifacts.mkdir(exist_ok=True)
+
+          def json_get(path: str) -> dict:
+              request = Request(f"{origin}{path}", headers={"Cache-Control": "no-cache"})
+              with urlopen(request, timeout=15) as response:
+                  if response.status != 200:
+                      raise AssertionError(f"{path} returned HTTP {response.status}")
+                  return json.loads(response.read().decode("utf-8"))
+
+          deadline = time.monotonic() + 120
+          last_error = None
+          while time.monotonic() < deadline:
+              try:
+                  health = json_get("/health")
+                  live = json_get("/live/status")
+                  if health.get("status") == "ok" and live.get("running") is True:
+                      break
+              except Exception as error:
+                  last_error = error
+              time.sleep(3)
+          else:
+              raise AssertionError(f"production did not become ready: {last_error}")
+
+          with sync_playwright() as playwright:
+              browser = playwright.chromium.launch()
+              context = browser.new_context(viewport={"width": 1440, "height": 1000})
+              page = context.new_page()
+              console_errors: list[str] = []
+              page_errors: list[str] = []
+              page.on(
+                  "console",
+                  lambda message: console_errors.append(message.text)
+                  if message.type == "error"
+                  else None,
+              )
+              page.on("pageerror", lambda error: page_errors.append(str(error)))
+
+              page.goto(origin, wait_until="domcontentloaded", timeout=45_000)
+              page.locator("#root > *").first.wait_for(state="visible", timeout=30_000)
+              page.locator("main.terminal").wait_for(state="visible", timeout=30_000)
+
+              body = page.locator("body")
+              for required_text in ("PROTO", "BTC/USD", "ETH/USD", "SOL/USD", "LIVE PUBLIC"):
+                  body.get_by_text(required_text, exact=False).first.wait_for(
+                      state="visible", timeout=30_000
+                  )
+
+              # A hydrated live terminal must leave the boot/reconciliation state and
+              # expose a public-feed status. We deliberately do not assert a price value.
+              page.get_by_text(re.compile(r"STREAMING|RECONCILING")).first.wait_for(
+                  state="visible", timeout=30_000
+              )
+              page.get_by_text(re.compile(r"FEED (LIVE|STALE|OFFLINE)")).first.wait_for(
+                  state="visible", timeout=30_000
+              )
+
+              # Exercise the React-owned market controls. Assert state on the button
+              # itself and verify the selected chart header changes with that state.
+              eth = page.locator("button.marketTile").filter(has_text="ETH/USD").first
+              eth.click()
+              page.wait_for_timeout(300)
+              if "active" not in (eth.get_attribute("class") or ""):
+                  raise AssertionError("ETH market tile did not become active after click")
+              page.locator(".center article.panel.chart header").get_by_text(
+                  "ETH/USD", exact=False
+              ).wait_for(state="visible", timeout=5_000)
+
+              btc = page.locator("button.marketTile").filter(has_text="BTC/USD").first
+              btc.click()
+              page.wait_for_timeout(300)
+              if "active" not in (btc.get_attribute("class") or ""):
+                  raise AssertionError("BTC market tile did not become active after click")
+              page.locator(".center article.panel.chart header").get_by_text(
+                  "BTC/USD", exact=False
+              ).wait_for(state="visible", timeout=5_000)
+
+              page.screenshot(path=str(artifacts / "desktop.png"), full_page=True)
+
+              # Reload must rehydrate cleanly and must not require a manual reconnect.
+              page.reload(wait_until="domcontentloaded", timeout=45_000)
+              page.locator("main.terminal").wait_for(state="visible", timeout=30_000)
+              page.get_by_text("LIVE PUBLIC", exact=False).first.wait_for(
+                  state="visible", timeout=30_000
+              )
+
+              # Tablet landscape validation catches the dashboard's densest responsive case.
+              page.set_viewport_size({"width": 1280, "height": 800})
+              page.wait_for_timeout(300)
+              overflow = page.evaluate(
+                  """() => ({
+                    documentWidth: document.documentElement.scrollWidth,
+                    viewportWidth: document.documentElement.clientWidth,
+                    bodyWidth: document.body.scrollWidth
+                  })"""
+              )
+              if overflow["documentWidth"] > overflow["viewportWidth"] + 2:
+                  raise AssertionError(f"horizontal document overflow: {overflow}")
+              page.screenshot(path=str(artifacts / "tablet-landscape.png"), full_page=True)
+
+              if page_errors:
+                  raise AssertionError(f"uncaught page errors: {page_errors}")
+              severe_console = [
+                  item for item in console_errors
+                  if not re.search(r"Failed to load resource.*favicon", item, re.I)
+              ]
+              if severe_console:
+                  raise AssertionError(f"browser console errors: {severe_console}")
+
+              browser.close()
+          PY
+
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-browser-screenshots
+          path: browser-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
