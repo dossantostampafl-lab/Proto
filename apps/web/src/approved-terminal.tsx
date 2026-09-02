@@ -26,6 +26,7 @@ const WS_BASE = API_BASE.replace(/^http/, "ws");
 const REST_MS = 3000;
 const RESEARCH_MS = 5000;
 const MAX_SERIES = 80;
+const HISTORY_LIMIT = 1000;
 
 const emptyFrames = (): Record<SymbolName, LiveFrame | null> => ({ BTC: null, ETH: null, SOL: null });
 const emptyAnalytics = (): Record<SymbolName, LiveAnalytics | null> => ({ BTC: null, ETH: null, SOL: null });
@@ -118,6 +119,26 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const bootstrap = async () => {
+      const results = await Promise.all(SYMBOLS.map(sym => requestJson<LiveHistoryResponse>(`/live/history/${sym}?limit=${HISTORY_LIMIT}`)));
+      if (cancelled) return;
+      setPriceSeries(old => {
+        const next = { ...old };
+        results.forEach((result, index) => {
+          if (!result.ok || !result.data) return;
+          const symbol = SYMBOLS[index];
+          const history = result.data.history.filter(frame => frame.symbol === symbol && Number.isFinite(frame.mid) && frame.mid > 0).slice(-MAX_SERIES).map(frame => frame.mid);
+          if (history.length) next[symbol] = [...history, ...old[symbol]].slice(-MAX_SERIES);
+        });
+        return next;
+      });
+    };
+    void bootstrap();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     let reconnect: number | null = null;
     const ingest = (frame: LiveFrame) => {
       if (!SYMBOLS.includes(frame.symbol) || !Number.isFinite(frame.mid) || frame.mid <= 0) return;
@@ -129,21 +150,34 @@ function App() {
         requestJson<Health>("/health"), requestJson<LiveStatus>("/live/status"), requestJson<LiveMarketResponse>("/live/market-data"), requestJson<LifecycleResponse>("/market-lifecycle"), requestJson<Portfolio>("/v1/portfolio"), requestJson<PnL>("/pnl/attribution"), requestJson<Calibration>("/models/calibration"), ...SYMBOLS.map(sym => requestJson<LiveAnalytics>(`/live/analytics/${sym}`))
       ]);
       if (cancelled) return;
-      if (h.ok) setHealth(h.data); if (s.ok) setStatus(s.data); market.data?.markets.forEach(ingest);
-      if (life.ok && life.data) { setLifecycle(life.data.markets); setEdgeSeries(old => { const next = { ...old }; SYMBOLS.forEach(sym => { const r = life.data!.markets.find(x => x.symbol === sym); if (r) next[sym] = append(next[sym], r.net_edge); }); return next; }); }
+      if (h.ok) setHealth(h.data);
+      if (s.ok) setStatus(s.data);
+      market.data?.markets.forEach(ingest);
+      if (life.ok && life.data) {
+        setLifecycle(life.data.markets);
+        setEdgeSeries(old => {
+          const next = { ...old };
+          SYMBOLS.forEach(sym => { const r = life.data!.markets.find(x => x.symbol === sym); if (r) next[sym] = append(next[sym], r.net_edge); });
+          return next;
+        });
+      }
       if (port.ok && port.data) { setPortfolio(port.data); setPnlSeries(old => append(old, port.data!.total_pnl_after_fees)); }
-      if (attribution.ok) setPnl(attribution.data); if (calibrationResult.ok) setCalibration(calibrationResult.data);
+      if (attribution.ok) setPnl(attribution.data);
+      if (calibrationResult.ok) setCalibration(calibrationResult.data);
       setAnalytics(old => { const next = { ...old }; aa.forEach((r, i) => { if (r.ok && r.data) next[SYMBOLS[i]] = r.data; }); return next; });
     };
     const connect = () => {
       if (cancelled) return;
-      const ws = new WebSocket(`${WS_BASE}/ws/market-data`); socket.current = ws;
+      const ws = new WebSocket(`${WS_BASE}/ws/market-data`);
+      socket.current = ws;
       ws.onopen = () => setWsConnected(true);
       ws.onmessage = event => { try { const msg = JSON.parse(event.data as string) as Envelope; if (msg.type === "market-data" && msg.data) ingest(msg.data as LiveFrame); } catch { /* ignore malformed frames */ } };
       ws.onerror = () => ws.close();
       ws.onclose = () => { if (cancelled) return; setWsConnected(false); reconnect = window.setTimeout(connect, 1500); };
     };
-    void refresh(); connect(); const id = window.setInterval(() => void refresh(), REST_MS);
+    void refresh();
+    connect();
+    const id = window.setInterval(() => void refresh(), REST_MS);
     return () => { cancelled = true; window.clearInterval(id); if (reconnect != null) window.clearTimeout(reconnect); socket.current?.close(); };
   }, []);
 
@@ -157,17 +191,19 @@ function App() {
       if (h.ok && h.data) { setHawkes(h.data); setHawkesSeries(old => append(old, h.data!.current_intensity)); } else setHawkes(null);
       setGreeks(g.ok ? g.data : null);
     };
-    void load(); const id = window.setInterval(() => void load(), RESEARCH_MS); return () => { cancelled = true; window.clearInterval(id); };
+    void load();
+    const id = window.setInterval(() => void load(), RESEARCH_MS);
+    return () => { cancelled = true; window.clearInterval(id); };
   }, [selected, selectedMarket?.market_id]);
 
   const liveFresh = Boolean(status?.running && status.receiving_data && status.all_symbols_fresh);
   const researchBySymbol = Object.fromEntries(SYMBOLS.map(sym => [sym, lifecycle.find(x => x.symbol === sym) ?? null])) as Record<SymbolName, LifecycleRow | null>;
   const selectedAnalytics = analytics[selected];
   const selectedFrame = frames[selected];
-  const riskUsage = clamp(Math.max(portfolio?.max_asset_concentration ?? 0, Math.min(Math.abs(portfolio?.realized_drawdown ?? 0) / Math.max(Math.abs(portfolio?.gross_exposure ?? 1), 1), 1)));
-  const positions = Array.isArray(portfolio?.positions) ? portfolio!.positions! : [];
-  const aggressiveBuy = selectedFrame ? selectedFrame.bid_size : null;
-  const aggressiveSell = selectedFrame ? selectedFrame.ask_size : null;
+  const displayRiskScore = clamp(Math.max(portfolio?.max_asset_concentration ?? 0, Math.min(Math.abs(portfolio?.realized_drawdown ?? 0) / Math.max(Math.abs(portfolio?.gross_exposure ?? 1), 1), 1)));
+  const positions = Array.isArray(portfolio?.positions) ? portfolio.positions : [];
+  const bestBidSize = selectedFrame ? selectedFrame.bid_size : null;
+  const bestAskSize = selectedFrame ? selectedFrame.ask_size : null;
 
   return <main className="terminal approvedTerminal" data-feed={liveFresh ? "live" : "stale"}>
     <aside className="sideNav" aria-label="Terminal sections"><div className="sideLogo">P</div>{["▦", "⌁", "◇", "▤", "⬡", "◫", "ϟ", "⚙", "◌"].map((x, i) => <button type="button" key={i} className={i === 0 ? "active" : ""}>{x}</button>)}</aside>
@@ -178,9 +214,9 @@ function App() {
 
     <section className="dashboardGrid">
       <article className="panel lifecyclePanel"><header>MARKET LIFECYCLE / RESOLUTION GRID <Badge kind="research" /></header><LifecycleGrid rows={lifecycle} /></article>
-      <article className="panel portfolioPanel"><header>PORTFOLIO STATUS <Badge kind="paper" /></header><div className="portfolioBody"><div className="portfolioStats"><span>EQUITY / P&L<b className={(portfolio?.total_pnl_after_fees ?? 0) >= 0 ? "good" : "bad"}>{usd(portfolio?.total_pnl_after_fees)}</b></span><span>REALIZED P&L<b>{usd(portfolio?.total_realized_pnl)}</b></span><span>UNREALIZED P&L<b>{usd(portfolio?.total_unrealized_pnl)}</b></span><span>GROSS EXPOSURE<b>{usd(portfolio?.gross_exposure)}</b></span><span>NET EXPOSURE<b>{usd(portfolio?.net_exposure)}</b></span><span>DRAWDOWN<b className="bad">{usd(portfolio?.realized_drawdown)}</b></span></div><div className="riskDonut" style={{ background: `conic-gradient(#2ecf78 0 ${Math.max(0, 1 - riskUsage) * 100}%, #287dff ${Math.max(0, 1 - riskUsage) * 100}% 100%)` }}><div><span>RISK USAGE</span><strong>{n(riskUsage * 100, 1)}%</strong><small>OF LIMIT</small></div></div></div></article>
-      <article className="panel orderFlowPanel"><header>ORDER FLOW <Badge kind="live" /></header><div className="orderRows"><span>IMBALANCE<b className={(selectedAnalytics?.current_imbalance ?? 0) >= 0 ? "good" : "bad"}>{selectedAnalytics ? `${selectedAnalytics.current_imbalance >= 0 ? "+" : ""}${n(selectedAnalytics.current_imbalance, 3)}` : "—"}</b></span><span>BEST BID SIZE<b className="good">{n(aggressiveBuy, 5)}</b></span><span>BEST ASK SIZE<b className="bad">{n(aggressiveSell, 5)}</b></span><span>MICROPRICE<b>{usd(selectedAnalytics?.current_microprice)}</b></span><span>REALIZED VOL<b>{pct(selectedAnalytics?.realized_volatility, 2)}</b></span><span>OBSERVATIONS<b>{selectedAnalytics?.sample_count ?? "—"}</b></span></div></article>
-      <article className="panel riskPanel"><header>RISK <Badge kind="paper" /></header><div className="riskRows"><span>LIMIT UTILIZATION<i><em style={{ width: `${riskUsage * 100}%` }} /></i><b>{n(riskUsage * 100, 1)}%</b></span><span>CONCENTRATION<i><em style={{ width: `${clamp(portfolio?.max_asset_concentration ?? 0) * 100}%` }} /></i><b>{pct(portfolio?.max_asset_concentration, 1)}</b></span><span>OPEN POSITIONS<b>{portfolio?.open_position_count ?? "—"}</b></span><span>FINANCIAL CONNECTIVITY<b className="good">OFF</b></span><span>KILL SWITCH<b className="good">ARMED / SAFE</b></span></div></article>
+      <article className="panel portfolioPanel"><header>PORTFOLIO STATUS <Badge kind="paper" /></header><div className="portfolioBody"><div className="portfolioStats"><span>P&L AFTER FEES<b className={(portfolio?.total_pnl_after_fees ?? 0) >= 0 ? "good" : "bad"}>{usd(portfolio?.total_pnl_after_fees)}</b></span><span>REALIZED P&L<b>{usd(portfolio?.total_realized_pnl)}</b></span><span>UNREALIZED P&L<b>{usd(portfolio?.total_unrealized_pnl)}</b></span><span>GROSS EXPOSURE<b>{usd(portfolio?.gross_exposure)}</b></span><span>NET EXPOSURE<b>{usd(portfolio?.net_exposure)}</b></span><span>DRAWDOWN<b className="bad">{usd(portfolio?.realized_drawdown)}</b></span></div><div className="riskDonut" style={{ background: `conic-gradient(#2ecf78 0 ${Math.max(0, 1 - displayRiskScore) * 100}%, #287dff ${Math.max(0, 1 - displayRiskScore) * 100}% 100%)` }}><div><span>DISPLAY RISK SCORE</span><strong>{n(displayRiskScore * 100, 1)}%</strong><small>COMPOSITE VIEW</small></div></div></div></article>
+      <article className="panel orderFlowPanel"><header>L1 MICROSTRUCTURE <Badge kind="live" /></header><div className="orderRows"><span>IMBALANCE<b className={(selectedAnalytics?.current_imbalance ?? 0) >= 0 ? "good" : "bad"}>{selectedAnalytics ? `${selectedAnalytics.current_imbalance >= 0 ? "+" : ""}${n(selectedAnalytics.current_imbalance, 3)}` : "—"}</b></span><span>BEST BID SIZE<b className="good">{n(bestBidSize, 5)}</b></span><span>BEST ASK SIZE<b className="bad">{n(bestAskSize, 5)}</b></span><span>MICROPRICE<b>{usd(selectedAnalytics?.current_microprice)}</b></span><span>REALIZED VOL<b>{pct(selectedAnalytics?.realized_volatility, 2)}</b></span><span>OBSERVATIONS<b>{selectedAnalytics?.sample_count ?? "—"}</b></span></div></article>
+      <article className="panel riskPanel"><header>RISK / SAFETY <Badge kind="paper" /></header><div className="riskRows"><span>DISPLAY COMPOSITE<i><em style={{ width: `${displayRiskScore * 100}%` }} /></i><b>{n(displayRiskScore * 100, 1)}%</b></span><span>CONCENTRATION<i><em style={{ width: `${clamp(portfolio?.max_asset_concentration ?? 0) * 100}%` }} /></i><b>{pct(portfolio?.max_asset_concentration, 1)}</b></span><span>OPEN POSITIONS<b>{portfolio?.open_position_count ?? "—"}</b></span><span>FINANCIAL CONNECTIVITY<b className="good">OFF</b></span><span>EXECUTION MODE<b className="good">PAPER / SIM</b></span></div></article>
 
       <article className="panel edgePanel"><header>EDGE TIMELINE <Badge kind="research" /></header><div className="multiLines">{SYMBOLS.map((sym, i) => <div key={sym}><span>{sym} EDGE</span><Line values={edgeSeries[sym]} tone={i === 0 ? "orange" : i === 1 ? "blue" : "green"} height={82} /></div>)}</div></article>
       <article className="panel pnlPanel"><header>P&L CURVE <Badge kind="paper" /></header><div className="wideChart"><Line values={pnlSeries} tone={(portfolio?.total_pnl_after_fees ?? 0) >= 0 ? "green" : "red"} height={100} /><div className="chartLegend"><span>CURRENT {usd(portfolio?.total_pnl_after_fees)}</span><span>FEES {usd(pnl?.fees)}</span><span>SLIPPAGE {usd(pnl?.slippage)}</span></div></div></article>
