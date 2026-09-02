@@ -3,6 +3,9 @@ name: Production Browser E2E
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/production-browser-e2e.yml"
   workflow_dispatch:
 
 permissions:
