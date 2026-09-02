@@ -14,7 +14,6 @@ from services.live_execution import (
     TradeIntent,
 )
 
-
 NOW = datetime.now(UTC)
 
 
