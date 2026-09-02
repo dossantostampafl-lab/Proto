@@ -102,18 +102,25 @@ jobs:
                   state="visible", timeout=30_000
               )
 
-              # Exercise React-owned asset switching; this catches hydration/listener
-              # failures that an HTTP-only production contract cannot see.
-              eth = page.get_by_text("ETH/USD", exact=True).first
+              # Exercise the React-owned market controls. Assert state on the button
+              # itself and verify the selected chart header changes with that state.
+              eth = page.locator("button.marketTile").filter(has_text="ETH/USD").first
               eth.click()
               page.wait_for_timeout(300)
               if "active" not in (eth.get_attribute("class") or ""):
                   raise AssertionError("ETH market tile did not become active after click")
-              btc = page.get_by_text("BTC/USD", exact=True).first
+              page.locator(".center article.panel.chart header").get_by_text(
+                  "ETH/USD", exact=False
+              ).wait_for(state="visible", timeout=5_000)
+
+              btc = page.locator("button.marketTile").filter(has_text="BTC/USD").first
               btc.click()
               page.wait_for_timeout(300)
               if "active" not in (btc.get_attribute("class") or ""):
                   raise AssertionError("BTC market tile did not become active after click")
+              page.locator(".center article.panel.chart header").get_by_text(
+                  "BTC/USD", exact=False
+              ).wait_for(state="visible", timeout=5_000)
 
               page.screenshot(path=str(artifacts / "desktop.png"), full_page=True)
 
