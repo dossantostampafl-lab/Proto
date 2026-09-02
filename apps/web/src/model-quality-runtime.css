@@ -1,0 +1,170 @@
+.modelQualitySurface {
+  margin: 0 18px 14px;
+}
+
+.mqPanel {
+  background: linear-gradient(180deg, rgba(11, 19, 32, 0.98), rgba(8, 16, 28, 0.98));
+  border: 1px solid rgba(113, 167, 255, 0.16);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  color: #d7deea;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.mqHeader,
+.mqMeta,
+.mqStatus,
+.mqMetrics,
+.mqReliabilityRow {
+  display: flex;
+  align-items: center;
+}
+
+.mqHeader {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-family: "IBM Plex Mono", "JetBrains Mono", monospace;
+  letter-spacing: 0.06em;
+  font-size: 12px;
+}
+
+.mqBadge {
+  padding: 4px 7px;
+  border: 1px solid rgba(139, 114, 255, 0.35);
+  border-radius: 999px;
+  color: #b9abff;
+  font-size: 9px;
+}
+
+.mqMeta {
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: #7e8a9c;
+  font: 10px/1.4 "IBM Plex Mono", "JetBrains Mono", monospace;
+  margin-bottom: 12px;
+}
+
+.mqStatus {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: rgba(113, 167, 255, 0.05);
+  border: 1px solid rgba(113, 167, 255, 0.1);
+  margin-bottom: 10px;
+  font: 10px/1.4 "IBM Plex Mono", "JetBrains Mono", monospace;
+}
+
+.mqStatus.current b { color: #5ce39b; }
+.mqStatus.stale b { color: #e8c15a; }
+.mqStatus span { color: #7e8a9c; }
+
+.mqMetrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.mqMetric {
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 7px;
+  background: rgba(5, 8, 17, 0.64);
+  border: 1px solid rgba(126, 138, 156, 0.12);
+}
+
+.mqMetric span,
+.mqMetric b {
+  display: block;
+}
+
+.mqMetric span {
+  color: #7e8a9c;
+  font: 9px/1.3 "IBM Plex Mono", "JetBrains Mono", monospace;
+  letter-spacing: 0.05em;
+}
+
+.mqMetric b {
+  margin-top: 5px;
+  color: #eef3fb;
+  font: 600 15px/1.2 "JetBrains Mono", "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.mqReliability {
+  border-top: 1px solid rgba(126, 138, 156, 0.1);
+  padding-top: 10px;
+}
+
+.mqReliabilityChart {
+  display: grid;
+  gap: 5px;
+}
+
+.mqReliabilityRow {
+  display: grid;
+  grid-template-columns: 64px minmax(120px, 1fr) minmax(170px, auto);
+  gap: 10px;
+  color: #93a0b3;
+  font: 9px/1.2 "IBM Plex Mono", "JetBrains Mono", monospace;
+}
+
+.mqBars {
+  position: relative;
+  height: 10px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(126, 138, 156, 0.08);
+}
+
+.mqBars i {
+  position: absolute;
+  left: 0;
+  height: 4px;
+  border-radius: 4px;
+}
+
+.mqPredicted {
+  top: 0;
+  background: #71a7ff;
+}
+
+.mqObserved {
+  bottom: 0;
+  background: #5ce39b;
+}
+
+.mqBinValues {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mqEmpty,
+.mqError {
+  margin: 8px 0 2px;
+  padding: 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mqEmpty {
+  color: #7e8a9c;
+  background: rgba(126, 138, 156, 0.05);
+}
+
+.mqError {
+  color: #f05f65;
+  background: rgba(240, 95, 101, 0.06);
+}
+
+@media (max-width: 900px) {
+  .modelQualitySurface { margin-inline: 10px; }
+  .mqMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mqReliabilityRow { grid-template-columns: 56px 1fr; }
+  .mqBinValues { grid-column: 2; text-align: left; }
+}
