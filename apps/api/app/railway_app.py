@@ -27,7 +27,7 @@ app.include_router(paper_autopilot_router)
 # them to distinguish "the endpoint responds" from "the expected backend/UI
 # generation is actually deployed" without provider-specific Railway metadata.
 _DASHBOARD_RELEASE = "server-paper-autopilot-v1"
-_DASHBOARD_UI_RELEASE = "paper-controls-hierarchy-v3"
+_DASHBOARD_UI_RELEASE = "model-quality-persisted-v4"
 
 _CONTENT_SECURITY_POLICY = "; ".join(
     (
@@ -62,9 +62,8 @@ _OPERATIONAL_EVENTS = {
     "/replay/reset": "REPLAY_RESET",
     "/paper/start": "PAPER_TRADING_STARTED",
     "/paper/stop": "PAPER_TRADING_STOPPED",
-    "/paper/reset": "PAPER_TRADING_RESET",
-    "/paper/autopilot/start": "PAPER_AUTOPILOT_STARTED",
-    "/paper/autopilot/stop": "PAPER_AUTOPILOT_STOPPED",
+    "/paper/automation/start": "PAPER_AUTOPILOT_STARTED",
+    "/paper/automation/stop": "PAPER_AUTOPILOT_STOPPED",
 }
 
 
