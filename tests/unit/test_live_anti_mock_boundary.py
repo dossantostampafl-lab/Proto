@@ -35,19 +35,19 @@ def test_terminal_keeps_live_research_and_paper_provenance_explicit() -> None:
         'requestJson<LiveStatus>("/live/status")',
         'requestJson<LiveMarketResponse>("/live/market-data")',
         'requestJson<LiveAnalytics>(`/live/analytics/${symbol}`)',
-        '"LIVE PUBLIC"',
+        "LIVE PUBLIC",
     )
     required_research = (
         'requestJson<LifecycleResponse>("/market-lifecycle")',
         'requestJson<Hawkes>(`/hawkes/${selected}`)',
-        '"SYNTHETIC RESEARCH"',
+        "SYNTHETIC RESEARCH",
         "SYNTHETIC GREEKS",
     )
     required_paper = (
-        '"PAPER / SIM"',
-        '"PAPER PORTFOLIO"',
-        '"EXEC SIMULATION"',
-        '"financial connectivity OFF"',
+        "PAPER / SIM",
+        "PAPER PORTFOLIO",
+        "EXEC SIMULATION",
+        "financial connectivity OFF",
     )
 
     for marker in (*required_live, *required_research, *required_paper):
