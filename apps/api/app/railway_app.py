@@ -6,15 +6,16 @@ from fastapi import Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from .live_routes import router as live_router
 from .main import app
 from .paper_autopilot import router as paper_autopilot_router
 from .paper_control import router as paper_control_router
 
-# Railway runs the research/simulation API and the public read-only BTC/ETH/SOL
-# monitor in the same process. ``main`` already receives the live router through
-# the research router, so Railway must not register it a second time. Paper
-# controls and the paper autopilot operate only on the internal server-authoritative
-# simulator and never add account credentials or financial connectivity.
+# Railway composes the public live surface at the application boundary. The
+# research router deliberately excludes /live so the live router and its lifespan
+# are registered exactly once in this process. Paper controls and the paper
+# autopilot remain internal simulation-only surfaces.
+app.include_router(live_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
 
