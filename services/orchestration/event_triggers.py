@@ -25,10 +25,9 @@ class EventTriggerRule:
 class AutonomousEventDispatcher:
     """Translate allowlisted bus events into durable ProtoBrain jobs.
 
-    The dispatcher never accepts a job name or mode from the event payload. Both
-    are fixed by code-owned rules so public market data cannot escalate into an
-    execution capability. The bus message id becomes part of the durable
-    idempotency key, making replay safe.
+    Job names and modes are code-owned rules; an event payload cannot escalate
+    itself into another capability. A stream may declare a default semantic event
+    type when its schema already fixes the meaning, as with proto.market.normalized.
     """
 
     def __init__(
@@ -38,6 +37,7 @@ class AutonomousEventDispatcher:
         brain: ProtoBrain,
         stream: str,
         rules: tuple[EventTriggerRule, ...],
+        default_event_type: AutonomousEventType | None = None,
     ) -> None:
         if not stream.strip():
             raise ValueError("event stream must be non-empty")
@@ -45,6 +45,9 @@ class AutonomousEventDispatcher:
         self.brain = brain
         self.stream = stream
         self.rules = {rule.event_type.value: rule for rule in rules}
+        self.default_event_type = default_event_type
+        if default_event_type is not None and default_event_type.value not in self.rules:
+            raise ValueError("default event type must have a configured trigger rule")
         self._cursor = "0-0"
         self._processed = 0
         self._ignored = 0
@@ -55,6 +58,9 @@ class AutonomousEventDispatcher:
             "stream": self.stream,
             "cursor": self._cursor,
             "rules": sorted(self.rules),
+            "default_event_type": (
+                self.default_event_type.value if self.default_event_type is not None else None
+            ),
             "processed": self._processed,
             "ignored": self._ignored,
             "last_error": self._last_error,
@@ -66,7 +72,9 @@ class AutonomousEventDispatcher:
         dispatched = 0
         async for message in self.bus.subscribe(self.stream, after=self._cursor):
             self._cursor = message.message_id
-            event_type = message.payload.get("event")
+            event_type = message.payload.get("event_type")
+            if event_type is None and self.default_event_type is not None:
+                event_type = self.default_event_type.value
             rule = self.rules.get(event_type or "")
             if rule is None:
                 self._ignored += 1
@@ -83,8 +91,13 @@ class AutonomousEventDispatcher:
                         "trigger_event": event_type,
                         "trigger_stream": self.stream,
                         "trigger_message_id": message.message_id,
+                        "event_id": message.payload.get("event_id"),
                         "symbol": message.payload.get("symbol"),
-                        "observed_at": message.payload.get("observed_at"),
+                        "observed_at": (
+                            message.payload.get("occurred_at")
+                            or message.payload.get("observed_at")
+                        ),
+                        "received_at": message.payload.get("received_at"),
                         "sequence": message.payload.get("sequence"),
                         "source": message.payload.get("source"),
                     },
