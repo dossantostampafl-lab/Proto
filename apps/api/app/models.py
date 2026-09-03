@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class SystemMode(StrEnum):
     SIMULATION = "SIMULATION"
+    SHADOW = "SHADOW"
     PAPER_TRADING = "PAPER_TRADING"
     HISTORICAL_REPLAY = "HISTORICAL_REPLAY"
     LIVE_MONITORING = "LIVE_MONITORING"
