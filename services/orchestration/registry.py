@@ -64,7 +64,8 @@ def build_job_catalog() -> dict[str, JobContract]:
                 ),
             ),
             input_contract=(
-                "fact-only candidate decision with explicit timestamps, input hash, action and provenance"
+                "fact-only candidate decision with explicit timestamps, input hash, "
+                "action and provenance"
             ),
             output_contract="persisted SHADOW_ONLY decision lineage with execution=false",
             completion_criteria=(
