@@ -8,6 +8,7 @@ COPY apps/web ./
 # window.location.origin. Do not pin the Railway-generated hostname into the bundle.
 ENV VITE_API_BASE_URL=""
 RUN npm run build \
+    && sha256sum src/approved-terminal.tsx >/dev/null \
     && cat index.html src/approved-terminal.tsx src/autonomy-control-deck.ts \
        | sha256sum | awk '{print $1}' > dist/proto-ui-source.sha256
 
