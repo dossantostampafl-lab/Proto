@@ -1,3 +1,8 @@
+from .event_triggers import (
+    AutonomousEventDispatcher,
+    AutonomousEventType,
+    EventTriggerRule,
+)
 from .memory import (
     DecisionMemoryBase,
     DecisionMemoryEntry,
@@ -27,11 +32,14 @@ from .supervisor import OrchestrationSupervisor, PeriodicJob
 __all__ = [
     "CATALOG_VERSION",
     "JOB_CATALOG",
+    "AutonomousEventDispatcher",
+    "AutonomousEventType",
     "DecisionMemoryBase",
     "DecisionMemoryEntry",
     "DecisionMemoryStore",
     "DecisionOutcome",
     "DecisionStage",
+    "EventTriggerRule",
     "JobCapability",
     "JobContract",
     "JobRun",
