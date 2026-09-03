@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 12
     env:
       PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
-      EXPECTED_UI_RELEASE: operator-terminal-v2
+      EXPECTED_UI_RELEASE: operator-terminal-v3
       EXPECTED_GIT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -38,9 +38,14 @@ jobs:
           origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
           expected_release = os.environ["EXPECTED_UI_RELEASE"]
           expected_git_sha = os.environ["EXPECTED_GIT_SHA"]
-          expected_source_sha = hashlib.sha256(
-              Path("apps/web/src/approved-terminal.tsx").read_bytes()
-          ).hexdigest()
+          digest = hashlib.sha256()
+          for path in (
+              Path("apps/web/index.html"),
+              Path("apps/web/src/approved-terminal.tsx"),
+              Path("apps/web/src/autonomy-control-deck.ts"),
+          ):
+              digest.update(path.read_bytes())
+          expected_source_sha = digest.hexdigest()
           last_error = None
 
           for attempt in range(1, 121):
@@ -51,7 +56,7 @@ jobs:
                   request = urllib.request.Request(
                       f"{origin}/?{query}",
                       headers={
-                          "User-Agent": "proto-ui-contract/3.0",
+                          "User-Agent": "proto-ui-contract/4.0",
                           "Cache-Control": "no-cache",
                       },
                   )

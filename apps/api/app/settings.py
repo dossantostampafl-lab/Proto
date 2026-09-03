@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import re
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .safety_policy import SafetyPolicyError, validate_runtime_mode
+
+_SYMBOL_RE = re.compile(r"^[A-Z0-9.-]{1,40}$")
 
 
 class Settings(BaseSettings):
@@ -97,6 +101,9 @@ class Settings(BaseSettings):
     @staticmethod
     def _parse_symbol_csv(value: str) -> tuple[str, ...]:
         symbols = {item.strip().upper() for item in value.split(",") if item.strip()}
+        invalid = sorted(symbol for symbol in symbols if _SYMBOL_RE.fullmatch(symbol) is None)
+        if invalid:
+            raise ValueError("equity symbol allowlists contain invalid symbol syntax")
         return tuple(sorted(symbols))
 
     @property
