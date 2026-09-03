@@ -15,20 +15,27 @@ assert.match(runtime, /\/paper\/automation\/start/, "autopilot controller must s
 assert.match(runtime, /\/paper\/automation\/stop/, "autopilot controller must stop the server worker");
 assert.match(runtime, /financial_connectivity !== false \|\| current\.data\.real_money_execution !== false/, "controller must fail closed if paper safety boundaries are not false");
 assert.match(runtime, /live_market_ready: boolean/, "frontend status contract must consume authoritative server live readiness");
-assert.match(runtime, /server\.paper_runtime_ready && server\.live_market_ready/, "active badge must require both paper runtime and fresh live-market readiness");
+assert.match(runtime, /server\.paper_runtime_ready && server\.live_market_ready && server\.config !== null/, "active badge must require paper runtime, live-market readiness and explicit config");
+assert.match(runtime, /stop_loss_fraction: number/, "frontend contract must carry the explicit stop-loss fraction");
+assert.match(runtime, /STOP LOSS \(%\)/, "operator must see an explicit stop-loss input");
+assert.match(runtime, /stopLoss\.required = true/, "stop-loss input must be required");
+assert.match(runtime, /stopLoss\.placeholder = "required"/, "stop-loss control must not invent a default percentage");
+assert.doesNotMatch(runtime, /DEFAULT_STOP|stopLoss\.value\s*=\s*String\(DEFAULT/, "frontend must not silently invent a stop-loss percentage");
+assert.match(runtime, /stop_loss_fraction: stopLossPercent \/ 100/, "UI percentage must be converted explicitly to API fraction");
 assert.match(runtime, /SERVER PAUSED/, "running worker without decision readiness must be visibly paused rather than shown active");
 assert.match(runtime, /public live feed is stale or unavailable · no simulated order will be submitted/, "stale public feed must be disclosed as a no-submit state");
 assert.match(runtime, /Primary automation · continues on the server after this dashboard tab is closed/, "primary persistent server lifetime must be disclosed");
 assert.match(runtime, /host\.prepend\(section\)/, "autopilot must be the first control in the automation workspace");
 assert.match(runtime, /START PAPER AUTOPILOT/, "primary action must use clear paper-autopilot language");
 assert.match(runtime, /STOP PAPER AUTOPILOT/, "stop action must use clear paper-autopilot language");
-assert.match(runtime, /Persistent server task · simulation only · no exchange account · no financial connectivity · no real-money execution/, "autopilot must disclose the simulation-only boundary");
+assert.match(runtime, /Persistent server task · simulation only · explicit stop-loss required · no exchange account · no financial connectivity · no real-money execution/, "autopilot must disclose stop-loss and simulation-only boundary");
 assert.doesNotMatch(runtime, /\/live\/market-data|\/live\/analytics|\/v1\/simulate/, "browser controller must not run the trading decision/execution loop itself");
 assert.doesNotMatch(runtime, /setInterval\(\(\) => void executeCycle|document\.hidden|armedDirection/, "browser controller must not masquerade as a persistent automation worker");
 assert.doesNotMatch(runtime, /api[_-]?key|bearer\s|private[_-]?key|wallet_address|broker_url/i, "autopilot must not implement account credentials or brokerage connectivity");
 assert.match(styles, /\.paperAutopilot/, "autopilot must have dedicated visual treatment");
 assert.match(styles, /@media\(max-width:620px\)/, "autopilot must support narrow tablet/mobile layouts");
 assert.match(styles, /focus-visible/, "autopilot controls must preserve keyboard focus");
+assert.match(styles, /input:invalid/, "required stop-loss must have an invalid-state affordance");
 assert.match(styles, /input:disabled/, "running server configuration must visibly lock mutable inputs");
 assert.match(modeControl, /syncExecutionHeader/, "paper runtime controller must keep the topbar execution indicator authoritative");
 assert.match(modeControl, /EXEC PAPER/, "paper mode must be rendered explicitly in the topbar");
@@ -42,4 +49,4 @@ assert.match(modeControl, /autopilot manages its own runtime automatically/, "ma
 assert.match(modeStyles, /\.paperModeControl\{grid-column:1\/-1/, "manual runtime control must span the paper console rather than alter the command pipeline");
 assert.match(modeStyles, /execModeManaged:after/, "authoritative execution label must override the legacy static React text without visual flicker");
 
-console.log("frontend persistent paper-autopilot readiness and control-hierarchy contracts: ok");
+console.log("frontend persistent paper-autopilot stop-loss, readiness and control-hierarchy contracts: ok");
