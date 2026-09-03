@@ -8,6 +8,8 @@ from apps.api.app.app_state import runtime
 from apps.api.app.models import KillSwitchState, SimulationResult, SystemMode
 from apps.api.app.paper_autopilot import PaperAutopilotConfig, PaperAutopilotService
 
+_TEST_STOP_LOSS = 0.05
+
 
 @pytest.fixture(autouse=True)
 def restore_runtime():
@@ -20,6 +22,19 @@ def _paper_runtime() -> None:
     runtime.mode = SystemMode.PAPER_TRADING
     runtime.running = True
     runtime.kill_switch = KillSwitchState.ARMED
+
+
+def _config(**overrides) -> PaperAutopilotConfig:
+    values = {
+        "symbol": "BTC",
+        "imbalance_trigger": 0.6,
+        "cooldown_seconds": 5,
+        "quantity": 0.001,
+        "max_spread_bps": 20,
+        "stop_loss_fraction": _TEST_STOP_LOSS,
+    }
+    values.update(overrides)
+    return PaperAutopilotConfig(**values)
 
 
 def _fresh_status(symbol: str = "BTC") -> dict[str, object]:
@@ -52,7 +67,7 @@ async def test_autopilot_start_fails_closed_outside_paper_runtime() -> None:
     service = PaperAutopilotService()
 
     with pytest.raises(HTTPException) as error:
-        await service.start(PaperAutopilotConfig())
+        await service.start(_config())
 
     assert error.value.status_code == 409
     assert service.running is False
@@ -64,13 +79,7 @@ async def test_autopilot_start_fails_closed_outside_paper_runtime() -> None:
 async def test_autopilot_stale_live_data_blocks_submission(monkeypatch) -> None:
     _paper_runtime()
     service = PaperAutopilotService()
-    service._config = PaperAutopilotConfig(  # noqa: SLF001 - white-box safety regression
-        symbol="BTC",
-        imbalance_trigger=0.6,
-        cooldown_seconds=5,
-        quantity=0.001,
-        max_spread_bps=20,
-    )
+    service._config = _config()  # noqa: SLF001 - white-box safety regression
     stale = _fresh_status()
     stale["symbol_health"] = {
         "BTC": {"fresh": False, "receipt_fresh": False, "current_connection": True}
@@ -99,6 +108,7 @@ async def test_autopilot_stale_live_data_blocks_submission(monkeypatch) -> None:
 async def test_autopilot_source_and_generation_health_fail_closed(monkeypatch) -> None:
     _paper_runtime()
     service = PaperAutopilotService()
+    service._config = _config()  # noqa: SLF001
     statuses: list[dict[str, object]] = []
 
     disconnected = _fresh_status()
@@ -138,13 +148,7 @@ async def test_autopilot_source_and_generation_health_fail_closed(monkeypatch) -
 async def test_autopilot_rechecks_live_health_before_submission(monkeypatch) -> None:
     _paper_runtime()
     service = PaperAutopilotService()
-    service._config = PaperAutopilotConfig(  # noqa: SLF001
-        symbol="BTC",
-        imbalance_trigger=0.6,
-        cooldown_seconds=5,
-        quantity=0.001,
-        max_spread_bps=20,
-    )
+    service._config = _config()  # noqa: SLF001
     now = datetime.now(UTC).isoformat()
     frame = {
         "symbol": "BTC",
@@ -189,13 +193,7 @@ async def test_autopilot_same_signal_regime_submits_only_once(monkeypatch) -> No
     _paper_runtime()
     _fresh_live(monkeypatch)
     service = PaperAutopilotService()
-    service._config = PaperAutopilotConfig(  # noqa: SLF001 - white-box safety regression
-        symbol="BTC",
-        imbalance_trigger=0.6,
-        cooldown_seconds=5,
-        quantity=0.001,
-        max_spread_bps=20,
-    )
+    service._config = _config()  # noqa: SLF001 - white-box safety regression
 
     now = datetime.now(UTC).isoformat()
     frame = {
@@ -210,6 +208,7 @@ async def test_autopilot_same_signal_regime_submits_only_once(monkeypatch) -> No
     analytics = {"current_imbalance": 0.8, "realized_volatility": 0.02}
     monkeypatch.setattr(module.live_monitor, "snapshot", lambda symbol: frame)
     monkeypatch.setattr(module.live_monitor, "analytics", lambda symbol: analytics)
+    monkeypatch.setattr(service, "_position_for_symbol", lambda symbol: None)
 
     calls = 0
 
@@ -238,12 +237,8 @@ async def test_autopilot_spread_and_liquidity_guards_block_submission(monkeypatc
     _paper_runtime()
     _fresh_live(monkeypatch)
     service = PaperAutopilotService()
-    service._config = PaperAutopilotConfig(  # noqa: SLF001
-        imbalance_trigger=0.6,
-        cooldown_seconds=5,
-        quantity=1.0,
-        max_spread_bps=5,
-    )
+    service._config = _config(quantity=1.0, max_spread_bps=5)  # noqa: SLF001
+    monkeypatch.setattr(service, "_position_for_symbol", lambda symbol: None)
     now = datetime.now(UTC).isoformat()
     frame = {
         "symbol": "BTC",
@@ -280,7 +275,7 @@ async def test_autopilot_worker_can_start_and_stop_cleanly(monkeypatch) -> None:
     _fresh_live(monkeypatch)
     service = PaperAutopilotService()
 
-    started = await service.start(PaperAutopilotConfig())
+    started = await service.start(_config())
     assert started["running"] is True
     assert started["paper_runtime_ready"] is True
     assert started["live_market_ready"] is True
