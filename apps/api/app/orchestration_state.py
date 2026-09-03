@@ -19,6 +19,8 @@ from services.orchestration.supervisor import OrchestrationSupervisor, PeriodicJ
 
 from .app_state import decision_memory_store, orchestration_store
 from .live_monitor import live_monitor
+from .models import SimulationRequest
+from .shadow_engine import evaluate_shadow_candidate
 
 
 async def _market_data_health_job(_: dict[str, object]) -> dict[str, object]:
@@ -87,10 +89,18 @@ async def _shadow_decision_job(payload: dict[str, object]) -> dict[str, object]:
         "input_hash",
         "proposed_action",
         "provenance",
+        "simulation_request",
     )
     missing = [name for name in required if name not in payload]
     if missing:
         raise ValueError("shadow decision missing required fields: " + ",".join(missing))
+
+    simulation_request_raw = payload["simulation_request"]
+    if not isinstance(simulation_request_raw, dict):
+        raise ValueError("shadow decision simulation_request must be an object")
+    simulation_request = SimulationRequest.model_validate(simulation_request_raw)
+    shadow_result = evaluate_shadow_candidate(simulation_request)
+    risk_decision = "APPROVED" if shadow_result.accepted else f"REJECTED:{shadow_result.reason}"
 
     entry = DecisionMemoryEntry.model_validate(
         {
@@ -109,7 +119,7 @@ async def _shadow_decision_job(payload: dict[str, object]) -> dict[str, object]:
             "probability": payload.get("probability"),
             "uncertainty": payload.get("uncertainty"),
             "edge": payload.get("edge"),
-            "risk_decision": payload.get("risk_decision"),
+            "risk_decision": risk_decision,
             "proposed_action": payload["proposed_action"],
             "actual_action": None,
             "explanation": payload.get("explanation"),
@@ -119,8 +129,12 @@ async def _shadow_decision_job(payload: dict[str, object]) -> dict[str, object]:
     stored = await decision_memory_store.record(entry)
     return {
         "decision": stored.model_dump(mode="json"),
+        "shadow_result": shadow_result.model_dump(mode="json"),
         "stage": DecisionStage.SHADOW_ONLY.value,
+        "would_execute": bool(shadow_result.accepted and shadow_result.fill is not None),
         "executed": False,
+        "portfolio_mutated": False,
+        "fill_persisted": False,
         "memory_persisted": True,
         "financial_connectivity": False,
         "real_money_execution": False,
