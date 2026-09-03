@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import AsyncIterator, Mapping
 
 from fastapi import APIRouter
 
