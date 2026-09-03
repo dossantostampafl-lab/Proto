@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from fastapi import Request
@@ -34,10 +35,11 @@ _ORCHESTRATION_SOURCE_FILE = Path(__file__).with_name("orchestration_surface.py"
 
 # Human-readable release names remain useful for operational rollouts, while the
 # source digests prove which frontend/control-plane implementation is actually
-# running. The orchestration digest is computed directly from the runtime source,
-# so it remains valid regardless of which Railway image builder is selected.
+# running. Railway-provided Git metadata gives us an independent deployment
+# identity so a green provider status cannot be confused with the wrong service
+# or an older image behind the public domain.
 _DASHBOARD_RELEASE = "proto-brain-control-plane-v2"
-_DASHBOARD_UI_RELEASE = "model-quality-persisted-v4"
+_DASHBOARD_UI_RELEASE = "operator-terminal-v2"
 _DASHBOARD_UI_SOURCE_SHA = (
     _UI_SOURCE_DIGEST_FILE.read_text(encoding="utf-8").strip()
     if _UI_SOURCE_DIGEST_FILE.is_file()
@@ -48,6 +50,12 @@ _ORCHESTRATION_SOURCE_SHA = (
     if _ORCHESTRATION_SOURCE_FILE.is_file()
     else ""
 )
+_RAILWAY_GIT_COMMIT_SHA = os.getenv("RAILWAY_GIT_COMMIT_SHA", "").strip()
+_RAILWAY_GIT_BRANCH = os.getenv("RAILWAY_GIT_BRANCH", "").strip()
+_RAILWAY_DEPLOYMENT_ID = os.getenv("RAILWAY_DEPLOYMENT_ID", "").strip()
+_RAILWAY_SERVICE_ID = os.getenv("RAILWAY_SERVICE_ID", "").strip()
+_RAILWAY_SERVICE_NAME = os.getenv("RAILWAY_SERVICE_NAME", "").strip()
+_RAILWAY_ENVIRONMENT_NAME = os.getenv("RAILWAY_ENVIRONMENT_NAME", "").strip()
 
 _CONTENT_SECURITY_POLICY = "; ".join(
     (
@@ -110,7 +118,7 @@ async def operational_audit_policy(request: Request, call_next) -> Response:
 
 @app.middleware("http")
 async def dashboard_http_policy(request: Request, call_next) -> Response:
-    """Apply cache, browser-security, and release policy to Railway responses."""
+    """Apply cache, browser-security, release and deployment provenance policy."""
     response = await call_next(request)
     path = request.url.path
     if path == "/" or path.endswith(".html"):
@@ -132,7 +140,30 @@ async def dashboard_http_policy(request: Request, call_next) -> Response:
         response.headers["X-Proto-UI-Source-SHA256"] = _DASHBOARD_UI_SOURCE_SHA
     if _ORCHESTRATION_SOURCE_SHA:
         response.headers["X-Proto-Orchestration-Source-SHA256"] = _ORCHESTRATION_SOURCE_SHA
+    if _RAILWAY_GIT_COMMIT_SHA:
+        response.headers["X-Proto-Git-Commit-SHA"] = _RAILWAY_GIT_COMMIT_SHA
+    if _RAILWAY_DEPLOYMENT_ID:
+        response.headers["X-Proto-Deployment-ID"] = _RAILWAY_DEPLOYMENT_ID
     return response
+
+
+@app.get("/deployment/info", tags=["system"])
+def deployment_info() -> dict[str, object]:
+    """Expose non-secret build provenance for operator and production verification."""
+    return {
+        "release": _DASHBOARD_RELEASE,
+        "ui_release": _DASHBOARD_UI_RELEASE,
+        "ui_source_sha256": _DASHBOARD_UI_SOURCE_SHA or None,
+        "orchestration_source_sha256": _ORCHESTRATION_SOURCE_SHA or None,
+        "git_commit_sha": _RAILWAY_GIT_COMMIT_SHA or None,
+        "git_branch": _RAILWAY_GIT_BRANCH or None,
+        "deployment_id": _RAILWAY_DEPLOYMENT_ID or None,
+        "service_id": _RAILWAY_SERVICE_ID or None,
+        "service_name": _RAILWAY_SERVICE_NAME or None,
+        "environment": _RAILWAY_ENVIRONMENT_NAME or None,
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
 
 
 if _DASHBOARD_DIR.is_dir():
