@@ -3,15 +3,6 @@ name: Production Orchestration Contract
 on:
   push:
     branches: [main]
-  pull_request:
-    paths:
-      - ".github/workflows/production-orchestration-contract.yml"
-      - "Dockerfile"
-      - "apps/api/app/settings.py"
-      - "apps/api/app/app_state.py"
-      - "apps/api/app/orchestration_surface.py"
-      - "apps/api/app/orchestration_state.py"
-      - "services/orchestration/**"
   workflow_dispatch:
 
 permissions:
