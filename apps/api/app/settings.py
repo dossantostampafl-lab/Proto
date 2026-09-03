@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     event_bus_backend: str = "memory"
     persistence_enabled: bool = False
+    orchestration_persistence_enabled: bool = False
     http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
     minimum_net_edge: float = Field(default=0.01, ge=0.0, le=1.0, allow_inf_nan=False)
     minimum_confidence: float = Field(default=0.55, ge=0.0, le=1.0, allow_inf_nan=False)
