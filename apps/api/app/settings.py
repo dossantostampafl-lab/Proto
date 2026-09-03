@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .safety_policy import SafetyPolicyError, validate_runtime_mode
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9.-]{1,40}$")
+_ALLOWED_ALPACA_EQUITY_FEEDS = frozenset(
+    {"iex", "sip", "delayed_sip", "otc", "boats", "overnight"}
+)
 
 
 class Settings(BaseSettings):
@@ -27,7 +30,12 @@ class Settings(BaseSettings):
     persistence_enabled: bool = False
     orchestration_persistence_enabled: bool = False
     alpaca_equity_symbols: str = ""
+    alpaca_market_data_key_id: str | None = None
+    alpaca_market_data_secret_key: str | None = None
+    alpaca_equity_feed: str = "iex"
     brapi_equity_symbols: str = ""
+    brapi_market_data_token: str | None = None
+    equity_market_data_max_age_seconds: float | None = Field(default=None, gt=0, le=3_600)
     creation_bridge_shared_secret: str | None = None
     http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
     minimum_net_edge: float = Field(default=0.01, ge=0.0, le=1.0, allow_inf_nan=False)
@@ -90,9 +98,22 @@ class Settings(BaseSettings):
             raise ValueError("live_market_source must be COINBASE or BINANCE")
         return normalized
 
-    @field_validator("creation_bridge_shared_secret")
+    @field_validator("alpaca_equity_feed")
     @classmethod
-    def normalize_creation_secret(cls, value: str | None) -> str | None:
+    def enforce_alpaca_equity_feed(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in _ALLOWED_ALPACA_EQUITY_FEEDS:
+            raise ValueError("unsupported Alpaca equity feed")
+        return normalized
+
+    @field_validator(
+        "alpaca_market_data_key_id",
+        "alpaca_market_data_secret_key",
+        "brapi_market_data_token",
+        "creation_bridge_shared_secret",
+    )
+    @classmethod
+    def normalize_optional_secret(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
@@ -113,6 +134,13 @@ class Settings(BaseSettings):
     @property
     def brapi_equity_allowlist(self) -> tuple[str, ...]:
         return self._parse_symbol_csv(self.brapi_equity_symbols)
+
+    @property
+    def alpaca_market_data_configured(self) -> bool:
+        return (
+            self.alpaca_market_data_key_id is not None
+            and self.alpaca_market_data_secret_key is not None
+        )
 
     @property
     def creation_bridge_configured(self) -> bool:

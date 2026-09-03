@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .universal import MarketEvent, MarketEventKind, MarketEventProvenance
 
@@ -126,18 +126,23 @@ class AlpacaEquityReadOnlyProvider:
             ask_size = float(quote.get("as", 0.0))
         except (KeyError, TypeError, ValueError) as exc:
             raise ReadOnlyProviderError("ALPACA quote payload is invalid") from exc
-        return MarketEvent(
-            instrument_id=f"US:{symbol}",
-            kind=MarketEventKind.QUOTE,
-            observed_at=observed_at,
-            received_at=datetime.now(UTC),
-            source=f"ALPACA_{self.config.feed.upper()}",
-            provenance=MarketEventProvenance.LICENSED_READ_ONLY,
-            bid=bid,
-            ask=ask,
-            bid_size=bid_size,
-            ask_size=ask_size,
-        )
+        try:
+            return MarketEvent(
+                instrument_id=f"US:{symbol}",
+                kind=MarketEventKind.QUOTE,
+                observed_at=observed_at,
+                received_at=datetime.now(UTC),
+                source=f"ALPACA_{self.config.feed.upper()}",
+                provenance=MarketEventProvenance.LICENSED_READ_ONLY,
+                bid=bid,
+                ask=ask,
+                bid_size=bid_size,
+                ask_size=ask_size,
+            )
+        except ValidationError as exc:
+            raise ReadOnlyProviderError(
+                "ALPACA quote is invalid or non-executable"
+            ) from exc
 
 
 class BrapiEquityReadOnlyProvider:
@@ -212,17 +217,20 @@ class BrapiEquityReadOnlyProvider:
             requested_at = _parse_utc_timestamp(payload["requestedAt"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ReadOnlyProviderError("BRAPI quote payload is invalid") from exc
-        return MarketEvent(
-            instrument_id=f"B3:{symbol}",
-            kind=MarketEventKind.STATUS,
-            observed_at=requested_at,
-            received_at=datetime.now(UTC),
-            source="BRAPI_V2",
-            provenance=MarketEventProvenance.PUBLIC_READ_ONLY,
-            last=last,
-            volume=volume,
-            quality_flags=("REQUEST_TIME_NOT_EXCHANGE_TIMESTAMP",),
-        )
+        try:
+            return MarketEvent(
+                instrument_id=f"B3:{symbol}",
+                kind=MarketEventKind.STATUS,
+                observed_at=requested_at,
+                received_at=datetime.now(UTC),
+                source="BRAPI_V2",
+                provenance=MarketEventProvenance.PUBLIC_READ_ONLY,
+                last=last,
+                volume=volume,
+                quality_flags=("REQUEST_TIME_NOT_EXCHANGE_TIMESTAMP",),
+            )
+        except ValidationError as exc:
+            raise ReadOnlyProviderError("BRAPI quote is invalid") from exc
 
 
 def _parse_utc_timestamp(value: object) -> datetime:
