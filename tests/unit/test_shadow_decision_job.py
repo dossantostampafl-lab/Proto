@@ -29,7 +29,7 @@ def _simulation_request(
     bid_size: float = 1.0,
     ask_size: float = 1.0,
 ) -> dict[str, object]:
-    observed_at = datetime(2026, 9, 3, 1, 30, tzinfo=UTC)
+    observed_at = datetime.now(UTC)
     return {
         "order": {
             "market_id": f"{asset}-shadow",
@@ -75,7 +75,7 @@ async def test_shadow_decision_persists_fact_only_lineage_and_never_executes(mon
         {
             "decision_id": decision_id,
             "instrument_id": "CRYPTO:BTC",
-            "observed_at": datetime(2026, 9, 3, 1, 30, tzinfo=UTC),
+            "observed_at": datetime.now(UTC),
             "input_hash": "0123456789abcdef0123456789abcdef",
             "proposed_action": "BUY",
             "provenance": {"source": "PUBLIC_READ_ONLY"},
@@ -122,7 +122,7 @@ async def test_shadow_decision_rejects_missing_fact_fields(monkeypatch) -> None:
             {
                 "decision_id": uuid4(),
                 "instrument_id": "CRYPTO:BTC",
-                "observed_at": datetime(2026, 9, 3, 1, 30, tzinfo=UTC),
+                "observed_at": datetime.now(UTC),
                 "input_hash": "0123456789abcdef0123456789abcdef",
                 "proposed_action": "WATCH_LONG",
             }
@@ -139,7 +139,7 @@ async def test_shadow_payload_cannot_force_actual_execution(monkeypatch) -> None
         {
             "decision_id": uuid4(),
             "instrument_id": "CRYPTO:ETH",
-            "observed_at": datetime(2026, 9, 3, 1, 30, tzinfo=UTC),
+            "observed_at": datetime.now(UTC),
             "input_hash": "abcdef0123456789abcdef0123456789",
             "proposed_action": "SELL",
             "actual_action": "SELL",
