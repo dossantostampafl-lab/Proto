@@ -20,38 +20,55 @@ jobs:
       PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
       EXPECTED_UI_RELEASE: model-quality-persisted-v4
     steps:
+      - uses: actions/checkout@v4
+
       - name: Verify deployed dashboard UI generation
         shell: bash
         run: |
           python - <<'PY'
+          import hashlib
           import os
           import time
           import urllib.error
           import urllib.request
+          from pathlib import Path
 
           origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
-          expected = os.environ["EXPECTED_UI_RELEASE"]
+          expected_release = os.environ["EXPECTED_UI_RELEASE"]
+          expected_source_sha = hashlib.sha256(
+              Path("apps/web/src/approved-terminal.tsx").read_bytes()
+          ).hexdigest()
           last_error = None
 
           for attempt in range(1, 61):
               try:
                   request = urllib.request.Request(
                       f"{origin}/",
-                      headers={"User-Agent": "proto-ui-contract/1.0"},
+                      headers={"User-Agent": "proto-ui-contract/2.0"},
                   )
                   with urllib.request.urlopen(request, timeout=10) as response:
                       body = response.read().decode("utf-8")
                       headers = {name.lower(): value for name, value in response.headers.items()}
                   if '<div id="root"></div>' not in body:
                       raise AssertionError("dashboard React root is missing")
-                  actual = headers.get("x-proto-ui-release")
-                  if actual != expected:
+                  actual_release = headers.get("x-proto-ui-release")
+                  if actual_release != expected_release:
                       raise AssertionError(
-                          f"UI deployment mismatch: expected={expected!r} got={actual!r}"
+                          "UI release mismatch: "
+                          f"expected={expected_release!r} got={actual_release!r}"
+                      )
+                  actual_source_sha = headers.get("x-proto-ui-source-sha256")
+                  if actual_source_sha != expected_source_sha:
+                      raise AssertionError(
+                          "deployed UI source digest mismatch: "
+                          f"expected={expected_source_sha!r} got={actual_source_sha!r}"
                       )
                   if "no-store" not in headers.get("cache-control", ""):
                       raise AssertionError("dashboard HTML cache policy is not no-store")
-                  print(f"production UI contract: ok release={actual}")
+                  print(
+                      "production UI contract: ok "
+                      f"release={actual_release} source_sha256={actual_source_sha}"
+                  )
                   break
               except (AssertionError, urllib.error.URLError, TimeoutError) as error:
                   last_error = error

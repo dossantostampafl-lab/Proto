@@ -86,9 +86,13 @@ assert.match(dockerfile, /VITE_API_BASE_URL=""/, "single-origin deploy must rema
 assert.match(dockerfile, /SYNTHETIC_RESEARCH_ENABLED=true/, "Railway image must explicitly enable isolated synthetic research");
 assert.match(dockerfile, /LIVE_PERSISTENCE_ENABLED=true/, "Railway image must preserve public live-history persistence");
 assert.doesNotMatch(dockerfile, /\n\s*PERSISTENCE_ENABLED=true/, "live deployment must not implicitly enable general simulation persistence");
+assert.match(dockerfile, /sha256sum src\/approved-terminal\.tsx/, "web image must bind a digest to the exact approved UI source");
+assert.match(dockerfile, /proto-ui-source\.sha256/, "web image must carry the approved UI digest into dist");
 assert.match(pyproject, /"aiosqlite>=0\.21,<1"/, "runtime dependencies must include async sqlite driver used by default live persistence");
 assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bundle must not hardcode Railway hostname");
 assert.match(railwayApp, /Cache-Control.*no-store/, "HTML must not be served from stale cache");
 assert.match(railwayApp, /max-age=31536000, immutable/, "fingerprinted assets must remain immutable-cacheable");
+assert.match(railwayApp, /X-Proto-UI-Source-SHA256/, "runtime must expose the digest of the actually bundled approved UI source");
+assert.match(railwayApp, /proto-ui-source\.sha256/, "runtime UI digest must come from the image artifact rather than a static release label");
 
 console.log("approved terminal provenance, transport, semantics, layout and deployment contracts: ok");
