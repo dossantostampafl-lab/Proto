@@ -15,18 +15,20 @@ from .main import app
 from .orchestration_surface import router as orchestration_router
 from .paper_autopilot import router as paper_autopilot_router
 from .paper_control import router as paper_control_router
+from .shadow_control import router as shadow_control_router
 
 # Railway composes the public live surface at the application boundary. The
 # research router deliberately excludes /live so the live router and its lifespan
-# are registered exactly once in this process. Paper controls and the paper
-# autopilot remain internal simulation-only surfaces. The event router exposes
-# runtime health plus the append-only operational audit journal. The orchestration
-# router is deliberately read-only: it exposes contracts/readiness but no endpoint
-# capable of starting arbitrary jobs.
+# are registered exactly once in this process. Paper and shadow controls remain
+# simulation-only/non-financial surfaces. The event router exposes runtime health
+# plus the append-only operational audit journal. The orchestration router is
+# deliberately read-only: it exposes contracts/readiness but no endpoint capable
+# of starting arbitrary jobs.
 app.include_router(live_router)
 app.include_router(event_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
+app.include_router(shadow_control_router)
 app.include_router(orchestration_router)
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
@@ -92,6 +94,9 @@ _OPERATIONAL_EVENTS = {
     "/paper/stop": "PAPER_TRADING_STOPPED",
     "/paper/automation/start": "PAPER_AUTOPILOT_STARTED",
     "/paper/automation/stop": "PAPER_AUTOPILOT_STOPPED",
+    "/shadow/start": "SHADOW_MODE_STARTED",
+    "/shadow/stop": "SHADOW_MODE_STOPPED",
+    "/shadow/evaluate": "SHADOW_DECISION_EVALUATED",
 }
 
 

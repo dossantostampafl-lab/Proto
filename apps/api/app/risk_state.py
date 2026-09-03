@@ -7,6 +7,7 @@ from .settings import settings
 SIMULATED_EXECUTION_MODES = frozenset(
     {
         SystemMode.SIMULATION,
+        SystemMode.SHADOW,
         SystemMode.PAPER_TRADING,
     }
 )
