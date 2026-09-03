@@ -31,6 +31,7 @@ class JobCapability(StrEnum):
 SAFE_MODES = frozenset(
     {
         "SIMULATION",
+        "SHADOW",
         "PAPER_TRADING",
         "HISTORICAL_REPLAY",
         "LIVE_MONITORING",

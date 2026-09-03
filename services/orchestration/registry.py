@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .runtime import JobCapability, JobSpec
 
-CATALOG_VERSION = "2026-09-02.3"
+CATALOG_VERSION = "2026-09-03.1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +38,13 @@ def build_job_catalog() -> dict[str, JobContract]:
                 "opportunity-scan",
                 JobCapability.QUANT_RESEARCH,
                 allowed_modes=frozenset(
-                    {"SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY", "LIVE_MONITORING"}
+                    {
+                        "SIMULATION",
+                        "SHADOW",
+                        "PAPER_TRADING",
+                        "HISTORICAL_REPLAY",
+                        "LIVE_MONITORING",
+                    }
                 ),
             ),
             input_contract=(
@@ -59,20 +65,22 @@ def build_job_catalog() -> dict[str, JobContract]:
             spec=JobSpec(
                 "shadow-decision",
                 JobCapability.QUANT_RESEARCH,
-                allowed_modes=frozenset(
-                    {"SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY", "LIVE_MONITORING"}
-                ),
+                allowed_modes=frozenset({"SHADOW"}),
             ),
             input_contract=(
-                "fact-only candidate decision with explicit timestamps, input hash, "
-                "action and provenance"
+                "fact-only decision lineage plus an explicit SimulationRequest built from observed "
+                "market data"
             ),
-            output_contract="persisted SHADOW_ONLY decision lineage with execution=false",
+            output_contract=(
+                "authoritative SHADOW risk/fill evaluation and persisted SHADOW_ONLY "
+                "decision lineage"
+            ),
             completion_criteria=(
-                "candidate contains no fabricated model fields",
-                "decision lineage persisted before success",
-                "actual_action remains null",
-                "no simulator, broker or financial side effect invoked",
+                "candidate contains no fabricated model or market fields",
+                "server-authoritative exposure, liquidity and configured risk limits evaluated",
+                "hypothetical fill is never persisted or applied to the paper portfolio",
+                "actual_action remains null and decision lineage is persisted before success",
+                "financial connectivity and real-money execution remain unavailable",
             ),
             owner_domain="orchestration",
         ),
@@ -80,7 +88,7 @@ def build_job_catalog() -> dict[str, JobContract]:
             spec=JobSpec(
                 "quant-research",
                 JobCapability.QUANT_RESEARCH,
-                allowed_modes=frozenset({"SIMULATION", "HISTORICAL_REPLAY"}),
+                allowed_modes=frozenset({"SIMULATION", "SHADOW", "HISTORICAL_REPLAY"}),
             ),
             input_contract=(
                 "versioned market/replay observations and explicit execution-cost inputs"
@@ -97,7 +105,7 @@ def build_job_catalog() -> dict[str, JobContract]:
             spec=JobSpec(
                 "model-calibration",
                 JobCapability.CALIBRATION,
-                allowed_modes=frozenset({"SIMULATION", "HISTORICAL_REPLAY"}),
+                allowed_modes=frozenset({"SIMULATION", "SHADOW", "HISTORICAL_REPLAY"}),
             ),
             input_contract="labeled probability observations and model identifier",
             output_contract="Brier/log-loss/ECE/MCE/reliability metrics",
@@ -112,7 +120,7 @@ def build_job_catalog() -> dict[str, JobContract]:
             spec=JobSpec(
                 "risk-evaluation",
                 JobCapability.RISK,
-                allowed_modes=frozenset({"SIMULATION", "PAPER_TRADING"}),
+                allowed_modes=frozenset({"SIMULATION", "SHADOW", "PAPER_TRADING"}),
             ),
             input_contract="candidate action, exposure, liquidity and configured limits",
             output_contract="independent approved/rejected risk decision",
@@ -158,7 +166,13 @@ def build_job_catalog() -> dict[str, JobContract]:
                 "observability-health",
                 JobCapability.OBSERVABILITY,
                 allowed_modes=frozenset(
-                    {"SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY", "LIVE_MONITORING"}
+                    {
+                        "SIMULATION",
+                        "SHADOW",
+                        "PAPER_TRADING",
+                        "HISTORICAL_REPLAY",
+                        "LIVE_MONITORING",
+                    }
                 ),
             ),
             input_contract="runtime health, event journal, persistence and feed metrics",

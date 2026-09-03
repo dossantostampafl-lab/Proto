@@ -115,6 +115,34 @@ async def test_mission_mode_must_match_job_contract(store: SqlJobStore) -> None:
     assert receipt.job_run_ids == ()
 
 
+@pytest.mark.asyncio
+async def test_creation_can_request_allowlisted_shadow_job(store: SqlJobStore) -> None:
+    async def handler(payload: dict[str, object]) -> dict[str, object]:
+        return payload
+
+    brain = ProtoBrain(store=store, worker_id="mission-worker")
+    brain.register(
+        JobSpec(
+            "shadow-decision",
+            JobCapability.QUANT_RESEARCH,
+            allowed_modes=frozenset({"SHADOW"}),
+        ),
+        handler,
+    )
+    gateway = MissionGateway(brain, frozenset({"shadow-decision"}))
+
+    receipt = await gateway.accept(
+        _mission(jobs=("shadow-decision",), mode="SHADOW"),
+        identity_verified=True,
+    )
+
+    assert receipt.state is MissionState.ACCEPTED
+    assert receipt.accepted_jobs == ("shadow-decision",)
+    assert len(receipt.job_run_ids) == 1
+    assert receipt.financial_connectivity is False
+    assert receipt.real_money_execution is False
+
+
 def test_mission_contract_rejects_live_execution_mode() -> None:
     with pytest.raises(ValidationError, match="safe PROTO mode"):
         _mission(jobs=("observability",), mode="LIVE_EXECUTION")
