@@ -35,6 +35,7 @@ jobs:
           ORIGIN: ${{ env.PROTO_PUBLIC_ORIGIN }}
         run: |
           python - <<'PY'
+          import hashlib
           import json
           import os
           import re
@@ -47,6 +48,9 @@ jobs:
           origin = os.environ["ORIGIN"].rstrip("/")
           artifacts = Path("browser-artifacts")
           artifacts.mkdir(exist_ok=True)
+          expected_ui_sha = hashlib.sha256(
+              Path("apps/web/src/approved-terminal.tsx").read_bytes()
+          ).hexdigest()
 
           def json_get(path: str) -> dict:
               request = Request(f"{origin}{path}", headers={"Cache-Control": "no-cache"})
@@ -55,19 +59,35 @@ jobs:
                       raise AssertionError(f"{path} returned HTTP {response.status}")
                   return json.loads(response.read().decode("utf-8"))
 
-          deadline = time.monotonic() + 120
+          def deployed_ui_sha() -> str | None:
+              request = Request(
+                  f"{origin}/",
+                  headers={"Cache-Control": "no-cache", "User-Agent": "proto-browser-e2e/2.0"},
+              )
+              with urlopen(request, timeout=15) as response:
+                  return response.headers.get("X-Proto-UI-Source-SHA256")
+
+          deadline = time.monotonic() + 180
           last_error = None
           while time.monotonic() < deadline:
               try:
                   health = json_get("/health")
                   live = json_get("/live/status")
-                  if health.get("status") == "ok" and live.get("running") is True:
+                  actual_ui_sha = deployed_ui_sha()
+                  if (
+                      health.get("status") == "ok"
+                      and live.get("running") is True
+                      and actual_ui_sha == expected_ui_sha
+                  ):
                       break
+                  last_error = AssertionError(
+                      f"deployment not current: ui_sha={actual_ui_sha!r} expected={expected_ui_sha!r}"
+                  )
               except Exception as error:
                   last_error = error
               time.sleep(3)
           else:
-              raise AssertionError(f"production did not become ready: {last_error}")
+              raise AssertionError(f"production did not become current and ready: {last_error}")
 
           with sync_playwright() as playwright:
               browser = playwright.chromium.launch()
@@ -93,8 +113,6 @@ jobs:
                       state="visible", timeout=30_000
                   )
 
-              # A hydrated live terminal must leave the boot/reconciliation state and
-              # expose a public-feed status. We deliberately do not assert a price value.
               page.get_by_text(re.compile(r"STREAMING|RECONCILING")).first.wait_for(
                   state="visible", timeout=30_000
               )
@@ -102,8 +120,24 @@ jobs:
                   state="visible", timeout=30_000
               )
 
-              # Exercise the React-owned market controls. Assert state on the button
-              # itself and verify the selected chart header changes with that state.
+              # Structural selectors are used because panel labels contain nested value
+              # and provenance elements; exact accessible-text matching would incorrectly
+              # reject a valid panel. No calibration values are asserted.
+              calibration = page.locator("article.calibrationPanel")
+              calibration.wait_for(state="visible", timeout=30_000)
+              calibration.locator("header").filter(has_text="MODEL CALIBRATION").wait_for(
+                  state="visible", timeout=30_000
+              )
+              calibration.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
+                  state="visible", timeout=30_000
+              )
+              calibration.locator(".calMetrics span").filter(has_text="BRIER SCORE").wait_for(
+                  state="visible", timeout=30_000
+              )
+              calibration.locator(".calMetrics span").filter(has_text="SAMPLE COUNT").wait_for(
+                  state="visible", timeout=30_000
+              )
+
               eth = page.locator("button.marketTile").filter(has_text="ETH/USD").first
               eth.click()
               page.wait_for_timeout(300)
@@ -124,14 +158,20 @@ jobs:
 
               page.screenshot(path=str(artifacts / "desktop.png"), full_page=True)
 
-              # Reload must rehydrate cleanly and must not require a manual reconnect.
               page.reload(wait_until="domcontentloaded", timeout=45_000)
               page.locator("main.terminal").wait_for(state="visible", timeout=30_000)
               page.get_by_text("LIVE PUBLIC", exact=False).first.wait_for(
                   state="visible", timeout=30_000
               )
+              calibration = page.locator("article.calibrationPanel")
+              calibration.wait_for(state="visible", timeout=30_000)
+              calibration.locator("header").filter(has_text="MODEL CALIBRATION").wait_for(
+                  state="visible", timeout=30_000
+              )
+              calibration.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
+                  state="visible", timeout=30_000
+              )
 
-              # Tablet landscape validation catches the dashboard's densest responsive case.
               page.set_viewport_size({"width": 1280, "height": 800})
               page.wait_for_timeout(300)
               overflow = page.evaluate(
