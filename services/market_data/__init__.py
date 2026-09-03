@@ -28,6 +28,13 @@ from .core import (
     OrderBookMetrics,
     compute_orderbook_metrics,
 )
+from .equity_readonly import (
+    AlpacaEquityReadOnlyProvider,
+    AlpacaReadOnlyConfig,
+    BrapiEquityReadOnlyProvider,
+    BrapiReadOnlyConfig,
+    ReadOnlyProviderError,
+)
 from .instruments import AssetClass, Instrument, InstrumentRegistry, SessionType
 from .l2_corpus_replay import (
     PublicL2CorpusRecord,
@@ -81,11 +88,15 @@ from .public_l2_live import CoinbasePublicL2StreamAdapter, PublicL2StreamHealth
 from .universal import MarketEvent, MarketEventKind, MarketEventProvenance
 
 __all__ = [
+    "AlpacaEquityReadOnlyProvider",
+    "AlpacaReadOnlyConfig",
     "AssetClass",
     "BinaryContractSnapshot",
     "BinancePublicFeedTimeoutError",
     "BinancePublicMarketDataAdapter",
     "BookLevel",
+    "BrapiEquityReadOnlyProvider",
+    "BrapiReadOnlyConfig",
     "CSVReplayAdapter",
     "Candle",
     "CoinbasePublicL2StreamAdapter",
@@ -137,6 +148,7 @@ __all__ = [
     "PublicL2StreamHealth",
     "PublicL2Update",
     "PublicMarketDataAdapter",
+    "ReadOnlyProviderError",
     "ResearchAsset",
     "SUPPORTED_BINANCE_SYMBOLS",
     "SessionType",
