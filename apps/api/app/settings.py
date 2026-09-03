@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     event_bus_backend: str = "memory"
     persistence_enabled: bool = False
     orchestration_persistence_enabled: bool = False
+    alpaca_equity_symbols: str = ""
+    brapi_equity_symbols: str = ""
+    creation_bridge_shared_secret: str | None = None
     http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
     minimum_net_edge: float = Field(default=0.01, ge=0.0, le=1.0, allow_inf_nan=False)
     minimum_confidence: float = Field(default=0.55, ge=0.0, le=1.0, allow_inf_nan=False)
@@ -82,6 +85,31 @@ class Settings(BaseSettings):
         if normalized not in {"COINBASE", "BINANCE"}:
             raise ValueError("live_market_source must be COINBASE or BINANCE")
         return normalized
+
+    @field_validator("creation_bridge_shared_secret")
+    @classmethod
+    def normalize_creation_secret(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @staticmethod
+    def _parse_symbol_csv(value: str) -> tuple[str, ...]:
+        symbols = {item.strip().upper() for item in value.split(",") if item.strip()}
+        return tuple(sorted(symbols))
+
+    @property
+    def alpaca_equity_allowlist(self) -> tuple[str, ...]:
+        return self._parse_symbol_csv(self.alpaca_equity_symbols)
+
+    @property
+    def brapi_equity_allowlist(self) -> tuple[str, ...]:
+        return self._parse_symbol_csv(self.brapi_equity_symbols)
+
+    @property
+    def creation_bridge_configured(self) -> bool:
+        return self.creation_bridge_shared_secret is not None
 
     @property
     def database_driver(self) -> str:
