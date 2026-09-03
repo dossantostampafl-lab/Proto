@@ -59,7 +59,6 @@ def test_registry_filters_without_claiming_provider_coverage() -> None:
 
 def test_instrument_rejects_invalid_timezone() -> None:
     with pytest.raises(ValidationError, match="valid IANA timezone"):
-        _instrument().model_copy(update={"timezone": "Not/A_Real_Timezone"})
         Instrument(
             instrument_id="TEST:ABC",
             symbol="ABC",
