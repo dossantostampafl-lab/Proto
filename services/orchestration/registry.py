@@ -72,7 +72,8 @@ def build_job_catalog() -> dict[str, JobContract]:
                 "market data"
             ),
             output_contract=(
-                "authoritative SHADOW risk/fill evaluation and persisted SHADOW_ONLY decision lineage"
+                "authoritative SHADOW risk/fill evaluation and persisted SHADOW_ONLY "
+                "decision lineage"
             ),
             completion_criteria=(
                 "candidate contains no fabricated model or market fields",
