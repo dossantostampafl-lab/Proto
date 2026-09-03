@@ -27,11 +27,20 @@ app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
 app.include_router(orchestration_router)
 
-# Deliberately static application-contract markers. Production verification uses
-# them to distinguish "the endpoint responds" from "the expected backend/UI
-# generation is actually deployed" without provider-specific Railway metadata.
+_DASHBOARD_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
+_UI_SOURCE_DIGEST_FILE = _DASHBOARD_DIR / "proto-ui-source.sha256"
+
+# Human-readable release names remain useful for operational rollouts, but they
+# are not proof that a particular frontend bundle is deployed. The source digest
+# is generated in the Docker web-build stage from the exact approved React entry
+# that produced the image and is surfaced separately for deployment verification.
 _DASHBOARD_RELEASE = "proto-brain-control-plane-v1"
 _DASHBOARD_UI_RELEASE = "model-quality-persisted-v4"
+_DASHBOARD_UI_SOURCE_SHA = (
+    _UI_SOURCE_DIGEST_FILE.read_text(encoding="utf-8").strip()
+    if _UI_SOURCE_DIGEST_FILE.is_file()
+    else ""
+)
 
 _CONTENT_SECURITY_POLICY = "; ".join(
     (
@@ -112,10 +121,10 @@ async def dashboard_http_policy(request: Request, call_next) -> Response:
     )
     response.headers["X-Proto-Release"] = _DASHBOARD_RELEASE
     response.headers["X-Proto-UI-Release"] = _DASHBOARD_UI_RELEASE
+    if _DASHBOARD_UI_SOURCE_SHA:
+        response.headers["X-Proto-UI-Source-SHA256"] = _DASHBOARD_UI_SOURCE_SHA
     return response
 
-
-_DASHBOARD_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
 
 if _DASHBOARD_DIR.is_dir():
     app.mount(
