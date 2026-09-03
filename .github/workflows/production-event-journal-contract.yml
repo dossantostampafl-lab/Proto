@@ -15,9 +15,10 @@ concurrency:
 jobs:
   railway-event-journal:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 12
     env:
       PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+      EXPECTED_PROTO_RELEASE: proto-brain-control-plane-v2
     steps:
       - name: Verify deployed operational journal integrity
         shell: bash
@@ -30,23 +31,42 @@ jobs:
           import urllib.request
 
           origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
+          expected_release = os.environ["EXPECTED_PROTO_RELEASE"]
           last_error = None
 
-          def get_json(path: str) -> dict:
-              request = urllib.request.Request(
+          def request(path: str):
+              req = urllib.request.Request(
                   f"{origin}{path}",
                   headers={
                       "Cache-Control": "no-cache",
-                      "User-Agent": "proto-event-journal-contract/1.0",
+                      "User-Agent": "proto-event-journal-contract/2.0",
                   },
               )
-              with urllib.request.urlopen(request, timeout=10) as response:
-                  if response.status != 200:
-                      raise AssertionError(f"{path} returned HTTP {response.status}")
-                  return json.loads(response.read().decode("utf-8"))
+              with urllib.request.urlopen(req, timeout=10) as response:
+                  return (
+                      response.status,
+                      {name.lower(): value for name, value in response.headers.items()},
+                      response.read(),
+                  )
 
-          for attempt in range(1, 61):
+          def get_json(path: str) -> dict:
+              status, _, body = request(path)
+              if status != 200:
+                  raise AssertionError(f"{path} returned HTTP {status}")
+              return json.loads(body.decode("utf-8"))
+
+          for attempt in range(1, 121):
               try:
+                  root_status, root_headers, _ = request("/")
+                  if root_status != 200:
+                      raise AssertionError(f"/ returned HTTP {root_status}")
+                  deployed_release = root_headers.get("x-proto-release")
+                  if deployed_release != expected_release:
+                      raise AssertionError(
+                          "event-journal gate is observing a stale deployment: "
+                          f"expected={expected_release!r} got={deployed_release!r}"
+                      )
+
                   ready = get_json("/events/ready")
                   verify = get_json("/events/journal/verify")
 
@@ -70,6 +90,7 @@ jobs:
                       "production event journal contract: ok",
                       json.dumps(
                           {
+                              "release": deployed_release,
                               "event_count": verify.get("event_count"),
                               "persisted_count": verify.get("persisted_count"),
                               "persistence_enabled": verify.get("persistence_enabled"),
@@ -85,10 +106,11 @@ jobs:
                   json.JSONDecodeError,
                   urllib.error.URLError,
                   TimeoutError,
+                  OSError,
               ) as error:
                   last_error = error
-                  print(f"attempt {attempt}/60 not ready: {type(error).__name__}: {error}")
-                  if attempt == 60:
+                  print(f"attempt {attempt}/120 not ready: {type(error).__name__}: {error}")
+                  if attempt == 120:
                       raise
                   time.sleep(5)
           else:
