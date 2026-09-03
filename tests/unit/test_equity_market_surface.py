@@ -7,7 +7,11 @@ import apps.api.app.equity_market_surface as equity_surface
 from apps.api.app.railway_app import app
 from apps.api.app.settings import settings
 from services.market_data import MarketEvent, MarketEventKind, MarketEventProvenance
-from services.market_data.equity_readonly import AlpacaEquityReadOnlyProvider, ReadOnlyProviderError
+from services.market_data.equity_readonly import (
+    AlpacaEquityReadOnlyProvider,
+    AlpacaReadOnlyConfig,
+    ReadOnlyProviderError,
+)
 
 
 def test_configured_us_equity_fails_closed_when_provider_credentials_are_absent(
@@ -69,7 +73,13 @@ def test_us_equity_observation_exposes_truthful_provenance_without_inventing_fre
 
 
 def test_alpaca_zero_bid_quote_is_reported_as_provider_error() -> None:
-    provider = object.__new__(AlpacaEquityReadOnlyProvider)
+    provider = AlpacaEquityReadOnlyProvider(
+        AlpacaReadOnlyConfig(
+            api_key_id="read-only-key",
+            api_secret_key="read-only-secret",
+            allowed_symbols=frozenset({"AAPL"}),
+        )
+    )
     quote = {
         "t": "2026-09-03T20:00:00Z",
         "bp": 0,
