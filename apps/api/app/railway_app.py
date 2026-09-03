@@ -48,7 +48,7 @@ _ORCHESTRATION_SOURCE_FILE = Path(__file__).with_name("orchestration_surface.py"
 # identity so a green provider status cannot be confused with the wrong service
 # or an older image behind the public domain.
 _DASHBOARD_RELEASE = "proto-brain-control-plane-v3"
-_DASHBOARD_UI_RELEASE = "operator-terminal-v2"
+_DASHBOARD_UI_RELEASE = "operator-terminal-v3"
 _DASHBOARD_UI_SOURCE_SHA = (
     _UI_SOURCE_DIGEST_FILE.read_text(encoding="utf-8").strip()
     if _UI_SOURCE_DIGEST_FILE.is_file()
