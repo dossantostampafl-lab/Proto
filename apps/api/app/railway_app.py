@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from fastapi import Request
@@ -29,16 +30,22 @@ app.include_router(orchestration_router)
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
 _UI_SOURCE_DIGEST_FILE = _DASHBOARD_DIR / "proto-ui-source.sha256"
+_ORCHESTRATION_SOURCE_FILE = Path(__file__).with_name("orchestration_surface.py")
 
-# Human-readable release names remain useful for operational rollouts, but they
-# are not proof that a particular frontend bundle is deployed. The source digest
-# is generated in the Docker web-build stage from the exact approved React entry
-# that produced the image and is surfaced separately for deployment verification.
-_DASHBOARD_RELEASE = "proto-brain-control-plane-v1"
+# Human-readable release names remain useful for operational rollouts, while the
+# source digests prove which frontend/control-plane implementation is actually
+# running. The orchestration digest is computed directly from the runtime source,
+# so it remains valid regardless of which Railway image builder is selected.
+_DASHBOARD_RELEASE = "proto-brain-control-plane-v2"
 _DASHBOARD_UI_RELEASE = "model-quality-persisted-v4"
 _DASHBOARD_UI_SOURCE_SHA = (
     _UI_SOURCE_DIGEST_FILE.read_text(encoding="utf-8").strip()
     if _UI_SOURCE_DIGEST_FILE.is_file()
+    else ""
+)
+_ORCHESTRATION_SOURCE_SHA = (
+    hashlib.sha256(_ORCHESTRATION_SOURCE_FILE.read_bytes()).hexdigest()
+    if _ORCHESTRATION_SOURCE_FILE.is_file()
     else ""
 )
 
@@ -123,6 +130,8 @@ async def dashboard_http_policy(request: Request, call_next) -> Response:
     response.headers["X-Proto-UI-Release"] = _DASHBOARD_UI_RELEASE
     if _DASHBOARD_UI_SOURCE_SHA:
         response.headers["X-Proto-UI-Source-SHA256"] = _DASHBOARD_UI_SOURCE_SHA
+    if _ORCHESTRATION_SOURCE_SHA:
+        response.headers["X-Proto-Orchestration-Source-SHA256"] = _ORCHESTRATION_SOURCE_SHA
     return response
 
 
