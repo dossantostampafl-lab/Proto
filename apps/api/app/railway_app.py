@@ -13,6 +13,7 @@ from .event_surface import router as event_router
 from .live_routes import router as live_router
 from .main import app
 from .orchestration_surface import router as orchestration_router
+from .paper_autonomy_bootstrap import router as paper_autonomy_router
 from .paper_autopilot import router as paper_autopilot_router
 from .paper_control import router as paper_control_router
 from .shadow_control import router as shadow_control_router
@@ -28,6 +29,7 @@ app.include_router(live_router)
 app.include_router(event_router)
 app.include_router(paper_control_router)
 app.include_router(paper_autopilot_router)
+app.include_router(paper_autonomy_router)
 app.include_router(shadow_control_router)
 app.include_router(orchestration_router)
 
