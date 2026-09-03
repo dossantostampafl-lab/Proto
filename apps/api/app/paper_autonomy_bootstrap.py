@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 
 from .app_state import replay_session, runtime
 from .models import KillSwitchState, SystemMode
 from .paper_autopilot import PaperAutopilotConfig, paper_autopilot
+from .risk_state import simulation_execution_allowed
 
 _ENV_PREFIX = "PROTO_PAPER_AUTONOMY_"
 _REQUIRED_ENV = (
@@ -20,6 +23,7 @@ _REQUIRED_ENV = (
     "MAX_SPREAD_BPS",
     "STOP_LOSS_FRACTION",
 )
+_WATCHDOG_SECONDS = 5.0
 
 
 def _enabled(value: str | None) -> bool:
@@ -59,6 +63,12 @@ class PaperAutonomyBootstrapState:
     started: bool = False
     last_reason: str = "DISABLED"
     config: PaperAutopilotConfig | None = None
+    watchdog_running: bool = False
+    watchdog_checks: int = 0
+    watchdog_restarts: int = 0
+    watchdog_failures: int = 0
+    watchdog_last_check_at: datetime | None = None
+    watchdog_last_error: str | None = None
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -71,14 +81,28 @@ class PaperAutonomyBootstrapState:
                 runtime.mode == SystemMode.PAPER_TRADING
                 and runtime.running
                 and runtime.kill_switch == KillSwitchState.ARMED
+                and simulation_execution_allowed()
             ),
             "autopilot_running": paper_autopilot.running,
+            "watchdog": {
+                "running": self.watchdog_running,
+                "checks": self.watchdog_checks,
+                "restarts": self.watchdog_restarts,
+                "failures": self.watchdog_failures,
+                "last_check_at": (
+                    self.watchdog_last_check_at.isoformat()
+                    if self.watchdog_last_check_at is not None
+                    else None
+                ),
+                "last_error": self.watchdog_last_error,
+            },
             "financial_connectivity": False,
             "real_money_execution": False,
         }
 
 
 bootstrap_state = PaperAutonomyBootstrapState()
+_watchdog_task: asyncio.Task[None] | None = None
 
 
 async def start_configured_paper_autonomy(
@@ -90,6 +114,11 @@ async def start_configured_paper_autonomy(
     bootstrap_state.configured = False
     bootstrap_state.started = False
     bootstrap_state.config = None
+    bootstrap_state.watchdog_restarts = 0
+    bootstrap_state.watchdog_failures = 0
+    bootstrap_state.watchdog_checks = 0
+    bootstrap_state.watchdog_last_check_at = None
+    bootstrap_state.watchdog_last_error = None
 
     try:
         config = load_bootstrap_config(env)
@@ -122,7 +151,76 @@ async def start_configured_paper_autonomy(
     return bootstrap_state.snapshot()
 
 
+async def reconcile_configured_paper_autonomy() -> bool:
+    """Restart only a bootstrap-owned worker that died unexpectedly.
+
+    Operator mode changes, a stopped runtime, kill-switch changes and risk-gate
+    denial are never overridden. This keeps recovery autonomous without turning a
+    watchdog into an execution-policy bypass.
+    """
+    bootstrap_state.watchdog_checks += 1
+    bootstrap_state.watchdog_last_check_at = datetime.now(UTC)
+
+    config = bootstrap_state.config
+    if not bootstrap_state.started or config is None:
+        return False
+    if runtime.mode != SystemMode.PAPER_TRADING or not runtime.running:
+        bootstrap_state.last_reason = "WATCHDOG_RUNTIME_NOT_OWNED"
+        return False
+    if runtime.kill_switch != KillSwitchState.ARMED or not simulation_execution_allowed():
+        bootstrap_state.last_reason = "WATCHDOG_SAFETY_GATE_BLOCKED"
+        return False
+    if paper_autopilot.running:
+        bootstrap_state.watchdog_last_error = None
+        return False
+
+    try:
+        await paper_autopilot.start(config)
+    except Exception as error:
+        bootstrap_state.watchdog_failures += 1
+        bootstrap_state.watchdog_last_error = f"{type(error).__name__}:{error}"
+        bootstrap_state.last_reason = "WATCHDOG_RESTART_FAILED"
+        return False
+
+    bootstrap_state.watchdog_restarts += 1
+    bootstrap_state.watchdog_last_error = None
+    bootstrap_state.last_reason = "WATCHDOG_AUTOPILOT_RESTARTED"
+    return True
+
+
+async def _watchdog_loop() -> None:
+    bootstrap_state.watchdog_running = True
+    try:
+        while True:
+            await asyncio.sleep(_WATCHDOG_SECONDS)
+            await reconcile_configured_paper_autonomy()
+    except asyncio.CancelledError:
+        raise
+    finally:
+        bootstrap_state.watchdog_running = False
+
+
+async def _start_watchdog() -> None:
+    global _watchdog_task
+    if _watchdog_task is not None and not _watchdog_task.done():
+        return
+    _watchdog_task = asyncio.create_task(_watchdog_loop(), name="paper-autonomy-watchdog")
+
+
+async def _stop_watchdog() -> None:
+    global _watchdog_task
+    task = _watchdog_task
+    if task is None:
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+    _watchdog_task = None
+    bootstrap_state.watchdog_running = False
+
+
 async def stop_configured_paper_autonomy() -> None:
+    await _stop_watchdog()
     if bootstrap_state.started and paper_autopilot.running:
         await paper_autopilot.stop()
     if bootstrap_state.started and runtime.mode == SystemMode.PAPER_TRADING:
@@ -133,6 +231,8 @@ async def stop_configured_paper_autonomy() -> None:
 @asynccontextmanager
 async def bootstrap_lifespan(_: APIRouter) -> AsyncIterator[None]:
     await start_configured_paper_autonomy()
+    if bootstrap_state.started:
+        await _start_watchdog()
     try:
         yield
     finally:
@@ -155,6 +255,7 @@ __all__ = [
     "PaperAutonomyBootstrapState",
     "bootstrap_state",
     "load_bootstrap_config",
+    "reconcile_configured_paper_autonomy",
     "router",
     "start_configured_paper_autonomy",
     "stop_configured_paper_autonomy",
