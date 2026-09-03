@@ -19,9 +19,18 @@ persistence_engine = build_engine(settings.database_url) if settings.persistence
 persistent_journal = (
     AsyncSqlFillJournal(persistence_engine) if persistence_engine is not None else None
 )
-orchestration_store = SqlJobStore(persistence_engine) if persistence_engine is not None else None
+orchestration_engine = (
+    persistence_engine
+    if persistence_engine is not None
+    else build_engine(settings.database_url)
+    if settings.orchestration_persistence_enabled
+    else None
+)
+orchestration_store = (
+    SqlJobStore(orchestration_engine) if orchestration_engine is not None else None
+)
 decision_memory_store = (
-    DecisionMemoryStore(persistence_engine) if persistence_engine is not None else None
+    DecisionMemoryStore(orchestration_engine) if orchestration_engine is not None else None
 )
 runtime = RuntimeState()
 portfolio = PaperPortfolio(
@@ -49,6 +58,7 @@ def reset_runtime_state() -> RuntimeState:
 
 __all__ = [
     "decision_memory_store",
+    "orchestration_engine",
     "orchestration_store",
     "persistence_engine",
     "persistent_journal",

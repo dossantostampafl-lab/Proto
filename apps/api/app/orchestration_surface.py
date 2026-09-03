@@ -7,15 +7,28 @@ from fastapi import APIRouter, Query
 
 from services.orchestration.registry import CATALOG_VERSION, JOB_CATALOG
 
-from .app_state import decision_memory_store, orchestration_store, persistence_engine
+from .app_state import (
+    decision_memory_store,
+    orchestration_engine,
+    orchestration_store,
+    persistence_engine,
+)
 from .orchestration_state import orchestration_supervisor
 from .persistence import database_ready
 from .safety_policy import policy_snapshot
 from .settings import settings
 
 
+def _durable_orchestration_backend() -> bool:
+    return settings.database_url.strip().lower().startswith("postgresql")
+
+
 @asynccontextmanager
 async def orchestration_lifespan(_: APIRouter) -> AsyncIterator[None]:
+    if orchestration_store is not None:
+        await orchestration_store.init_schema()
+    if decision_memory_store is not None:
+        await decision_memory_store.init_schema()
     if orchestration_supervisor is not None:
         await orchestration_supervisor.start()
     try:
@@ -23,6 +36,8 @@ async def orchestration_lifespan(_: APIRouter) -> AsyncIterator[None]:
     finally:
         if orchestration_supervisor is not None:
             await orchestration_supervisor.stop()
+        if orchestration_engine is not None and orchestration_engine is not persistence_engine:
+            await orchestration_engine.dispose()
 
 
 router = APIRouter(
@@ -35,8 +50,9 @@ router = APIRouter(
 @router.get("/status")
 async def orchestration_status() -> dict[str, object]:
     persistence_ready = (
-        await database_ready(persistence_engine) if persistence_engine is not None else False
+        await database_ready(orchestration_engine) if orchestration_engine is not None else False
     )
+    durable_backend = _durable_orchestration_backend()
     safety = policy_snapshot(settings.system_mode)
     safe_scope_ready = orchestration_store is not None and persistence_ready
     supervisor_status = (
@@ -67,11 +83,15 @@ async def orchestration_status() -> dict[str, object]:
         "durable_runtime": {
             "configured": orchestration_store is not None,
             "persistence_ready": persistence_ready,
+            "durable_backend": durable_backend,
             "decision_memory_configured": decision_memory_store is not None,
+            "general_simulation_persistence_enabled": settings.persistence_enabled,
+            "orchestration_persistence_enabled": settings.orchestration_persistence_enabled,
         },
         "supervisor": supervisor_status,
         "readiness": {
             "ready_safe_scope": safe_scope_ready,
+            "durable_safe_scope": safe_scope_ready and durable_backend,
             "live_ready": False,
             "live_ready_reason": "real financial execution is outside the approved PROTO scope",
         },
