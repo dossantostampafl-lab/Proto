@@ -23,7 +23,7 @@ orchestration_engine = (
     persistence_engine
     if persistence_engine is not None
     else build_engine(settings.database_url)
-    if settings.orchestration_persistence_enabled
+    if settings.orchestration_persistence_active
     else None
 )
 orchestration_store = (
