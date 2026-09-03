@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from services.orchestration.registry import CATALOG_VERSION, JOB_CATALOG
 
-from .app_state import orchestration_store, persistence_engine
+from .app_state import decision_memory_store, orchestration_store, persistence_engine
 from .orchestration_state import orchestration_supervisor
 from .persistence import database_ready
 from .safety_policy import policy_snapshot
@@ -67,6 +67,7 @@ async def orchestration_status() -> dict[str, object]:
         "durable_runtime": {
             "configured": orchestration_store is not None,
             "persistence_ready": persistence_ready,
+            "decision_memory_configured": decision_memory_store is not None,
         },
         "supervisor": supervisor_status,
         "readiness": {
@@ -83,4 +84,55 @@ async def orchestration_status() -> dict[str, object]:
             "read_only_surface": True,
             "arbitrary_job_execution_endpoint": False,
         },
+    }
+
+
+@router.get("/decision-memory/status")
+async def decision_memory_status() -> dict[str, object]:
+    if decision_memory_store is None:
+        return {
+            "configured": False,
+            "records": 0,
+            "resolved": 0,
+            "unresolved": 0,
+            "financial_connectivity": False,
+            "real_money_execution": False,
+        }
+    snapshot = await decision_memory_store.snapshot()
+    return {"configured": True, **snapshot}
+
+
+@router.get("/decision-memory/recent")
+async def recent_decisions(
+    instrument_id: str | None = Query(default=None, min_length=3, max_length=160),
+    limit: int = Query(default=100, ge=1, le=1_000),
+) -> dict[str, object]:
+    if decision_memory_store is None:
+        return {
+            "configured": False,
+            "instrument_id": instrument_id.strip().upper() if instrument_id else None,
+            "count": 0,
+            "decisions": [],
+            "financial_connectivity": False,
+            "real_money_execution": False,
+        }
+
+    rows = await decision_memory_store.recent(
+        instrument_id=instrument_id,
+        limit=limit,
+    )
+    decisions = [
+        {
+            "decision": entry.model_dump(mode="json"),
+            "outcome": outcome.model_dump(mode="json") if outcome is not None else None,
+        }
+        for entry, outcome in rows
+    ]
+    return {
+        "configured": True,
+        "instrument_id": instrument_id.strip().upper() if instrument_id else None,
+        "count": len(decisions),
+        "decisions": decisions,
+        "financial_connectivity": False,
+        "real_money_execution": False,
     }
