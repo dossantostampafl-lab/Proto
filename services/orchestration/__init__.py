@@ -1,3 +1,10 @@
+from .memory import (
+    DecisionMemoryBase,
+    DecisionMemoryEntry,
+    DecisionMemoryStore,
+    DecisionOutcome,
+    DecisionStage,
+)
 from .missions import (
     Mission,
     MissionGateway,
@@ -20,6 +27,11 @@ from .supervisor import OrchestrationSupervisor, PeriodicJob
 __all__ = [
     "CATALOG_VERSION",
     "JOB_CATALOG",
+    "DecisionMemoryBase",
+    "DecisionMemoryEntry",
+    "DecisionMemoryStore",
+    "DecisionOutcome",
+    "DecisionStage",
     "JobCapability",
     "JobContract",
     "JobRun",
