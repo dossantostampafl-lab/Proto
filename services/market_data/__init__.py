@@ -28,6 +28,7 @@ from .core import (
     OrderBookMetrics,
     compute_orderbook_metrics,
 )
+from .instruments import AssetClass, Instrument, InstrumentRegistry, SessionType
 from .l2_corpus_replay import (
     PublicL2CorpusRecord,
     PublicL2CorpusReplay,
@@ -77,8 +78,10 @@ from .public_l2 import (
     parse_public_l2_message,
 )
 from .public_l2_live import CoinbasePublicL2StreamAdapter, PublicL2StreamHealth
+from .universal import MarketEvent, MarketEventKind, MarketEventProvenance
 
 __all__ = [
+    "AssetClass",
     "BinaryContractSnapshot",
     "BinancePublicFeedTimeoutError",
     "BinancePublicMarketDataAdapter",
@@ -95,6 +98,8 @@ __all__ = [
     "FillMarkout",
     "FillObservation",
     "HistoricalReplayAdapter",
+    "Instrument",
+    "InstrumentRegistry",
     "LiveHistoryCursorError",
     "LiveTickJournal",
     "LiveTickJournalError",
@@ -102,6 +107,9 @@ __all__ = [
     "MarketDataPipeline",
     "MarketDataPipelineResult",
     "MarketDataPipelineSnapshot",
+    "MarketEvent",
+    "MarketEventKind",
+    "MarketEventProvenance",
     "MarketTick",
     "MarkoutPoint",
     "MarkoutSummary",
@@ -131,6 +139,7 @@ __all__ = [
     "PublicMarketDataAdapter",
     "ResearchAsset",
     "SUPPORTED_BINANCE_SYMBOLS",
+    "SessionType",
     "SyntheticAdapter",
     "compute_fill_markout",
     "compute_orderbook_metrics",
