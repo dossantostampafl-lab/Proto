@@ -11,13 +11,17 @@ from services.analytics.intelligence import (
 )
 from services.orchestration import (
     JOB_CATALOG,
+    AutonomousEventDispatcher,
+    AutonomousEventType,
     DecisionMemoryEntry,
     DecisionStage,
+    EventTriggerRule,
     ProtoBrain,
 )
 from services.orchestration.supervisor import OrchestrationSupervisor, PeriodicJob
 
 from .app_state import decision_memory_store, orchestration_store
+from .event_state import event_runtime
 from .live_monitor import live_monitor
 from .models import SimulationRequest
 from .shadow_engine import evaluate_shadow_candidate
@@ -149,6 +153,19 @@ if orchestration_store is not None:
     proto_brain.register(JOB_CATALOG["market-data-health"].spec, _market_data_health_job)
     proto_brain.register(JOB_CATALOG["opportunity-scan"].spec, _opportunity_scan_job)
     proto_brain.register(JOB_CATALOG["shadow-decision"].spec, _shadow_decision_job)
+    market_event_dispatcher = AutonomousEventDispatcher(
+        runtime=event_runtime,
+        brain=proto_brain,
+        stream="proto.market.normalized",
+        rules=(
+            EventTriggerRule(
+                event_type=AutonomousEventType.MARKET_TICK,
+                job_name="market-data-health",
+                mode="LIVE_MONITORING",
+            ),
+        ),
+        default_event_type=AutonomousEventType.MARKET_TICK,
+    )
     orchestration_supervisor = OrchestrationSupervisor(
         proto_brain,
         (
@@ -158,5 +175,6 @@ if orchestration_store is not None:
                 mode="LIVE_MONITORING",
             ),
         ),
+        event_dispatchers=(market_event_dispatcher,),
         poll_seconds=1.0,
     )
