@@ -7,7 +7,12 @@ from fastapi import APIRouter, Query
 
 from services.orchestration.registry import CATALOG_VERSION, JOB_CATALOG
 
-from .app_state import decision_memory_store, orchestration_store, persistence_engine
+from .app_state import (
+    decision_memory_store,
+    orchestration_engine,
+    orchestration_store,
+    persistence_engine,
+)
 from .orchestration_state import orchestration_supervisor
 from .persistence import database_ready
 from .safety_policy import policy_snapshot
@@ -16,6 +21,10 @@ from .settings import settings
 
 @asynccontextmanager
 async def orchestration_lifespan(_: APIRouter) -> AsyncIterator[None]:
+    if orchestration_store is not None:
+        await orchestration_store.init_schema()
+    if decision_memory_store is not None:
+        await decision_memory_store.init_schema()
     if orchestration_supervisor is not None:
         await orchestration_supervisor.start()
     try:
@@ -23,6 +32,8 @@ async def orchestration_lifespan(_: APIRouter) -> AsyncIterator[None]:
     finally:
         if orchestration_supervisor is not None:
             await orchestration_supervisor.stop()
+        if orchestration_engine is not None and orchestration_engine is not persistence_engine:
+            await orchestration_engine.dispose()
 
 
 router = APIRouter(
@@ -35,7 +46,7 @@ router = APIRouter(
 @router.get("/status")
 async def orchestration_status() -> dict[str, object]:
     persistence_ready = (
-        await database_ready(persistence_engine) if persistence_engine is not None else False
+        await database_ready(orchestration_engine) if orchestration_engine is not None else False
     )
     safety = policy_snapshot(settings.system_mode)
     safe_scope_ready = orchestration_store is not None and persistence_ready
@@ -68,6 +79,8 @@ async def orchestration_status() -> dict[str, object]:
             "configured": orchestration_store is not None,
             "persistence_ready": persistence_ready,
             "decision_memory_configured": decision_memory_store is not None,
+            "general_simulation_persistence_enabled": settings.persistence_enabled,
+            "orchestration_persistence_enabled": settings.orchestration_persistence_enabled,
         },
         "supervisor": supervisor_status,
         "readiness": {
