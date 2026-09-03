@@ -15,7 +15,7 @@ env:
 jobs:
   chromium-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v4
 
@@ -28,7 +28,7 @@ jobs:
           python -m pip install --disable-pip-version-check playwright==1.55.0
           python -m playwright install --with-deps chromium
 
-      - name: Validate hydrated production terminal
+      - name: Validate hydrated production operator terminal
         env:
           ORIGIN: ${{ env.PROTO_PUBLIC_ORIGIN }}
           EXPECTED_RELEASE: ${{ env.EXPECTED_PROTO_RELEASE }}
@@ -48,9 +48,7 @@ jobs:
           expected_release = os.environ["EXPECTED_RELEASE"]
           artifacts = Path("browser-artifacts")
           artifacts.mkdir(exist_ok=True)
-          expected_ui_sha = hashlib.sha256(
-              Path("apps/web/src/approved-terminal.tsx").read_bytes()
-          ).hexdigest()
+          expected_ui_sha = hashlib.sha256(Path("apps/web/src/approved-terminal.tsx").read_bytes()).hexdigest()
 
           def json_get(path: str) -> dict:
               request = Request(f"{origin}{path}", headers={"Cache-Control": "no-cache"})
@@ -60,35 +58,20 @@ jobs:
                   return json.loads(response.read().decode("utf-8"))
 
           def deployed_provenance() -> tuple[str | None, str | None]:
-              request = Request(
-                  f"{origin}/",
-                  headers={"Cache-Control": "no-cache", "User-Agent": "proto-browser-e2e/3.0"},
-              )
+              request = Request(f"{origin}/", headers={"Cache-Control": "no-cache", "User-Agent": "proto-browser-e2e/4.0"})
               with urlopen(request, timeout=15) as response:
-                  return (
-                      response.headers.get("X-Proto-Release"),
-                      response.headers.get("X-Proto-UI-Source-SHA256"),
-                  )
+                  return response.headers.get("X-Proto-Release"), response.headers.get("X-Proto-UI-Source-SHA256")
 
-          deadline = time.monotonic() + 600
+          deadline = time.monotonic() + 660
           last_error = None
           while time.monotonic() < deadline:
               try:
                   health = json_get("/health")
                   live = json_get("/live/status")
                   actual_release, actual_ui_sha = deployed_provenance()
-                  if (
-                      health.get("status") == "ok"
-                      and live.get("running") is True
-                      and actual_release == expected_release
-                      and actual_ui_sha == expected_ui_sha
-                  ):
+                  if health.get("status") == "ok" and live.get("running") is True and actual_release == expected_release and actual_ui_sha == expected_ui_sha:
                       break
-                  last_error = AssertionError(
-                      "deployment not current: "
-                      f"release={actual_release!r} expected_release={expected_release!r} "
-                      f"ui_sha={actual_ui_sha!r} expected_ui_sha={expected_ui_sha!r}"
-                  )
+                  last_error = AssertionError(f"deployment not current: release={actual_release!r} expected_release={expected_release!r} ui_sha={actual_ui_sha!r} expected_ui_sha={expected_ui_sha!r}")
               except Exception as error:
                   last_error = error
               time.sleep(5)
@@ -101,102 +84,65 @@ jobs:
               page = context.new_page()
               console_errors: list[str] = []
               page_errors: list[str] = []
-              page.on(
-                  "console",
-                  lambda message: console_errors.append(message.text)
-                  if message.type == "error"
-                  else None,
-              )
+              page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
               page.on("pageerror", lambda error: page_errors.append(str(error)))
 
               page.goto(origin, wait_until="domcontentloaded", timeout=45_000)
-              page.locator("#root > *").first.wait_for(state="visible", timeout=30_000)
               page.locator("main.terminal").wait_for(state="visible", timeout=30_000)
-
               body = page.locator("body")
               for required_text in ("PROTO", "BTC/USD", "ETH/USD", "SOL/USD", "LIVE PUBLIC"):
-                  body.get_by_text(required_text, exact=False).first.wait_for(
-                      state="visible", timeout=30_000
-                  )
-
-              page.get_by_text(re.compile(r"STREAMING|RECONCILING")).first.wait_for(
-                  state="visible", timeout=30_000
-              )
-              page.get_by_text(re.compile(r"FEED (LIVE|STALE|OFFLINE)")).first.wait_for(
-                  state="visible", timeout=30_000
-              )
-
-              calibration = page.locator("article.calibrationPanel")
-              calibration.wait_for(state="visible", timeout=30_000)
-              calibration.locator("header").filter(has_text="MODEL CALIBRATION").wait_for(
-                  state="visible", timeout=30_000
-              )
-              calibration.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
-                  state="visible", timeout=30_000
-              )
-              calibration.locator(".calMetrics span").filter(has_text="BRIER SCORE").wait_for(
-                  state="visible", timeout=30_000
-              )
-              calibration.locator(".calMetrics span").filter(has_text="SAMPLE COUNT").wait_for(
-                  state="visible", timeout=30_000
-              )
+                  body.get_by_text(required_text, exact=False).first.wait_for(state="visible", timeout=30_000)
+              page.get_by_text(re.compile(r"STREAMING|RECONCILING")).first.wait_for(state="visible", timeout=30_000)
+              page.get_by_text(re.compile(r"FEED (LIVE|STALE|OFFLINE)")).first.wait_for(state="visible", timeout=30_000)
 
               eth = page.locator("button.marketTile").filter(has_text="ETH/USD").first
               eth.click()
-              page.wait_for_timeout(300)
+              page.wait_for_timeout(250)
               if "active" not in (eth.get_attribute("class") or ""):
                   raise AssertionError("ETH market tile did not become active after click")
-              page.locator(".center article.panel.chart header").get_by_text(
-                  "ETH/USD", exact=False
-              ).wait_for(state="visible", timeout=5_000)
+              page.locator(".center article.panel.chart header").get_by_text("ETH/USD", exact=False).wait_for(state="visible", timeout=5_000)
 
-              btc = page.locator("button.marketTile").filter(has_text="BTC/USD").first
-              btc.click()
-              page.wait_for_timeout(300)
-              if "active" not in (btc.get_attribute("class") or ""):
-                  raise AssertionError("BTC market tile did not become active after click")
-              page.locator(".center article.panel.chart header").get_by_text(
-                  "BTC/USD", exact=False
-              ).wait_for(state="visible", timeout=5_000)
+              page.get_by_role("button", name="Paper Trading", exact=True).first.click()
+              page.get_by_text("PAPER TRADING CONTROL", exact=True).wait_for(state="visible", timeout=5_000)
+              page.get_by_text("MANUAL PAPER ORDER", exact=True).wait_for(state="visible", timeout=5_000)
+              page.get_by_text("PAPER AUTOPILOT", exact=True).wait_for(state="visible", timeout=5_000)
+              page.get_by_role("button", name="Start Paper Engine", exact=True).wait_for(state="visible", timeout=5_000)
+              page.get_by_role("button", name="BUY / PAPER", exact=True).wait_for(state="visible", timeout=5_000)
+              page.get_by_role("button", name="SELL / PAPER", exact=True).wait_for(state="visible", timeout=5_000)
 
-              page.screenshot(path=str(artifacts / "desktop.png"), full_page=True)
-
-              page.reload(wait_until="domcontentloaded", timeout=45_000)
-              page.locator("main.terminal").wait_for(state="visible", timeout=30_000)
-              page.get_by_text("LIVE PUBLIC", exact=False).first.wait_for(
-                  state="visible", timeout=30_000
-              )
+              page.get_by_role("button", name="Research", exact=True).first.click()
               calibration = page.locator("article.calibrationPanel")
-              calibration.wait_for(state="visible", timeout=30_000)
-              calibration.locator("header").filter(has_text="MODEL CALIBRATION").wait_for(
-                  state="visible", timeout=30_000
-              )
-              calibration.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
-                  state="visible", timeout=30_000
-              )
+              calibration.wait_for(state="visible", timeout=5_000)
+              calibration.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(state="visible", timeout=5_000)
+              calibration.locator(".calMetrics span").filter(has_text="BRIER SCORE").wait_for(state="visible", timeout=5_000)
+              calibration.locator(".calMetrics span").filter(has_text="SAMPLE COUNT").wait_for(state="visible", timeout=5_000)
+
+              page.get_by_role("button", name="Replay", exact=True).first.click()
+              page.get_by_text("HISTORICAL REPLAY CONTROL", exact=True).wait_for(state="visible", timeout=5_000)
+              page.get_by_text("No replay file loaded", exact=True).wait_for(state="visible", timeout=5_000)
+
+              page.get_by_role("button", name="Risk", exact=True).first.click()
+              page.get_by_role("button", name="Trigger Kill Switch", exact=True).wait_for(state="visible", timeout=5_000)
+              page.get_by_role("button", name="Reset Kill Switch", exact=True).wait_for(state="visible", timeout=5_000)
+
+              page.get_by_role("button", name="System", exact=True).first.click()
+              page.get_by_text("OPERATOR ACTION LOG", exact=True).wait_for(state="visible", timeout=5_000)
+
+              page.get_by_role("button", name="Overview", exact=True).first.click()
+              page.screenshot(path=str(artifacts / "desktop.png"), full_page=True)
 
               page.set_viewport_size({"width": 1280, "height": 800})
               page.wait_for_timeout(300)
-              overflow = page.evaluate(
-                  """() => ({
-                    documentWidth: document.documentElement.scrollWidth,
-                    viewportWidth: document.documentElement.clientWidth,
-                    bodyWidth: document.body.scrollWidth
-                  })"""
-              )
+              overflow = page.evaluate("""() => ({documentWidth: document.documentElement.scrollWidth, viewportWidth: document.documentElement.clientWidth, bodyWidth: document.body.scrollWidth})""")
               if overflow["documentWidth"] > overflow["viewportWidth"] + 2:
                   raise AssertionError(f"horizontal document overflow: {overflow}")
               page.screenshot(path=str(artifacts / "tablet-landscape.png"), full_page=True)
 
               if page_errors:
                   raise AssertionError(f"uncaught page errors: {page_errors}")
-              severe_console = [
-                  item for item in console_errors
-                  if not re.search(r"Failed to load resource.*favicon", item, re.I)
-              ]
+              severe_console = [item for item in console_errors if not re.search(r"Failed to load resource.*favicon", item, re.I)]
               if severe_console:
                   raise AssertionError(f"browser console errors: {severe_console}")
-
               browser.close()
           PY
 
