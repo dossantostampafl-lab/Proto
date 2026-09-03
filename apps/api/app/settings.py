@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     alpaca_equity_feed: str = "iex"
     brapi_equity_symbols: str = ""
     brapi_market_data_token: str | None = None
+    equity_market_data_max_age_seconds: float | None = Field(default=None, gt=0, le=3_600)
     creation_bridge_shared_secret: str | None = None
     http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
     minimum_net_edge: float = Field(default=0.01, ge=0.0, le=1.0, allow_inf_nan=False)
