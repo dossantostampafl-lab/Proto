@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from services.analytics.intelligence import (
     MarketIntelligenceInput,
     OpportunityPolicy,
@@ -7,10 +9,15 @@ from services.analytics.intelligence import (
     classify_market_state,
     rank_opportunities,
 )
-from services.orchestration import JOB_CATALOG, ProtoBrain
+from services.orchestration import (
+    JOB_CATALOG,
+    DecisionMemoryEntry,
+    DecisionStage,
+    ProtoBrain,
+)
 from services.orchestration.supervisor import OrchestrationSupervisor, PeriodicJob
 
-from .app_state import orchestration_store
+from .app_state import decision_memory_store, orchestration_store
 from .live_monitor import live_monitor
 
 
@@ -69,6 +76,57 @@ async def _opportunity_scan_job(payload: dict[str, object]) -> dict[str, object]
     }
 
 
+async def _shadow_decision_job(payload: dict[str, object]) -> dict[str, object]:
+    if decision_memory_store is None:
+        raise RuntimeError("decision memory persistence is unavailable")
+
+    required = (
+        "decision_id",
+        "instrument_id",
+        "observed_at",
+        "input_hash",
+        "proposed_action",
+        "provenance",
+    )
+    missing = [name for name in required if name not in payload]
+    if missing:
+        raise ValueError("shadow decision missing required fields: " + ",".join(missing))
+
+    entry = DecisionMemoryEntry.model_validate(
+        {
+            "decision_id": payload["decision_id"],
+            "mission_id": payload.get("mission_id"),
+            "instrument_id": payload["instrument_id"],
+            "observed_at": payload["observed_at"],
+            "recorded_at": datetime.now(UTC),
+            "stage": DecisionStage.SHADOW_ONLY,
+            "model_id": payload.get("model_id"),
+            "model_version": payload.get("model_version"),
+            "feature_version": payload.get("feature_version"),
+            "calibration_version": payload.get("calibration_version"),
+            "input_hash": payload["input_hash"],
+            "regime": payload.get("regime"),
+            "probability": payload.get("probability"),
+            "uncertainty": payload.get("uncertainty"),
+            "edge": payload.get("edge"),
+            "risk_decision": payload.get("risk_decision"),
+            "proposed_action": payload["proposed_action"],
+            "actual_action": None,
+            "explanation": payload.get("explanation"),
+            "provenance": payload["provenance"],
+        }
+    )
+    stored = await decision_memory_store.record(entry)
+    return {
+        "decision": stored.model_dump(mode="json"),
+        "stage": DecisionStage.SHADOW_ONLY.value,
+        "executed": False,
+        "memory_persisted": True,
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
+
+
 proto_brain: ProtoBrain | None = None
 orchestration_supervisor: OrchestrationSupervisor | None = None
 
@@ -76,6 +134,7 @@ if orchestration_store is not None:
     proto_brain = ProtoBrain(store=orchestration_store, worker_id="railway-api-safe-worker")
     proto_brain.register(JOB_CATALOG["market-data-health"].spec, _market_data_health_job)
     proto_brain.register(JOB_CATALOG["opportunity-scan"].spec, _opportunity_scan_job)
+    proto_brain.register(JOB_CATALOG["shadow-decision"].spec, _shadow_decision_job)
     orchestration_supervisor = OrchestrationSupervisor(
         proto_brain,
         (
