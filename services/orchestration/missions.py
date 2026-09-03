@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .runtime import ProtoBrain, SAFE_MODES
+from .runtime import SAFE_MODES, ProtoBrain
 
 
 class MissionOrigin(StrEnum):
