@@ -103,40 +103,79 @@ _OPERATIONAL_EVENTS = {
 
 
 @app.middleware("http")
-async def hardened_dashboard_headers(request: Request, call_next):
-    response: Response = await call_next(request)
-    response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
-    if request.url.path in _OPERATIONAL_EVENTS and request.method == "POST":
+async def operational_audit_policy(request: Request, call_next) -> Response:
+    """Record completed state-changing commands without inspecting private bodies."""
+    response = await call_next(request)
+    event_type = _OPERATIONAL_EVENTS.get(request.url.path) if request.method == "POST" else None
+    if event_type is not None:
         await record_operational_event(
-            _OPERATIONAL_EVENTS[request.url.path],
-            path=request.url.path,
-            method=request.method,
-            status_code=response.status_code,
+            event_type=event_type,
+            source="railway-api",
+            payload={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "request_id": response.headers.get("X-Request-ID"),
+                "financial_connectivity": False,
+                "real_money_execution": False,
+            },
         )
     return response
 
 
-@app.get("/release")
-def release_identity() -> dict[str, object]:
+@app.middleware("http")
+async def dashboard_http_policy(request: Request, call_next) -> Response:
+    """Apply cache, browser-security, release and deployment provenance policy."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith(".html"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    elif path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
+    response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    )
+    response.headers["X-Proto-Release"] = _DASHBOARD_RELEASE
+    response.headers["X-Proto-UI-Release"] = _DASHBOARD_UI_RELEASE
+    if _DASHBOARD_UI_SOURCE_SHA:
+        response.headers["X-Proto-UI-Source-SHA256"] = _DASHBOARD_UI_SOURCE_SHA
+    if _ORCHESTRATION_SOURCE_SHA:
+        response.headers["X-Proto-Orchestration-Source-SHA256"] = _ORCHESTRATION_SOURCE_SHA
+    if _RAILWAY_GIT_COMMIT_SHA:
+        response.headers["X-Proto-Git-Commit-SHA"] = _RAILWAY_GIT_COMMIT_SHA
+    if _RAILWAY_DEPLOYMENT_ID:
+        response.headers["X-Proto-Deployment-ID"] = _RAILWAY_DEPLOYMENT_ID
+    return response
+
+
+@app.get("/deployment/info", tags=["system"])
+def deployment_info() -> dict[str, object]:
+    """Expose non-secret build provenance for operator and production verification."""
     return {
         "release": _DASHBOARD_RELEASE,
         "ui_release": _DASHBOARD_UI_RELEASE,
-        "ui_source_sha256": _DASHBOARD_UI_SOURCE_SHA,
-        "orchestration_source_sha256": _ORCHESTRATION_SOURCE_SHA,
+        "ui_source_sha256": _DASHBOARD_UI_SOURCE_SHA or None,
+        "orchestration_source_sha256": _ORCHESTRATION_SOURCE_SHA or None,
         "git_commit_sha": _RAILWAY_GIT_COMMIT_SHA or None,
         "git_branch": _RAILWAY_GIT_BRANCH or None,
         "deployment_id": _RAILWAY_DEPLOYMENT_ID or None,
         "service_id": _RAILWAY_SERVICE_ID or None,
         "service_name": _RAILWAY_SERVICE_NAME or None,
         "environment": _RAILWAY_ENVIRONMENT_NAME or None,
+        "financial_connectivity": False,
+        "real_money_execution": False,
     }
 
 
 if _DASHBOARD_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=_DASHBOARD_DIR, html=True), name="dashboard")
+    app.mount(
+        "/",
+        StaticFiles(directory=_DASHBOARD_DIR, html=True),
+        name="dashboard",
+    )
