@@ -4,8 +4,15 @@ import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
 
 from .runtime import ProtoBrain
+
+
+class EventDispatcher(Protocol):
+    async def drain(self) -> int: ...
+
+    def status(self) -> dict[str, object]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,16 +37,19 @@ class OrchestrationSupervisor:
         brain: ProtoBrain,
         schedules: tuple[PeriodicJob, ...],
         *,
+        event_dispatchers: tuple[EventDispatcher, ...] = (),
         poll_seconds: float = 1.0,
     ) -> None:
         if poll_seconds <= 0:
             raise ValueError("poll_seconds must be > 0")
         self.brain = brain
         self.schedules = schedules
+        self.event_dispatchers = event_dispatchers
         self.poll_seconds = poll_seconds
         self._task: asyncio.Task[None] | None = None
         self._last_error: str | None = None
         self._ticks = 0
+        self._event_dispatches = 0
 
     @property
     def running(self) -> bool:
@@ -51,6 +61,8 @@ class OrchestrationSupervisor:
             "worker_id": self.brain.worker_id,
             "registered_jobs": sorted(self.brain.specs),
             "scheduled_jobs": [schedule.job_name for schedule in self.schedules],
+            "event_dispatches": self._event_dispatches,
+            "event_dispatchers": [dispatcher.status() for dispatcher in self.event_dispatchers],
             "ticks": self._ticks,
             "last_error": self._last_error,
             "financial_connectivity": False,
@@ -69,6 +81,8 @@ class OrchestrationSupervisor:
                     "schedule_interval_seconds": schedule.interval_seconds,
                 },
             )
+        for dispatcher in self.event_dispatchers:
+            self._event_dispatches += await dispatcher.drain()
         # enqueue() timestamps persistence independently. Claim using the current
         # database-facing clock rather than the pre-enqueue scheduling timestamp,
         # otherwise a just-created row can be microseconds newer than `current`.
