@@ -19,6 +19,10 @@ from .safety_policy import policy_snapshot
 from .settings import settings
 
 
+def _durable_orchestration_backend() -> bool:
+    return settings.database_url.strip().lower().startswith("postgresql")
+
+
 @asynccontextmanager
 async def orchestration_lifespan(_: APIRouter) -> AsyncIterator[None]:
     if orchestration_store is not None:
@@ -48,6 +52,7 @@ async def orchestration_status() -> dict[str, object]:
     persistence_ready = (
         await database_ready(orchestration_engine) if orchestration_engine is not None else False
     )
+    durable_backend = _durable_orchestration_backend()
     safety = policy_snapshot(settings.system_mode)
     safe_scope_ready = orchestration_store is not None and persistence_ready
     supervisor_status = (
@@ -78,6 +83,7 @@ async def orchestration_status() -> dict[str, object]:
         "durable_runtime": {
             "configured": orchestration_store is not None,
             "persistence_ready": persistence_ready,
+            "durable_backend": durable_backend,
             "decision_memory_configured": decision_memory_store is not None,
             "general_simulation_persistence_enabled": settings.persistence_enabled,
             "orchestration_persistence_enabled": settings.orchestration_persistence_enabled,
@@ -85,6 +91,7 @@ async def orchestration_status() -> dict[str, object]:
         "supervisor": supervisor_status,
         "readiness": {
             "ready_safe_scope": safe_scope_ready,
+            "durable_safe_scope": safe_scope_ready and durable_backend,
             "live_ready": False,
             "live_ready_reason": "real financial execution is outside the approved PROTO scope",
         },
