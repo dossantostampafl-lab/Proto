@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, HTTPException
 
 from services.market_data.equity_readonly import (
@@ -57,10 +59,17 @@ async def equity_market_observation(instrument_id: str) -> dict[str, object]:
     except (ReadOnlyProviderError, ValueError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
+    threshold = settings.equity_market_data_max_age_seconds
+    age_seconds = max(0.0, (datetime.now(UTC) - event.observed_at).total_seconds())
+    currently_fresh = age_seconds <= threshold if threshold is not None else None
+
     return {
         "instrument": instrument.model_dump(mode="json"),
         "event": event.model_dump(mode="json"),
         "read_only_market_data": True,
+        "observation_age_seconds": age_seconds,
+        "freshness_threshold_seconds": threshold,
+        "currently_fresh": currently_fresh,
         "execution_connected": False,
         "financial_connectivity": False,
         "real_money_execution": False,
