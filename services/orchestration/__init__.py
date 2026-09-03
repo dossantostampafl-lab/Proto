@@ -1,3 +1,11 @@
+from .missions import (
+    Mission,
+    MissionGateway,
+    MissionOrigin,
+    MissionPriority,
+    MissionReceipt,
+    MissionState,
+)
 from .registry import CATALOG_VERSION, JOB_CATALOG, JobContract, build_job_catalog
 from .runtime import (
     JobCapability,
@@ -17,6 +25,12 @@ __all__ = [
     "JobRun",
     "JobSpec",
     "JobState",
+    "Mission",
+    "MissionGateway",
+    "MissionOrigin",
+    "MissionPriority",
+    "MissionReceipt",
+    "MissionState",
     "OrchestrationBase",
     "OrchestrationSupervisor",
     "PeriodicJob",
