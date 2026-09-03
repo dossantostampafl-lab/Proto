@@ -15,10 +15,11 @@ concurrency:
 jobs:
   railway-ui-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 12
     env:
       PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
-      EXPECTED_UI_RELEASE: model-quality-persisted-v4
+      EXPECTED_UI_RELEASE: operator-terminal-v2
+      EXPECTED_GIT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,21 +31,29 @@ jobs:
           import os
           import time
           import urllib.error
+          import urllib.parse
           import urllib.request
           from pathlib import Path
 
           origin = os.environ["PROTO_PUBLIC_ORIGIN"].rstrip("/")
           expected_release = os.environ["EXPECTED_UI_RELEASE"]
+          expected_git_sha = os.environ["EXPECTED_GIT_SHA"]
           expected_source_sha = hashlib.sha256(
               Path("apps/web/src/approved-terminal.tsx").read_bytes()
           ).hexdigest()
           last_error = None
 
-          for attempt in range(1, 61):
+          for attempt in range(1, 121):
               try:
+                  query = urllib.parse.urlencode(
+                      {"proto_sha": expected_git_sha, "attempt": attempt}
+                  )
                   request = urllib.request.Request(
-                      f"{origin}/",
-                      headers={"User-Agent": "proto-ui-contract/2.0"},
+                      f"{origin}/?{query}",
+                      headers={
+                          "User-Agent": "proto-ui-contract/3.0",
+                          "Cache-Control": "no-cache",
+                      },
                   )
                   with urllib.request.urlopen(request, timeout=10) as response:
                       body = response.read().decode("utf-8")
@@ -57,6 +66,12 @@ jobs:
                           "UI release mismatch: "
                           f"expected={expected_release!r} got={actual_release!r}"
                       )
+                  actual_git_sha = headers.get("x-proto-git-commit-sha")
+                  if actual_git_sha != expected_git_sha:
+                      raise AssertionError(
+                          "Railway git deployment mismatch: "
+                          f"expected={expected_git_sha!r} got={actual_git_sha!r}"
+                      )
                   actual_source_sha = headers.get("x-proto-ui-source-sha256")
                   if actual_source_sha != expected_source_sha:
                       raise AssertionError(
@@ -67,13 +82,14 @@ jobs:
                       raise AssertionError("dashboard HTML cache policy is not no-store")
                   print(
                       "production UI contract: ok "
-                      f"release={actual_release} source_sha256={actual_source_sha}"
+                      f"release={actual_release} git_sha={actual_git_sha} "
+                      f"source_sha256={actual_source_sha}"
                   )
                   break
               except (AssertionError, urllib.error.URLError, TimeoutError) as error:
                   last_error = error
-                  print(f"attempt {attempt}/60 not ready: {type(error).__name__}: {error}")
-                  if attempt == 60:
+                  print(f"attempt {attempt}/120 not ready: {type(error).__name__}: {error}")
+                  if attempt == 120:
                       raise
                   time.sleep(5)
           else:
