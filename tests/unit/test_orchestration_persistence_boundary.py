@@ -64,4 +64,7 @@ def test_production_surface_does_not_claim_durability_for_ephemeral_sqlite() -> 
     assert '"durable_backend": durable_backend' in surface
     assert '"durable_safe_scope": safe_scope_ready and durable_backend' in surface
     assert '"general_simulation_persistence_enabled": settings.persistence_enabled' in surface
-    assert '"orchestration_persistence_enabled": settings.orchestration_persistence_active' in surface
+    assert (
+        '"orchestration_persistence_enabled": settings.orchestration_persistence_active'
+        in surface
+    )
