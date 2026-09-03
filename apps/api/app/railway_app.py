@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from .creation_surface import router as creation_router
+from .equity_market_surface import router as equity_market_router
 from .event_state import record_operational_event
 from .event_surface import router as event_router
 from .live_routes import router as live_router
@@ -27,7 +28,8 @@ from .universe_surface import router as universe_router
 # plus the append-only operational audit journal. The orchestration router is
 # deliberately read-only: it exposes contracts/readiness but no endpoint capable
 # of starting arbitrary jobs. The Creation bridge is separately authenticated and
-# only maps allowlisted safe missions into ProtoBrain.
+# only maps allowlisted safe missions into ProtoBrain. Equity market-data routes
+# remain read-only and expose no trading/order capability.
 app.include_router(live_router)
 app.include_router(event_router)
 app.include_router(paper_control_router)
@@ -36,6 +38,7 @@ app.include_router(paper_autonomy_router)
 app.include_router(shadow_control_router)
 app.include_router(orchestration_router)
 app.include_router(universe_router)
+app.include_router(equity_market_router)
 app.include_router(creation_router)
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
