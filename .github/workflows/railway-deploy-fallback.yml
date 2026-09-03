@@ -1,0 +1,59 @@
+name: Railway Deploy Fallback
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: railway-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: 55de030a-f957-4c7a-9441-de2a6c7212e7
+      RAILWAY_SERVICE_ID: b67794ef-eadf-43cb-bd8a-da5397a7d9d5
+      RAILWAY_ENVIRONMENT_ID: 5f30b2e7-d7e5-4027-b51c-c1993df1c650
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect authenticated fallback availability
+        id: auth
+        shell: bash
+        run: |
+          if [ -z "${RAILWAY_TOKEN}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "RAILWAY_TOKEN is not configured; leaving deployment to the connected Railway GitHub service."
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Authenticated Railway CLI fallback is available."
+          fi
+
+      - name: Deploy exact main checkout to Railway
+        if: steps.auth.outputs.available == 'true'
+        uses: docker://ghcr.io/railwayapp/cli:latest
+        with:
+          args: >-
+            up . --ci
+            --project ${{ env.RAILWAY_PROJECT_ID }}
+            --environment ${{ env.RAILWAY_ENVIRONMENT_ID }}
+            --service ${{ env.RAILWAY_SERVICE_ID }}
+            --message "GitHub main ${{ github.sha }}"
+        env:
+          RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
+
+      - name: Record fallback result
+        shell: bash
+        run: |
+          if [ "${{ steps.auth.outputs.available }}" = "true" ]; then
+            echo "Railway CLI deployment attempted for ${GITHUB_SHA}."
+          else
+            echo "No CLI deployment attempted because no Railway project token is available to GitHub Actions."
+          fi
