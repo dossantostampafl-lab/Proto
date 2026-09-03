@@ -102,6 +102,32 @@ jobs:
                   state="visible", timeout=30_000
               )
 
+              # The deployed UI must expose the persisted model-quality surface. This
+              # validates provenance and structure without asserting or fabricating a
+              # calibration value; an empty evidence set remains a legitimate state.
+              model_quality_deadline = time.monotonic() + 120
+              while time.monotonic() < model_quality_deadline:
+                  if page.get_by_text("MODEL CALIBRATION", exact=True).count() > 0:
+                      break
+                  page.wait_for_timeout(3_000)
+                  page.reload(wait_until="domcontentloaded", timeout=45_000)
+                  page.locator("main.terminal").wait_for(state="visible", timeout=30_000)
+              else:
+                  raise AssertionError("deployed terminal never exposed MODEL CALIBRATION")
+
+              page.get_by_text("MODEL CALIBRATION", exact=True).wait_for(
+                  state="visible", timeout=10_000
+              )
+              page.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
+                  state="visible", timeout=10_000
+              )
+              page.get_by_text("BRIER SCORE", exact=True).wait_for(
+                  state="visible", timeout=10_000
+              )
+              page.get_by_text("SAMPLE COUNT", exact=True).wait_for(
+                  state="visible", timeout=10_000
+              )
+
               # Exercise the React-owned market controls. Assert state on the button
               # itself and verify the selected chart header changes with that state.
               eth = page.locator("button.marketTile").filter(has_text="ETH/USD").first
@@ -128,6 +154,12 @@ jobs:
               page.reload(wait_until="domcontentloaded", timeout=45_000)
               page.locator("main.terminal").wait_for(state="visible", timeout=30_000)
               page.get_by_text("LIVE PUBLIC", exact=False).first.wait_for(
+                  state="visible", timeout=30_000
+              )
+              page.get_by_text("MODEL CALIBRATION", exact=True).wait_for(
+                  state="visible", timeout=30_000
+              )
+              page.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
                   state="visible", timeout=30_000
               )
 
