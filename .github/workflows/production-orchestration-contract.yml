@@ -10,40 +10,74 @@ permissions:
 
 env:
   PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+  EXPECTED_PROTO_RELEASE: proto-brain-control-plane-v2
 
 jobs:
   railway-orchestration-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 12
     steps:
+      - uses: actions/checkout@v4
+
       - name: Verify durable safe control plane
         env:
           ORIGIN: ${{ env.PROTO_PUBLIC_ORIGIN }}
+          EXPECTED_PROTO_RELEASE: ${{ env.EXPECTED_PROTO_RELEASE }}
         run: |
           python - <<'PY'
+          import hashlib
           import json
           import os
           import time
           import urllib.error
           import urllib.request
+          from pathlib import Path
 
           origin = os.environ["ORIGIN"].rstrip("/")
+          expected_release = os.environ["EXPECTED_PROTO_RELEASE"]
+          expected_source_sha = hashlib.sha256(
+              Path("apps/api/app/orchestration_surface.py").read_bytes()
+          ).hexdigest()
           last_error = None
+          last_durable = None
+
+          def request(path: str):
+              req = urllib.request.Request(
+                  f"{origin}{path}",
+                  headers={
+                      "Cache-Control": "no-cache",
+                      "User-Agent": "proto-orchestration-contract/3.0",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=10) as response:
+                  headers = {name.lower(): value for name, value in response.headers.items()}
+                  return response.status, headers, response.read()
 
           def json_get(path: str) -> dict:
-              request = urllib.request.Request(
-                  f"{origin}{path}",
-                  headers={"Cache-Control": "no-cache", "User-Agent": "proto-orchestration-contract/2.0"},
-              )
-              with urllib.request.urlopen(request, timeout=10) as response:
-                  if response.status != 200:
-                      raise AssertionError(f"{path} returned HTTP {response.status}")
-                  return json.loads(response.read().decode("utf-8"))
+              status_code, _, body = request(path)
+              if status_code != 200:
+                  raise AssertionError(f"{path} returned HTTP {status_code}")
+              return json.loads(body.decode("utf-8"))
 
-          for attempt in range(1, 61):
+          for attempt in range(1, 121):
               try:
+                  _, headers, _ = request("/")
+                  deployed_release = headers.get("x-proto-release")
+                  if deployed_release != expected_release:
+                      raise AssertionError(
+                          f"control-plane release not deployed: expected={expected_release!r} "
+                          f"got={deployed_release!r}"
+                      )
+                  deployed_source_sha = headers.get("x-proto-orchestration-source-sha256")
+                  if deployed_source_sha != expected_source_sha:
+                      raise AssertionError(
+                          "control-plane source digest not deployed: "
+                          f"expected={expected_source_sha!r} got={deployed_source_sha!r}"
+                      )
+
                   status = json_get("/orchestration/status")
                   durable = status.get("durable_runtime") or {}
+                  last_durable = durable
                   control = status.get("control_plane") or {}
                   readiness = status.get("readiness") or {}
                   if durable.get("configured") is not True:
@@ -55,19 +89,19 @@ jobs:
                   if durable.get("decision_memory_configured") is not True:
                       raise AssertionError("decision memory is not configured")
                   if durable.get("orchestration_persistence_enabled") is not True:
-                      raise AssertionError("isolated orchestration persistence flag is not enabled")
+                      raise AssertionError("effective orchestration persistence is not enabled")
                   if durable.get("general_simulation_persistence_enabled") is not False:
-                      raise AssertionError("live deployment unexpectedly enabled general simulation persistence")
+                      raise AssertionError("live deployment unexpectedly enabled simulation persistence")
                   if readiness.get("ready_safe_scope") is not True:
                       raise AssertionError("safe orchestration scope is not ready")
                   if readiness.get("durable_safe_scope") is not True:
                       raise AssertionError("durable safe orchestration scope is not ready")
                   if readiness.get("live_ready") is not False:
-                      raise AssertionError("orchestration must not claim real financial live readiness")
+                      raise AssertionError("orchestration must not claim financial live readiness")
                   if control.get("read_only_surface") is not True:
                       raise AssertionError("public orchestration surface must remain read-only")
                   if control.get("arbitrary_job_execution_endpoint") is not False:
-                      raise AssertionError("public orchestration surface exposed arbitrary execution")
+                      raise AssertionError("public orchestration exposed arbitrary execution")
 
                   memory = json_get("/orchestration/decision-memory/status")
                   if memory.get("configured") is not True:
@@ -88,14 +122,32 @@ jobs:
                       raise AssertionError("decision lineage payload is not a list")
 
                   print(
-                      "production orchestration contract: ok "
-                      f"catalog={status.get('catalog_version')} records={memory.get('records')}"
+                      "production orchestration contract: ok",
+                      json.dumps(
+                          {
+                              "release": deployed_release,
+                              "source_sha256": deployed_source_sha,
+                              "catalog": status.get("catalog_version"),
+                              "records": memory.get("records"),
+                              "durable_runtime": durable,
+                          },
+                          sort_keys=True,
+                      ),
                   )
                   break
-              except (AssertionError, urllib.error.URLError, TimeoutError) as error:
+              except (
+                  AssertionError,
+                  json.JSONDecodeError,
+                  urllib.error.URLError,
+                  TimeoutError,
+                  OSError,
+              ) as error:
                   last_error = error
-                  print(f"attempt {attempt}/60 not ready: {type(error).__name__}: {error}")
-                  if attempt == 60:
+                  diagnostic = f" durable={json.dumps(last_durable, sort_keys=True)}" if last_durable else ""
+                  print(
+                      f"attempt {attempt}/120 not ready: {type(error).__name__}: {error}{diagnostic}"
+                  )
+                  if attempt == 120:
                       raise
                   time.sleep(5)
           else:
