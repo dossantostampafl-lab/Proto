@@ -113,8 +113,6 @@ jobs:
                       state="visible", timeout=30_000
                   )
 
-              # A hydrated live terminal must expose a public-feed state. No price value
-              # is asserted because market values are external observations.
               page.get_by_text(re.compile(r"STREAMING|RECONCILING")).first.wait_for(
                   state="visible", timeout=30_000
               )
@@ -122,23 +120,24 @@ jobs:
                   state="visible", timeout=30_000
               )
 
-              # Verify the persisted research-quality surface structurally without
-              # asserting or synthesizing any calibration metric value.
-              page.get_by_text("MODEL CALIBRATION", exact=True).wait_for(
+              # Structural selectors are used because panel labels contain nested value
+              # and provenance elements; exact accessible-text matching would incorrectly
+              # reject a valid panel. No calibration values are asserted.
+              calibration = page.locator("article.calibrationPanel")
+              calibration.wait_for(state="visible", timeout=30_000)
+              calibration.locator("header").filter(has_text="MODEL CALIBRATION").wait_for(
                   state="visible", timeout=30_000
               )
-              page.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
+              calibration.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
                   state="visible", timeout=30_000
               )
-              page.get_by_text("BRIER SCORE", exact=True).wait_for(
+              calibration.locator(".calMetrics span").filter(has_text="BRIER SCORE").wait_for(
                   state="visible", timeout=30_000
               )
-              page.get_by_text("SAMPLE COUNT", exact=True).wait_for(
+              calibration.locator(".calMetrics span").filter(has_text="SAMPLE COUNT").wait_for(
                   state="visible", timeout=30_000
               )
 
-              # Exercise the React-owned market controls. Assert state on the button
-              # itself and verify the selected chart header changes with that state.
               eth = page.locator("button.marketTile").filter(has_text="ETH/USD").first
               eth.click()
               page.wait_for_timeout(300)
@@ -159,20 +158,20 @@ jobs:
 
               page.screenshot(path=str(artifacts / "desktop.png"), full_page=True)
 
-              # Reload must rehydrate cleanly and preserve both provenance classes.
               page.reload(wait_until="domcontentloaded", timeout=45_000)
               page.locator("main.terminal").wait_for(state="visible", timeout=30_000)
               page.get_by_text("LIVE PUBLIC", exact=False).first.wait_for(
                   state="visible", timeout=30_000
               )
-              page.get_by_text("MODEL CALIBRATION", exact=True).wait_for(
+              calibration = page.locator("article.calibrationPanel")
+              calibration.wait_for(state="visible", timeout=30_000)
+              calibration.locator("header").filter(has_text="MODEL CALIBRATION").wait_for(
                   state="visible", timeout=30_000
               )
-              page.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
+              calibration.get_by_text("PERSISTED RESEARCH", exact=True).wait_for(
                   state="visible", timeout=30_000
               )
 
-              # Tablet landscape validation catches the dashboard's densest responsive case.
               page.set_viewport_size({"width": 1280, "height": 800})
               page.wait_for_timeout(300)
               overflow = page.evaluate(
