@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .app_state import portfolio, replay_session, runtime, simulator
-from .models import KillSwitchState, RuntimeState, SimulationRequest, SimulationResult, SystemMode
-from .settings import settings
-from .simulation_policy import authoritative_simulation_request
+from .app_state import replay_session, runtime
+from .models import KillSwitchState, RuntimeState, SimulationRequest, SystemMode
+from .shadow_engine import evaluate_shadow_candidate
 from .websockets import hub
 
 router = APIRouter(prefix="/shadow", tags=["shadow-control"])
@@ -65,27 +64,7 @@ def shadow_status() -> dict[str, object]:
 @router.post("/evaluate")
 def evaluate_shadow_decision(request: SimulationRequest) -> dict[str, object]:
     """Evaluate a candidate against authoritative risk without portfolio side effects."""
-    if (
-        runtime.mode != SystemMode.SHADOW
-        or not runtime.running
-        or runtime.kill_switch != KillSwitchState.ARMED
-    ):
-        result = SimulationResult(
-            mode=SystemMode.SHADOW,
-            accepted=False,
-            reason="shadow mode halted",
-        )
-    else:
-        effective_request = authoritative_simulation_request(
-            request,
-            portfolio.snapshot(),
-            max_order_notional=settings.simulation_max_order_notional,
-            max_position_notional=settings.simulation_max_position_notional,
-            max_slippage_bps=settings.simulation_max_slippage_bps,
-        )
-        simulated = simulator.simulate(effective_request)
-        result = simulated.model_copy(update={"mode": SystemMode.SHADOW})
-
+    result = evaluate_shadow_candidate(request)
     return {
         "decision": result.model_dump(mode="json"),
         "would_execute": bool(result.accepted and result.fill is not None),
