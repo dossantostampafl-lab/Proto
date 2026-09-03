@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 20
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
       RAILWAY_PROJECT_ID: 55de030a-f957-4c7a-9441-de2a6c7212e7
       RAILWAY_SERVICE_ID: b67794ef-eadf-43cb-bd8a-da5397a7d9d5
       RAILWAY_ENVIRONMENT_ID: 5f30b2e7-d7e5-4027-b51c-c1993df1c650
@@ -28,16 +29,22 @@ jobs:
         id: auth
         shell: bash
         run: |
-          if [ -z "${RAILWAY_TOKEN}" ]; then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "RAILWAY_TOKEN is not configured; leaving deployment to the connected Railway GitHub service."
-          else
+          if [ -n "${RAILWAY_TOKEN}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
-            echo "Authenticated Railway CLI fallback is available."
+            echo "auth_kind=project" >> "$GITHUB_OUTPUT"
+            echo "Authenticated Railway project-token fallback is available."
+          elif [ -n "${RAILWAY_API_TOKEN}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "auth_kind=workspace" >> "$GITHUB_OUTPUT"
+            echo "Authenticated Railway workspace-token fallback is available."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "auth_kind=none" >> "$GITHUB_OUTPUT"
+            echo "No Railway token is configured; leaving deployment to the connected Railway GitHub service."
           fi
 
-      - name: Deploy exact main checkout to Railway
-        if: steps.auth.outputs.available == 'true'
+      - name: Deploy exact main checkout to Railway with project token
+        if: steps.auth.outputs.auth_kind == 'project'
         uses: docker://ghcr.io/railwayapp/cli:latest
         with:
           args: >-
@@ -49,11 +56,24 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
 
+      - name: Deploy exact main checkout to Railway with workspace token
+        if: steps.auth.outputs.auth_kind == 'workspace'
+        uses: docker://ghcr.io/railwayapp/cli:latest
+        with:
+          args: >-
+            up . --ci
+            --project ${{ env.RAILWAY_PROJECT_ID }}
+            --environment ${{ env.RAILWAY_ENVIRONMENT_ID }}
+            --service ${{ env.RAILWAY_SERVICE_ID }}
+            --message "GitHub main ${{ github.sha }}"
+        env:
+          RAILWAY_API_TOKEN: ${{ env.RAILWAY_API_TOKEN }}
+
       - name: Record fallback result
         shell: bash
         run: |
-          if [ "${{ steps.auth.outputs.available }}" = "true" ]; then
-            echo "Railway CLI deployment attempted for ${GITHUB_SHA}."
-          else
-            echo "No CLI deployment attempted because no Railway project token is available to GitHub Actions."
-          fi
+          case "${{ steps.auth.outputs.auth_kind }}" in
+            project) echo "Railway CLI deployment attempted with project token for ${GITHUB_SHA}." ;;
+            workspace) echo "Railway CLI deployment attempted with workspace token for ${GITHUB_SHA}." ;;
+            *) echo "No CLI deployment attempted because neither Railway token is available to GitHub Actions." ;;
+          esac
