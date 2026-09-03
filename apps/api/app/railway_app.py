@@ -8,6 +8,7 @@ from fastapi import Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from .creation_surface import router as creation_router
 from .event_state import record_operational_event
 from .event_surface import router as event_router
 from .live_routes import router as live_router
@@ -17,6 +18,7 @@ from .paper_autonomy_bootstrap import router as paper_autonomy_router
 from .paper_autopilot import router as paper_autopilot_router
 from .paper_control import router as paper_control_router
 from .shadow_control import router as shadow_control_router
+from .universe_surface import router as universe_router
 
 # Railway composes the public live surface at the application boundary. The
 # research router deliberately excludes /live so the live router and its lifespan
@@ -24,7 +26,8 @@ from .shadow_control import router as shadow_control_router
 # simulation-only/non-financial surfaces. The event router exposes runtime health
 # plus the append-only operational audit journal. The orchestration router is
 # deliberately read-only: it exposes contracts/readiness but no endpoint capable
-# of starting arbitrary jobs.
+# of starting arbitrary jobs. The Creation bridge is separately authenticated and
+# only maps allowlisted safe missions into ProtoBrain.
 app.include_router(live_router)
 app.include_router(event_router)
 app.include_router(paper_control_router)
@@ -32,6 +35,8 @@ app.include_router(paper_autopilot_router)
 app.include_router(paper_autonomy_router)
 app.include_router(shadow_control_router)
 app.include_router(orchestration_router)
+app.include_router(universe_router)
+app.include_router(creation_router)
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
 _UI_SOURCE_DIGEST_FILE = _DASHBOARD_DIR / "proto-ui-source.sha256"
@@ -42,7 +47,7 @@ _ORCHESTRATION_SOURCE_FILE = Path(__file__).with_name("orchestration_surface.py"
 # running. Railway-provided Git metadata gives us an independent deployment
 # identity so a green provider status cannot be confused with the wrong service
 # or an older image behind the public domain.
-_DASHBOARD_RELEASE = "proto-brain-control-plane-v2"
+_DASHBOARD_RELEASE = "proto-brain-control-plane-v3"
 _DASHBOARD_UI_RELEASE = "operator-terminal-v2"
 _DASHBOARD_UI_SOURCE_SHA = (
     _UI_SOURCE_DIGEST_FILE.read_text(encoding="utf-8").strip()
@@ -99,6 +104,7 @@ _OPERATIONAL_EVENTS = {
     "/shadow/start": "SHADOW_MODE_STARTED",
     "/shadow/stop": "SHADOW_MODE_STOPPED",
     "/shadow/evaluate": "SHADOW_DECISION_EVALUATED",
+    "/creation/missions": "CREATION_MISSION_SUBMITTED",
 }
 
 
