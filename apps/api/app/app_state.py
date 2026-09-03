@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from services.orchestration import SqlJobStore
+from services.orchestration import DecisionMemoryStore, SqlJobStore
 
 from .models import RuntimeState, SystemMode
 from .persistence import (
@@ -20,6 +20,9 @@ persistent_journal = (
     AsyncSqlFillJournal(persistence_engine) if persistence_engine is not None else None
 )
 orchestration_store = SqlJobStore(persistence_engine) if persistence_engine is not None else None
+decision_memory_store = (
+    DecisionMemoryStore(persistence_engine) if persistence_engine is not None else None
+)
 runtime = RuntimeState()
 portfolio = PaperPortfolio(
     reference_time_provider=lambda: (
@@ -45,6 +48,7 @@ def reset_runtime_state() -> RuntimeState:
 
 
 __all__ = [
+    "decision_memory_store",
     "orchestration_store",
     "persistence_engine",
     "persistent_journal",

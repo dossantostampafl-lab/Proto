@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from hashlib import sha256
 from math import isfinite
 from time import monotonic
 from typing import Literal
@@ -11,10 +12,12 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from .app_state import portfolio, runtime
+from services.orchestration import DecisionMemoryEntry, DecisionStage
+
+from .app_state import decision_memory_store, portfolio, runtime
 from .live_monitor import live_monitor
 from .main import simulate
-from .models import KillSwitchState, SimulationRequest, SystemMode
+from .models import KillSwitchState, SimulationRequest, SimulationResult, SystemMode
 from .paper_stop_loss import evaluate_stop_loss
 from .risk_state import simulation_execution_allowed
 
@@ -45,6 +48,8 @@ class PaperAutopilotService:
         self._last_signal: dict[str, object] | None = None
         self._last_result: dict[str, object] | None = None
         self._last_stop_loss: dict[str, object] | None = None
+        self._last_decision_id: str | None = None
+        self._decision_memory_failures = 0
         self._armed_side: str | None = None
         self._cycles = 0
         self._signals = 0
@@ -86,6 +91,8 @@ class PaperAutopilotService:
             self._last_signal = None
             self._last_result = None
             self._last_stop_loss = None
+            self._last_decision_id = None
+            self._decision_memory_failures = 0
             self._armed_side = None
             self._cycles = 0
             self._signals = 0
@@ -127,6 +134,8 @@ class PaperAutopilotService:
             "last_signal": self._last_signal,
             "last_result": self._last_result,
             "last_stop_loss": self._last_stop_loss,
+            "last_decision_id": self._last_decision_id,
+            "decision_memory_enabled": decision_memory_store is not None,
             "counters": {
                 "cycles": self._cycles,
                 "signals": self._signals,
@@ -134,6 +143,7 @@ class PaperAutopilotService:
                 "accepted": self._accepted,
                 "rejected": self._rejected,
                 "stop_loss_exits": self._stop_loss_exits,
+                "decision_memory_failures": self._decision_memory_failures,
                 "errors": self._errors,
             },
             "financial_connectivity": False,
@@ -191,6 +201,45 @@ class PaperAutopilotService:
                 return position
         return None
 
+    async def _record_decision(
+        self,
+        *,
+        request: SimulationRequest,
+        result: SimulationResult,
+        reason: str,
+    ) -> None:
+        if decision_memory_store is None:
+            return
+        input_hash = sha256(
+            request.model_dump_json(exclude={"order": {"id", "created_at"}}).encode("utf-8")
+        ).hexdigest()
+        stage = DecisionStage.PAPER_EXECUTED if result.accepted else DecisionStage.RISK_REJECTED
+        entry = DecisionMemoryEntry(
+            decision_id=request.order.id,
+            instrument_id=f"CRYPTO:{request.order.asset.value}",
+            observed_at=request.snapshot.observed_at,
+            recorded_at=datetime.now(UTC),
+            stage=stage,
+            input_hash=input_hash,
+            risk_decision=result.reason,
+            proposed_action=request.order.side.value,
+            actual_action=request.order.side.value if result.accepted else None,
+            explanation=reason,
+            provenance={
+                "decision_source": "PAPER_AUTOPILOT",
+                "market_data_source": "PUBLIC_READ_ONLY",
+                "market_id": request.order.market_id,
+                "system_mode": SystemMode.PAPER_TRADING.value,
+            },
+        )
+        try:
+            await decision_memory_store.record(entry)
+        except Exception:
+            self._decision_memory_failures += 1
+            self._errors += 1
+            return
+        self._last_decision_id = str(entry.decision_id)
+
     async def _submit(
         self,
         *,
@@ -234,6 +283,7 @@ class PaperAutopilotService:
         )
         self._submissions += 1
         result = await simulate(payload)
+        await self._record_decision(request=payload, result=result, reason=reason)
         self._last_action_monotonic = monotonic()
         self._last_action_at = datetime.now(UTC)
         self._last_result = result.model_dump(mode="json")
