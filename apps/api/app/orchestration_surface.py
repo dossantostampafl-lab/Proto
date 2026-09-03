@@ -86,7 +86,12 @@ async def orchestration_status() -> dict[str, object]:
             "durable_backend": durable_backend,
             "decision_memory_configured": decision_memory_store is not None,
             "general_simulation_persistence_enabled": settings.persistence_enabled,
-            "orchestration_persistence_enabled": settings.orchestration_persistence_enabled,
+            "orchestration_persistence_enabled": settings.orchestration_persistence_active,
+            "orchestration_persistence_requested": settings.orchestration_persistence_enabled,
+            "derived_from_live_persistence": (
+                settings.orchestration_persistence_active
+                and not settings.orchestration_persistence_enabled
+            ),
         },
         "supervisor": supervisor_status,
         "readiness": {

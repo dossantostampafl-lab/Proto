@@ -83,6 +83,23 @@ class Settings(BaseSettings):
             raise ValueError("live_market_source must be COINBASE or BINANCE")
         return normalized
 
+    @property
+    def orchestration_persistence_active(self) -> bool:
+        """Resolve durable orchestration storage without enabling simulation persistence.
+
+        Railway's existing production service already persists public live history in
+        PostgreSQL. Some deployments inject that configuration at the platform layer
+        rather than through the repository Dockerfile, so the dedicated orchestration
+        flag may be absent even though a durable database is already explicitly in use.
+        In that case it is safe to reuse the same durable database for read-only
+        orchestration/decision-memory state. General simulation persistence remains
+        controlled exclusively by ``persistence_enabled``.
+        """
+        if self.orchestration_persistence_enabled:
+            return True
+        durable_database = self.database_url.strip().lower().startswith("postgresql")
+        return self.live_persistence_enabled and durable_database
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
