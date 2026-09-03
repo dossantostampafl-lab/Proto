@@ -1,0 +1,112 @@
+name: Production Orchestration Contract
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/production-orchestration-contract.yml"
+      - "Dockerfile"
+      - "apps/api/app/settings.py"
+      - "apps/api/app/app_state.py"
+      - "apps/api/app/orchestration_surface.py"
+      - "apps/api/app/orchestration_state.py"
+      - "services/orchestration/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
+
+jobs:
+  railway-orchestration-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Verify durable safe control plane
+        env:
+          ORIGIN: ${{ env.PROTO_PUBLIC_ORIGIN }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          origin = os.environ["ORIGIN"].rstrip("/")
+          last_error = None
+
+          def json_get(path: str) -> dict:
+              request = urllib.request.Request(
+                  f"{origin}{path}",
+                  headers={"Cache-Control": "no-cache", "User-Agent": "proto-orchestration-contract/2.0"},
+              )
+              with urllib.request.urlopen(request, timeout=10) as response:
+                  if response.status != 200:
+                      raise AssertionError(f"{path} returned HTTP {response.status}")
+                  return json.loads(response.read().decode("utf-8"))
+
+          for attempt in range(1, 61):
+              try:
+                  status = json_get("/orchestration/status")
+                  durable = status.get("durable_runtime") or {}
+                  control = status.get("control_plane") or {}
+                  readiness = status.get("readiness") or {}
+                  if durable.get("configured") is not True:
+                      raise AssertionError("orchestration persistence is not configured")
+                  if durable.get("persistence_ready") is not True:
+                      raise AssertionError("orchestration persistence is not ready")
+                  if durable.get("durable_backend") is not True:
+                      raise AssertionError("orchestration backend is not durable PostgreSQL")
+                  if durable.get("decision_memory_configured") is not True:
+                      raise AssertionError("decision memory is not configured")
+                  if durable.get("orchestration_persistence_enabled") is not True:
+                      raise AssertionError("isolated orchestration persistence flag is not enabled")
+                  if durable.get("general_simulation_persistence_enabled") is not False:
+                      raise AssertionError("live deployment unexpectedly enabled general simulation persistence")
+                  if readiness.get("ready_safe_scope") is not True:
+                      raise AssertionError("safe orchestration scope is not ready")
+                  if readiness.get("durable_safe_scope") is not True:
+                      raise AssertionError("durable safe orchestration scope is not ready")
+                  if readiness.get("live_ready") is not False:
+                      raise AssertionError("orchestration must not claim real financial live readiness")
+                  if control.get("read_only_surface") is not True:
+                      raise AssertionError("public orchestration surface must remain read-only")
+                  if control.get("arbitrary_job_execution_endpoint") is not False:
+                      raise AssertionError("public orchestration surface exposed arbitrary execution")
+
+                  memory = json_get("/orchestration/decision-memory/status")
+                  if memory.get("configured") is not True:
+                      raise AssertionError("decision memory status is not configured")
+                  if memory.get("financial_connectivity") is not False:
+                      raise AssertionError("decision memory violated financial-connectivity boundary")
+                  if memory.get("real_money_execution") is not False:
+                      raise AssertionError("decision memory violated real-money boundary")
+
+                  recent = json_get("/orchestration/decision-memory/recent?limit=1")
+                  if recent.get("configured") is not True:
+                      raise AssertionError("decision lineage surface is not configured")
+                  if recent.get("financial_connectivity") is not False:
+                      raise AssertionError("decision lineage violated financial-connectivity boundary")
+                  if recent.get("real_money_execution") is not False:
+                      raise AssertionError("decision lineage violated real-money boundary")
+                  if not isinstance(recent.get("decisions"), list):
+                      raise AssertionError("decision lineage payload is not a list")
+
+                  print(
+                      "production orchestration contract: ok "
+                      f"catalog={status.get('catalog_version')} records={memory.get('records')}"
+                  )
+                  break
+              except (AssertionError, urllib.error.URLError, TimeoutError) as error:
+                  last_error = error
+                  print(f"attempt {attempt}/60 not ready: {type(error).__name__}: {error}")
+                  if attempt == 60:
+                      raise
+                  time.sleep(5)
+          else:
+              raise RuntimeError(f"orchestration contract exhausted retries: {last_error}")
+          PY
