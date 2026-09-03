@@ -1,3 +1,10 @@
+from .memory import (
+    DecisionMemoryBase,
+    DecisionMemoryEntry,
+    DecisionMemoryStore,
+    DecisionOutcome,
+    DecisionStage,
+)
 from .registry import CATALOG_VERSION, JOB_CATALOG, JobContract, build_job_catalog
 from .runtime import (
     JobCapability,
@@ -12,6 +19,11 @@ from .supervisor import OrchestrationSupervisor, PeriodicJob
 __all__ = [
     "CATALOG_VERSION",
     "JOB_CATALOG",
+    "DecisionMemoryBase",
+    "DecisionMemoryEntry",
+    "DecisionMemoryStore",
+    "DecisionOutcome",
+    "DecisionStage",
     "JobCapability",
     "JobContract",
     "JobRun",
