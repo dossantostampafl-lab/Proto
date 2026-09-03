@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 12
     env:
       PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
-      EXPECTED_PROTO_RELEASE: proto-brain-control-plane-v2
+      EXPECTED_PROTO_RELEASE: proto-brain-control-plane-v3
     steps:
       - name: Validate deployed dashboard and live safety contracts
         shell: bash
@@ -41,7 +41,7 @@ jobs:
                   f"{origin}{path}",
                   headers={
                       "Cache-Control": "no-cache",
-                      "User-Agent": "proto-production-smoke/2.0",
+                      "User-Agent": "proto-production-smoke/3.0",
                   },
               )
               with urllib.request.urlopen(req, timeout=10) as response:
@@ -116,12 +116,39 @@ jobs:
                   if history.get("real_money_execution") is not False:
                       raise AssertionError("persisted history violated real-money boundary")
 
+                  universe = json_get("/universe")
+                  registered = {
+                      item.get("instrument_id")
+                      for item in universe.get("instruments", [])
+                      if isinstance(item, dict)
+                  }
+                  if not {"CRYPTO:BTC", "CRYPTO:ETH", "CRYPTO:SOL"}.issubset(registered):
+                      raise AssertionError(f"core universe is incomplete: {sorted(registered)!r}")
+                  if universe.get("financial_connectivity") is not False:
+                      raise AssertionError("universe violated financial-connectivity boundary")
+                  if universe.get("real_money_execution") is not False:
+                      raise AssertionError("universe violated real-money boundary")
+
+                  creation = json_get("/creation/status")
+                  if creation.get("accepted_origin") != "THE_CREATION":
+                      raise AssertionError("Creation bridge origin contract is wrong")
+                  if creation.get("financial_connectivity") is not False:
+                      raise AssertionError("Creation bridge violated financial-connectivity boundary")
+                  if creation.get("real_money_execution") is not False:
+                      raise AssertionError("Creation bridge violated real-money boundary")
+
                   system = json_get("/system/status")
                   risk = json_get("/risk")
                   paper = json_get("/paper/status")
                   autopilot = json_get("/paper/automation/status")
                   mode = system.get("mode")
-                  known_modes = {"SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY", "LIVE_MONITORING"}
+                  known_modes = {
+                      "SIMULATION",
+                      "PAPER_TRADING",
+                      "HISTORICAL_REPLAY",
+                      "LIVE_MONITORING",
+                      "SHADOW",
+                  }
                   if mode not in known_modes:
                       raise AssertionError(f"unexpected runtime mode: {mode!r}")
                   if risk.get("mode") != mode:
@@ -160,6 +187,8 @@ jobs:
                               "release": deployed_release,
                               "runtime_mode": mode,
                               "fresh_symbols": sorted(fresh),
+                              "registered_instruments": sorted(registered),
+                              "creation_configured": creation.get("configured"),
                               "live_generation": market.get("connection_generation"),
                               "live_sequence": market.get("sequence"),
                           },
