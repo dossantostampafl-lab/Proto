@@ -11,10 +11,11 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from .app_state import runtime
+from .app_state import portfolio, runtime
 from .live_monitor import live_monitor
 from .main import simulate
 from .models import KillSwitchState, SimulationRequest, SystemMode
+from .paper_stop_loss import evaluate_stop_loss
 from .risk_state import simulation_execution_allowed
 
 _POLL_SECONDS = 3.0
@@ -29,12 +30,13 @@ class PaperAutopilotConfig(BaseModel):
     cooldown_seconds: float = Field(default=20.0, ge=5.0, le=300.0)
     quantity: float = Field(default=0.001, gt=0, le=1_000)
     max_spread_bps: float = Field(default=20.0, ge=0.01, le=75.0)
+    stop_loss_fraction: float = Field(gt=0.0, le=0.50)
 
 
 class PaperAutopilotService:
     def __init__(self) -> None:
         self._task: asyncio.Task[None] | None = None
-        self._config = PaperAutopilotConfig()
+        self._config: PaperAutopilotConfig | None = None
         self._started_at: datetime | None = None
         self._last_cycle_at: datetime | None = None
         self._last_action_at: datetime | None = None
@@ -42,12 +44,14 @@ class PaperAutopilotService:
         self._last_reason = "STOPPED"
         self._last_signal: dict[str, object] | None = None
         self._last_result: dict[str, object] | None = None
+        self._last_stop_loss: dict[str, object] | None = None
         self._armed_side: str | None = None
         self._cycles = 0
         self._signals = 0
         self._submissions = 0
         self._accepted = 0
         self._rejected = 0
+        self._stop_loss_exits = 0
         self._errors = 0
         self._lock = asyncio.Lock()
 
@@ -65,16 +69,13 @@ class PaperAutopilotService:
                         "before autopilot starts"
                     ),
                 )
-            previous_symbol = self._config.symbol
+            previous_symbol = self._config.symbol if self._config is not None else None
             self._config = config
             if self.running:
                 if config.symbol != previous_symbol:
-                    # Signal-consumption state belongs to one market. A symbol
-                    # transition must not inherit BUY/SELL hysteresis from the
-                    # previously configured market. The global cooldown is kept
-                    # intentionally to prevent a cross-asset burst after update.
                     self._armed_side = None
                     self._last_signal = None
+                    self._last_stop_loss = None
                 self._last_reason = "CONFIG_UPDATED"
                 return self.status()
             self._started_at = datetime.now(UTC)
@@ -84,12 +85,14 @@ class PaperAutopilotService:
             self._last_reason = "STARTING"
             self._last_signal = None
             self._last_result = None
+            self._last_stop_loss = None
             self._armed_side = None
             self._cycles = 0
             self._signals = 0
             self._submissions = 0
             self._accepted = 0
             self._rejected = 0
+            self._stop_loss_exits = 0
             self._errors = 0
             self._task = asyncio.create_task(self._run(), name="paper-autopilot")
             return self.status()
@@ -107,25 +110,30 @@ class PaperAutopilotService:
             return self.status()
 
     def status(self) -> dict[str, object]:
+        config = self._config
         return {
             "mode": runtime.mode,
             "running": self.running,
             "paper_runtime_ready": self._paper_runtime_ready(),
-            "live_market_ready": self._live_market_ready(self._config.symbol),
+            "live_market_ready": (
+                self._live_market_ready(config.symbol) if config is not None else False
+            ),
             "kill_switch": runtime.kill_switch,
-            "config": self._config.model_dump(mode="json"),
+            "config": config.model_dump(mode="json") if config is not None else None,
             "started_at": self._started_at.isoformat() if self._started_at else None,
             "last_cycle_at": self._last_cycle_at.isoformat() if self._last_cycle_at else None,
             "last_action_at": self._last_action_at.isoformat() if self._last_action_at else None,
             "last_reason": self._last_reason,
             "last_signal": self._last_signal,
             "last_result": self._last_result,
+            "last_stop_loss": self._last_stop_loss,
             "counters": {
                 "cycles": self._cycles,
                 "signals": self._signals,
                 "submissions": self._submissions,
                 "accepted": self._accepted,
                 "rejected": self._rejected,
+                "stop_loss_exits": self._stop_loss_exits,
                 "errors": self._errors,
             },
             "financial_connectivity": False,
@@ -146,9 +154,7 @@ class PaperAutopilotService:
         health = symbol_health.get(symbol) if isinstance(symbol_health, Mapping) else None
         source_health = status.get("feed_health")
         source_connected = (
-            source_health.get("connected")
-            if isinstance(source_health, Mapping)
-            else None
+            source_health.get("connected") if isinstance(source_health, Mapping) else None
         )
         return bool(
             status.get("running")
@@ -175,103 +181,43 @@ class PaperAutopilotService:
             self._last_reason = f"WORKER_ERROR:{type(error).__name__}"
             self._task = None
 
-    async def _cycle(self) -> None:
-        self._cycles += 1
-        self._last_cycle_at = datetime.now(UTC)
-        if not self._paper_runtime_ready():
-            self._last_reason = "WAITING_FOR_PAPER_RUNTIME"
-            return
+    def _position_for_symbol(self, symbol: str) -> Mapping[str, object] | None:
+        snapshot = portfolio.snapshot()
+        positions = snapshot.get("positions")
+        if not isinstance(positions, list):
+            return None
+        for position in positions:
+            if isinstance(position, Mapping) and position.get("asset") == symbol:
+                return position
+        return None
 
-        config = self._config
-        if not self._live_market_ready(config.symbol):
-            self._last_reason = "WAITING_FOR_FRESH_LIVE_DATA"
-            return
-
-        frame = live_monitor.snapshot(config.symbol)
-        analytics = live_monitor.analytics(config.symbol)
-        if frame is None or analytics is None:
-            self._last_reason = "WAITING_FOR_LIVE_DATA"
-            return
-
-        try:
-            bid = float(frame["bid"])
-            ask = float(frame["ask"])
-            bid_size = float(frame["bid_size"])
-            ask_size = float(frame["ask_size"])
-            imbalance = float(analytics["current_imbalance"])
-            volatility = float(analytics["realized_volatility"])
-        except (KeyError, TypeError, ValueError):
-            self._errors += 1
-            self._last_reason = "INVALID_LIVE_PAYLOAD"
-            return
-
-        live_values = (bid, ask, bid_size, ask_size, imbalance, volatility)
-        if not all(isfinite(value) for value in live_values):
-            self._errors += 1
-            self._last_reason = "NON_FINITE_LIVE_PAYLOAD"
-            return
-        if bid <= 0 or ask < bid or bid_size < 0 or ask_size < 0:
-            self._errors += 1
-            self._last_reason = "INVALID_LIVE_BOOK"
-            return
-
-        spread_bps = ((ask - bid) / max(ask, 1e-9)) * 10_000
-        self._last_signal = {
-            "symbol": config.symbol,
-            "imbalance": imbalance,
-            "realized_volatility": volatility,
-            "spread_bps": spread_bps,
-            "observed_at": frame.get("received_at") or frame.get("timestamp"),
-        }
-
-        if abs(imbalance) < config.imbalance_trigger * _RESET_FACTOR:
-            self._armed_side = None
-        if abs(imbalance) < config.imbalance_trigger:
-            self._last_reason = "WATCHING_SIGNAL"
-            return
-        self._signals += 1
-
-        if spread_bps > config.max_spread_bps:
-            self._last_reason = "SPREAD_GUARD"
-            return
-
-        side = "BUY" if imbalance > 0 else "SELL"
-        if self._armed_side == side:
-            self._last_reason = "SIGNAL_ALREADY_CONSUMED"
-            return
-
-        elapsed = (
-            monotonic() - self._last_action_monotonic
-            if self._last_action_monotonic
-            else float("inf")
-        )
-        if elapsed < config.cooldown_seconds:
-            self._last_reason = "COOLDOWN"
-            return
-
-        top_size = ask_size if side == "BUY" else bid_size
-        if config.quantity > top_size:
-            self._last_reason = "LIQUIDITY_GUARD"
-            return
-
-        # Re-check the authoritative public-feed health immediately before the
-        # simulator call so a disconnect/staleness transition during decision
-        # work fails closed instead of submitting from a superseded snapshot.
+    async def _submit(
+        self,
+        *,
+        config: PaperAutopilotConfig,
+        side: str,
+        quantity: float,
+        bid: float,
+        ask: float,
+        bid_size: float,
+        ask_size: float,
+        volatility: float,
+        imbalance: float,
+        observed_at: object,
+        reason: str,
+    ) -> bool:
         if not self._live_market_ready(config.symbol):
             self._last_reason = "LIVE_DATA_BECAME_STALE"
-            return
-
+            return False
         market_id = f"autopilot-{config.symbol.lower()}-usd"
-        limit_price = ask if side == "BUY" else bid
-        observed_at = frame.get("received_at") or frame.get("timestamp")
         payload = SimulationRequest.model_validate(
             {
                 "order": {
                     "market_id": market_id,
                     "asset": config.symbol,
                     "side": side,
-                    "quantity": config.quantity,
-                    "limit_price": limit_price,
+                    "quantity": quantity,
+                    "limit_price": ask if side == "BUY" else bid,
                 },
                 "snapshot": {
                     "symbol": config.symbol,
@@ -286,19 +232,155 @@ class PaperAutopilotService:
                 },
             }
         )
-
         self._submissions += 1
         result = await simulate(payload)
         self._last_action_monotonic = monotonic()
         self._last_action_at = datetime.now(UTC)
-        self._armed_side = side
         self._last_result = result.model_dump(mode="json")
         if result.accepted:
             self._accepted += 1
-            self._last_reason = "SIMULATED_FILL"
-        else:
-            self._rejected += 1
-            self._last_reason = f"RISK_REJECTED:{result.reason}"
+            self._last_reason = reason
+            return True
+        self._rejected += 1
+        self._last_reason = f"RISK_REJECTED:{result.reason}"
+        return False
+
+    async def _cycle(self) -> None:
+        self._cycles += 1
+        self._last_cycle_at = datetime.now(UTC)
+        if not self._paper_runtime_ready():
+            self._last_reason = "WAITING_FOR_PAPER_RUNTIME"
+            return
+        config = self._config
+        if config is None:
+            self._last_reason = "CONFIG_REQUIRED"
+            return
+        if not self._live_market_ready(config.symbol):
+            self._last_reason = "WAITING_FOR_FRESH_LIVE_DATA"
+            return
+
+        frame = live_monitor.snapshot(config.symbol)
+        analytics = live_monitor.analytics(config.symbol)
+        if frame is None or analytics is None:
+            self._last_reason = "WAITING_FOR_LIVE_DATA"
+            return
+        try:
+            bid = float(frame["bid"])
+            ask = float(frame["ask"])
+            bid_size = float(frame["bid_size"])
+            ask_size = float(frame["ask_size"])
+            imbalance = float(analytics["current_imbalance"])
+            volatility = float(analytics["realized_volatility"])
+        except (KeyError, TypeError, ValueError):
+            self._errors += 1
+            self._last_reason = "INVALID_LIVE_PAYLOAD"
+            return
+        values = (bid, ask, bid_size, ask_size, imbalance, volatility)
+        if not all(isfinite(value) for value in values):
+            self._errors += 1
+            self._last_reason = "NON_FINITE_LIVE_PAYLOAD"
+            return
+        if bid <= 0 or ask < bid or bid_size < 0 or ask_size < 0:
+            self._errors += 1
+            self._last_reason = "INVALID_LIVE_BOOK"
+            return
+
+        observed_at = frame.get("received_at") or frame.get("timestamp")
+        spread_bps = ((ask - bid) / max(ask, 1e-9)) * 10_000
+        self._last_signal = {
+            "symbol": config.symbol,
+            "imbalance": imbalance,
+            "realized_volatility": volatility,
+            "spread_bps": spread_bps,
+            "observed_at": observed_at,
+        }
+
+        position = self._position_for_symbol(config.symbol)
+        if position is not None:
+            try:
+                position_quantity = float(position.get("quantity", 0.0))
+                average_price = float(position.get("average_price", 0.0))
+                stop = evaluate_stop_loss(
+                    position_quantity=position_quantity,
+                    average_price=average_price,
+                    bid=bid,
+                    ask=ask,
+                    stop_loss_fraction=config.stop_loss_fraction,
+                )
+            except (TypeError, ValueError):
+                self._errors += 1
+                self._last_reason = "INVALID_POSITION_FOR_STOP_LOSS"
+                return
+            self._last_stop_loss = {
+                "triggered": stop.triggered,
+                "threshold_price": stop.threshold_price,
+                "reason": stop.reason,
+                "position_quantity": position_quantity,
+            }
+            if stop.triggered and stop.side is not None:
+                top_size = ask_size if stop.side == "BUY" else bid_size
+                if stop.quantity > top_size:
+                    self._last_reason = "STOP_LOSS_LIQUIDITY_GUARD"
+                    return
+                closed = await self._submit(
+                    config=config,
+                    side=stop.side,
+                    quantity=stop.quantity,
+                    bid=bid,
+                    ask=ask,
+                    bid_size=bid_size,
+                    ask_size=ask_size,
+                    volatility=volatility,
+                    imbalance=imbalance,
+                    observed_at=observed_at,
+                    reason="STOP_LOSS_SIMULATED_FILL",
+                )
+                if closed:
+                    self._stop_loss_exits += 1
+                    self._armed_side = None
+                return
+
+        if abs(imbalance) < config.imbalance_trigger * _RESET_FACTOR:
+            self._armed_side = None
+        if abs(imbalance) < config.imbalance_trigger:
+            self._last_reason = "WATCHING_SIGNAL"
+            return
+        self._signals += 1
+        if spread_bps > config.max_spread_bps:
+            self._last_reason = "SPREAD_GUARD"
+            return
+        side = "BUY" if imbalance > 0 else "SELL"
+        if self._armed_side == side:
+            self._last_reason = "SIGNAL_ALREADY_CONSUMED"
+            return
+        elapsed = (
+            monotonic() - self._last_action_monotonic
+            if self._last_action_monotonic
+            else float("inf")
+        )
+        if elapsed < config.cooldown_seconds:
+            self._last_reason = "COOLDOWN"
+            return
+        top_size = ask_size if side == "BUY" else bid_size
+        if config.quantity > top_size:
+            self._last_reason = "LIQUIDITY_GUARD"
+            return
+        submissions_before = self._submissions
+        await self._submit(
+            config=config,
+            side=side,
+            quantity=config.quantity,
+            bid=bid,
+            ask=ask,
+            bid_size=bid_size,
+            ask_size=ask_size,
+            volatility=volatility,
+            imbalance=imbalance,
+            observed_at=observed_at,
+            reason="SIMULATED_FILL",
+        )
+        if self._submissions > submissions_before:
+            self._armed_side = side
 
 
 paper_autopilot = PaperAutopilotService()

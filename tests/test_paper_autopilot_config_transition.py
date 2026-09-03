@@ -8,6 +8,8 @@ from apps.api.app.app_state import runtime
 from apps.api.app.models import KillSwitchState, SystemMode
 from apps.api.app.paper_autopilot import PaperAutopilotConfig, PaperAutopilotService
 
+_TEST_STOP_LOSS = 0.05
+
 
 @pytest.fixture(autouse=True)
 def restore_runtime():
@@ -36,7 +38,10 @@ def fresh_status(symbol: str) -> dict[str, object]:
 @pytest.mark.asyncio
 async def test_symbol_update_resets_signal_but_keeps_cooldown(monkeypatch) -> None:
     service = PaperAutopilotService()
-    service._config = PaperAutopilotConfig(symbol="BTC")  # noqa: SLF001
+    service._config = PaperAutopilotConfig(  # noqa: SLF001
+        symbol="BTC",
+        stop_loss_fraction=_TEST_STOP_LOSS,
+    )
     service._armed_side = "BUY"  # noqa: SLF001
     service._last_signal = {"symbol": "BTC", "imbalance": 0.8}  # noqa: SLF001
     cooldown_clock = monotonic()
@@ -45,7 +50,9 @@ async def test_symbol_update_resets_signal_but_keeps_cooldown(monkeypatch) -> No
     monkeypatch.setattr(module.live_monitor, "status", lambda: fresh_status("ETH"))
 
     try:
-        state = await service.start(PaperAutopilotConfig(symbol="ETH"))
+        state = await service.start(
+            PaperAutopilotConfig(symbol="ETH", stop_loss_fraction=_TEST_STOP_LOSS)
+        )
         assert state["config"]["symbol"] == "ETH"
         assert state["last_reason"] == "CONFIG_UPDATED"
         assert service._armed_side is None  # noqa: SLF001
@@ -58,7 +65,11 @@ async def test_symbol_update_resets_signal_but_keeps_cooldown(monkeypatch) -> No
 @pytest.mark.asyncio
 async def test_same_symbol_config_update_preserves_consumed_signal(monkeypatch) -> None:
     service = PaperAutopilotService()
-    service._config = PaperAutopilotConfig(symbol="BTC", imbalance_trigger=0.65)  # noqa: SLF001
+    service._config = PaperAutopilotConfig(  # noqa: SLF001
+        symbol="BTC",
+        imbalance_trigger=0.65,
+        stop_loss_fraction=_TEST_STOP_LOSS,
+    )
     service._armed_side = "SELL"  # noqa: SLF001
     service._last_signal = {"symbol": "BTC", "imbalance": -0.8}  # noqa: SLF001
     service._task = asyncio.create_task(asyncio.sleep(60))  # noqa: SLF001
@@ -66,7 +77,11 @@ async def test_same_symbol_config_update_preserves_consumed_signal(monkeypatch) 
 
     try:
         state = await service.start(
-            PaperAutopilotConfig(symbol="BTC", imbalance_trigger=0.7)
+            PaperAutopilotConfig(
+                symbol="BTC",
+                imbalance_trigger=0.7,
+                stop_loss_fraction=_TEST_STOP_LOSS,
+            )
         )
         assert state["config"]["imbalance_trigger"] == 0.7
         assert service._armed_side == "SELL"  # noqa: SLF001
