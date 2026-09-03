@@ -19,10 +19,6 @@ from .safety_policy import policy_snapshot
 from .settings import settings
 
 
-def _durable_orchestration_backend() -> bool:
-    return settings.database_url.strip().lower().startswith("postgresql")
-
-
 @asynccontextmanager
 async def orchestration_lifespan(_: APIRouter) -> AsyncIterator[None]:
     if orchestration_store is not None:
@@ -52,7 +48,7 @@ async def orchestration_status() -> dict[str, object]:
     persistence_ready = (
         await database_ready(orchestration_engine) if orchestration_engine is not None else False
     )
-    durable_backend = _durable_orchestration_backend()
+    durable_backend = settings.durable_database_configured
     safety = policy_snapshot(settings.system_mode)
     safe_scope_ready = orchestration_store is not None and persistence_ready
     supervisor_status = (
@@ -84,11 +80,14 @@ async def orchestration_status() -> dict[str, object]:
             "configured": orchestration_store is not None,
             "persistence_ready": persistence_ready,
             "durable_backend": durable_backend,
+            "database_driver": settings.database_driver,
+            "app_env": settings.app_env,
+            "live_persistence_enabled": settings.live_persistence_enabled,
             "decision_memory_configured": decision_memory_store is not None,
             "general_simulation_persistence_enabled": settings.persistence_enabled,
             "orchestration_persistence_enabled": settings.orchestration_persistence_active,
             "orchestration_persistence_requested": settings.orchestration_persistence_enabled,
-            "derived_from_live_persistence": (
+            "derived_from_runtime_database": (
                 settings.orchestration_persistence_active
                 and not settings.orchestration_persistence_enabled
             ),

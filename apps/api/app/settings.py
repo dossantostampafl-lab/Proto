@@ -84,21 +84,34 @@ class Settings(BaseSettings):
         return normalized
 
     @property
+    def database_driver(self) -> str:
+        """Return only the non-sensitive SQLAlchemy driver identifier."""
+        return self.database_url.strip().split(":", maxsplit=1)[0].lower()
+
+    @property
+    def durable_database_configured(self) -> bool:
+        return self.database_driver in {
+            "postgres",
+            "postgresql",
+            "postgresql+asyncpg",
+        }
+
+    @property
     def orchestration_persistence_active(self) -> bool:
         """Resolve durable orchestration storage without enabling simulation persistence.
 
-        Railway's existing production service already persists public live history in
-        PostgreSQL. Some deployments inject that configuration at the platform layer
-        rather than through the repository Dockerfile, so the dedicated orchestration
-        flag may be absent even though a durable database is already explicitly in use.
-        In that case it is safe to reuse the same durable database for read-only
-        orchestration/decision-memory state. General simulation persistence remains
-        controlled exclusively by ``persistence_enabled``.
+        The dedicated switch remains the primary opt-in. In production, an explicitly
+        configured durable PostgreSQL DATABASE_URL is itself sufficient evidence that
+        orchestration/decision-memory may reuse that database even when Railway-level
+        environment variables override image defaults. This never enables simulation
+        persistence and never relaxes the real-money execution boundary.
         """
         if self.orchestration_persistence_enabled:
             return True
-        durable_database = self.database_url.strip().lower().startswith("postgresql")
-        return self.live_persistence_enabled and durable_database
+        production = self.app_env.strip().lower() == "production"
+        if production and self.durable_database_configured:
+            return True
+        return self.live_persistence_enabled and self.durable_database_configured
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

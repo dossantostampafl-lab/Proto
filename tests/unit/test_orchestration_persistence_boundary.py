@@ -18,6 +18,7 @@ def test_settings_expose_separate_orchestration_persistence_switch() -> None:
     settings = (ROOT / "apps/api/app/settings.py").read_text()
     assert "orchestration_persistence_enabled: bool = False" in settings
     assert "def orchestration_persistence_active" in settings
+    assert "def durable_database_configured" in settings
 
 
 def test_effective_orchestration_persistence_honors_explicit_switch() -> None:
@@ -26,6 +27,19 @@ def test_effective_orchestration_persistence_honors_explicit_switch() -> None:
         live_persistence_enabled=False,
         database_url="sqlite+aiosqlite:///:memory:",
     )
+    assert settings.orchestration_persistence_active is True
+    assert settings.persistence_enabled is False
+
+
+def test_production_durable_postgres_activates_orchestration_without_simulation() -> None:
+    settings = Settings(
+        app_env="production",
+        orchestration_persistence_enabled=False,
+        live_persistence_enabled=False,
+        database_url="postgresql+asyncpg://proto:proto@db/proto",
+    )
+    assert settings.database_driver == "postgresql+asyncpg"
+    assert settings.durable_database_configured is True
     assert settings.orchestration_persistence_active is True
     assert settings.persistence_enabled is False
 
@@ -42,10 +56,12 @@ def test_effective_orchestration_persistence_reuses_durable_live_postgres() -> N
 
 def test_effective_orchestration_persistence_never_derives_from_ephemeral_sqlite() -> None:
     settings = Settings(
+        app_env="production",
         orchestration_persistence_enabled=False,
         live_persistence_enabled=True,
         database_url="sqlite+aiosqlite:///:memory:",
     )
+    assert settings.durable_database_configured is False
     assert settings.orchestration_persistence_active is False
 
 
@@ -58,9 +74,10 @@ def test_orchestration_engine_isolated_from_simulation_persistence() -> None:
     assert "DecisionMemoryStore(orchestration_engine)" in app_state
 
 
-def test_production_surface_does_not_claim_durability_for_ephemeral_sqlite() -> None:
+def test_production_surface_exposes_only_sanitized_database_diagnostics() -> None:
     surface = (ROOT / "apps/api/app/orchestration_surface.py").read_text()
-    assert 'startswith("postgresql")' in surface
+    assert "settings.durable_database_configured" in surface
+    assert '"database_driver": settings.database_driver' in surface
     assert '"durable_backend": durable_backend' in surface
     assert '"durable_safe_scope": safe_scope_ready and durable_backend' in surface
     assert '"general_simulation_persistence_enabled": settings.persistence_enabled' in surface
@@ -68,3 +85,4 @@ def test_production_surface_does_not_claim_durability_for_ephemeral_sqlite() -> 
         '"orchestration_persistence_enabled": settings.orchestration_persistence_active'
         in surface
     )
+    assert '"database_url"' not in surface
