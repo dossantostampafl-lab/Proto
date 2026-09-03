@@ -365,7 +365,8 @@ class PaperAutopilotService:
         if config.quantity > top_size:
             self._last_reason = "LIQUIDITY_GUARD"
             return
-        accepted = await self._submit(
+        submissions_before = self._submissions
+        await self._submit(
             config=config,
             side=side,
             quantity=config.quantity,
@@ -378,7 +379,7 @@ class PaperAutopilotService:
             observed_at=observed_at,
             reason="SIMULATED_FILL",
         )
-        if accepted:
+        if self._submissions > submissions_before:
             self._armed_side = side
 
 
