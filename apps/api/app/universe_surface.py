@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, HTTPException, Query
 
 from services.market_data.instruments import (
@@ -128,8 +130,8 @@ def _coverage(instrument: Instrument) -> dict[str, object]:
 
 @router.get("")
 def universe(
-    asset_class: AssetClass | None = Query(default=None),
-    venue: str | None = Query(default=None, min_length=1, max_length=80),
+    asset_class: Annotated[AssetClass | None, Query()] = None,
+    venue: Annotated[str | None, Query(min_length=1, max_length=80)] = None,
 ) -> dict[str, object]:
     registry = build_instrument_registry()
     instruments = registry.list(asset_class=asset_class, venue=venue)
