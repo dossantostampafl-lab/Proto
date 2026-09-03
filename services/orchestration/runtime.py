@@ -31,6 +31,7 @@ class JobCapability(StrEnum):
 SAFE_MODES = frozenset(
     {
         "SIMULATION",
+        "SHADOW",
         "PAPER_TRADING",
         "HISTORICAL_REPLAY",
         "LIVE_MONITORING",
@@ -123,73 +124,70 @@ class ProtoBrain:
             payload=payload or {},
         )
 
-    async def run_once(self, *, now: datetime | None = None) -> JobRun | None:
-        current = now or datetime.now(UTC)
-        await self.store.recover_stale(self.specs, now=current)
-        run = await self.store.claim_next(self.specs, self.worker_id, now=current)
+    async def run_once(self) -> JobRun | None:
+        run = await self.store.claim_next(self.worker_id)
         if run is None:
             return None
 
         spec = self.specs.get(run.job_name)
         handler = self.handlers.get(run.job_name)
         if spec is None or handler is None:
-            return await self.store.dead_letter(
-                run.id,
-                owner=self.worker_id,
-                error="unregistered job",
-                now=current,
-            )
+            await self.store.dead_letter(run.id, "job handler not registered")
+            return await self.store.get(run.id)
 
         if spec.requires_risk_gate:
             if self.risk_gate is None:
-                return await self.store.block(
-                    run.id,
-                    owner=self.worker_id,
-                    error="risk gate unavailable",
-                    now=current,
-                )
-            approved = await self.risk_gate(run)
+                await self.store.block(run.id, "risk gate unavailable")
+                return await self.store.get(run.id)
+            try:
+                approved = await self.risk_gate(run)
+            except Exception as error:
+                await self.store.block(run.id, f"risk gate error: {type(error).__name__}")
+                return await self.store.get(run.id)
             if not approved:
-                return await self.store.block(
-                    run.id,
-                    owner=self.worker_id,
-                    error="risk gate rejected job",
-                    now=current,
-                )
+                await self.store.block(run.id, "risk gate rejected")
+                return await self.store.get(run.id)
 
         try:
             result = await handler(dict(run.payload))
-        except Exception as exc:
-            return await self.store.fail(
+        except Exception as error:
+            await self.store.fail(
                 run.id,
-                owner=self.worker_id,
-                spec=spec,
-                error=f"{type(exc).__name__}: {exc}",
-                now=current,
+                error=f"{type(error).__name__}: {error}",
+                base_backoff_seconds=spec.base_backoff_seconds,
             )
+            return await self.store.get(run.id)
 
-        return await self.store.succeed(
-            run.id,
-            owner=self.worker_id,
-            result=result or {},
-            now=current,
-        )
+        await self.store.succeed(run.id, result or {})
+        return await self.store.get(run.id)
 
-    async def heartbeat(self, run_id: str, *, now: datetime | None = None) -> JobRun:
-        run = await self.store.get(run_id)
-        if run is None:
-            raise KeyError(f"unknown job run: {run_id}")
-        spec = self.specs.get(run.job_name)
-        if spec is None:
-            raise KeyError(f"unregistered job: {run.job_name}")
-        return await self.store.heartbeat(
-            run_id,
-            owner=self.worker_id,
-            lease_seconds=spec.lease_seconds,
-            now=now or datetime.now(UTC),
-        )
+    async def heartbeat(self, run_id: str) -> None:
+        await self.store.heartbeat(run_id, self.worker_id)
 
-    @staticmethod
-    def next_retry_at(spec: JobSpec, attempts: int, now: datetime) -> datetime:
-        exponent = max(attempts - 1, 0)
-        return now + timedelta(seconds=spec.base_backoff_seconds * (2**exponent))
+    async def recover_stale(self) -> int:
+        return await self.store.recover_stale(datetime.now(UTC))
+
+    async def run_forever(
+        self,
+        *,
+        poll_seconds: float = 0.25,
+        stop_when: Callable[[], bool] | None = None,
+    ) -> None:
+        while stop_when is None or not stop_when():
+            run = await self.run_once()
+            if run is None:
+                import asyncio
+
+                await asyncio.sleep(poll_seconds)
+
+
+__all__ = [
+    "Handler",
+    "JobCapability",
+    "JobRun",
+    "JobSpec",
+    "JobState",
+    "ProtoBrain",
+    "RiskGate",
+    "SAFE_MODES",
+]
