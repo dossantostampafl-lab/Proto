@@ -14,6 +14,7 @@ type AutopilotConfig = {
   cooldown_seconds: number;
   quantity: number;
   max_spread_bps: number;
+  stop_loss_fraction: number;
 };
 type AutopilotStatus = {
   mode: string;
@@ -21,7 +22,7 @@ type AutopilotStatus = {
   paper_runtime_ready: boolean;
   live_market_ready: boolean;
   kill_switch: string;
-  config: AutopilotConfig;
+  config: AutopilotConfig | null;
   started_at?: string | null;
   last_cycle_at?: string | null;
   last_action_at?: string | null;
@@ -32,6 +33,12 @@ type AutopilotStatus = {
     realized_volatility?: number;
     spread_bps?: number;
     observed_at?: string | null;
+  } | null;
+  last_stop_loss?: {
+    triggered?: boolean;
+    threshold_price?: number;
+    reason?: string;
+    position_quantity?: number;
   } | null;
   last_result?: {
     accepted?: boolean;
@@ -50,6 +57,7 @@ type AutopilotStatus = {
     submissions: number;
     accepted: number;
     rejected: number;
+    stop_loss_exits?: number;
     errors: number;
   };
   financial_connectivity: boolean;
@@ -160,11 +168,23 @@ function mountPaperAutopilot() {
   maxSpread.value = String(DEFAULT_MAX_SPREAD_BPS);
   spreadLabel.append(maxSpread);
 
+  const stopLossLabel = document.createElement("label");
+  stopLossLabel.textContent = "STOP LOSS (%)";
+  const stopLoss = document.createElement("input");
+  stopLoss.type = "number";
+  stopLoss.min = "0.01";
+  stopLoss.max = "50";
+  stopLoss.step = "0.01";
+  stopLoss.required = true;
+  stopLoss.placeholder = "required";
+  stopLoss.autocomplete = "off";
+  stopLossLabel.append(stopLoss);
+
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "paperAutoToggle";
   toggle.textContent = "START PAPER AUTOPILOT";
-  controls.append(thresholdLabel, cooldownLabel, quantityLabel, spreadLabel, toggle);
+  controls.append(thresholdLabel, cooldownLabel, quantityLabel, spreadLabel, stopLossLabel, toggle);
 
   const telemetry = document.createElement("div");
   telemetry.className = "paperAutoTelemetry";
@@ -173,18 +193,18 @@ function mountPaperAutopilot() {
   const counters = document.createElement("span");
   signal.textContent = "signal —";
   lastAction.textContent = "last action —";
-  counters.textContent = "cycles 0 · fills 0 · rejected 0";
+  counters.textContent = "cycles 0 · fills 0 · stops 0 · rejected 0";
   telemetry.append(signal, lastAction, counters);
 
   const status = document.createElement("div");
   status.className = "paperAutoStatus idle";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
-  status.textContent = "Paper autopilot is off.";
+  status.textContent = "Paper autopilot is off. Explicit stop-loss is required before activation.";
 
   const boundary = document.createElement("small");
   boundary.className = "paperAutoBoundary";
-  boundary.textContent = "Persistent server task · simulation only · no exchange account · no financial connectivity · no real-money execution";
+  boundary.textContent = "Persistent server task · simulation only · explicit stop-loss required · no exchange account · no financial connectivity · no real-money execution";
   section.append(head, controls, telemetry, status, boundary);
   host.prepend(section);
 
@@ -197,6 +217,7 @@ function mountPaperAutopilot() {
     cooldown.disabled = disabled;
     quantity.disabled = disabled;
     maxSpread.disabled = disabled;
+    stopLoss.disabled = disabled;
   };
 
   const configFromInputs = (): AutopilotConfig | null => {
@@ -204,11 +225,13 @@ function mountPaperAutopilot() {
     const cooldown_seconds = Number(cooldown.value);
     const quantityValue = Number(quantity.value);
     const max_spread_bps = Number(maxSpread.value);
+    const stopLossPercent = Number(stopLoss.value);
     if (
       !Number.isFinite(imbalance_trigger) || imbalance_trigger < 0.1 || imbalance_trigger > 0.95
       || !Number.isFinite(cooldown_seconds) || cooldown_seconds < 5 || cooldown_seconds > 300
       || !Number.isFinite(quantityValue) || quantityValue <= 0 || quantityValue > MAX_QUANTITY
       || !Number.isFinite(max_spread_bps) || max_spread_bps < 0.01 || max_spread_bps > 75
+      || !Number.isFinite(stopLossPercent) || stopLossPercent <= 0 || stopLossPercent > 50
     ) return null;
     return {
       symbol: selectedSymbol(),
@@ -216,6 +239,7 @@ function mountPaperAutopilot() {
       cooldown_seconds,
       quantity: quantityValue,
       max_spread_bps,
+      stop_loss_fraction: stopLossPercent / 100,
     };
   };
 
@@ -225,6 +249,7 @@ function mountPaperAutopilot() {
     cooldown.value = String(server.config.cooldown_seconds);
     quantity.value = String(server.config.quantity);
     maxSpread.value = String(server.config.max_spread_bps);
+    stopLoss.value = String(server.config.stop_loss_fraction * 100);
     hydratedFromServer = true;
   };
 
@@ -243,24 +268,25 @@ function mountPaperAutopilot() {
     hydrateInputs(server);
     const safe = server.financial_connectivity === false && server.real_money_execution === false;
     active = safe && server.running;
-    const decisionReady = active && server.paper_runtime_ready && server.live_market_ready;
+    const decisionReady = active && server.paper_runtime_ready && server.live_market_ready && server.config !== null;
     stateBadge.className = `paperAutoBadge ${decisionReady ? "on" : "off"}`;
     stateBadge.textContent = decisionReady ? "SERVER ACTIVE" : active ? "SERVER PAUSED" : "OFF";
     toggle.textContent = active ? "STOP PAPER AUTOPILOT" : "START PAPER AUTOPILOT";
     toggle.disabled = busy || !safe;
     setInputsDisabled(active || busy);
 
+    const configSymbol = server.config?.symbol ?? selectedSymbol();
     const s = server.last_signal;
     signal.textContent = s && finite(s.imbalance) && finite(s.spread_bps)
-      ? `${s.symbol ?? server.config.symbol} imbalance ${s.imbalance.toFixed(3)} · spread ${s.spread_bps.toFixed(2)} bp`
+      ? `${s.symbol ?? configSymbol} imbalance ${s.imbalance.toFixed(3)} · spread ${s.spread_bps.toFixed(2)} bp`
       : "signal —";
     const fill = server.last_result?.fill;
     lastAction.textContent = fill
-      ? `${fill.side ?? "—"} ${fill.asset ?? server.config.symbol} ${fill.filled_quantity ?? "—"} @ ${fill.fill_price ?? "—"}`
+      ? `${fill.side ?? "—"} ${fill.asset ?? configSymbol} ${fill.filled_quantity ?? "—"} @ ${fill.fill_price ?? "—"}`
       : server.last_action_at
         ? `last action ${server.last_action_at.slice(11, 19)} UTC`
         : "last action —";
-    counters.textContent = `cycles ${server.counters.cycles} · fills ${server.counters.accepted} · rejected ${server.counters.rejected}`;
+    counters.textContent = `cycles ${server.counters.cycles} · fills ${server.counters.accepted} · stops ${server.counters.stop_loss_exits ?? 0} · rejected ${server.counters.rejected}`;
 
     const reason = server.last_reason.replaceAll("_", " ");
     if (active && !server.paper_runtime_ready) {
@@ -268,10 +294,10 @@ function mountPaperAutopilot() {
       status.textContent = `SERVER AUTOPILOT PAUSED · PAPER_TRADING runtime is not ready · ${reason}`;
     } else if (active && !server.live_market_ready) {
       status.className = "paperAutoStatus locked";
-      status.textContent = `SERVER AUTOPILOT PAUSED · ${server.config.symbol} public live feed is stale or unavailable · no simulated order will be submitted.`;
+      status.textContent = `SERVER AUTOPILOT PAUSED · ${configSymbol} public live feed is stale or unavailable · no simulated order will be submitted.`;
     } else if (decisionReady) {
-      status.className = server.last_reason.startsWith("RISK_REJECTED") ? "paperAutoStatus rejected" : server.last_reason === "SIMULATED_FILL" ? "paperAutoStatus accepted" : "paperAutoStatus watching";
-      status.textContent = `SERVER AUTOPILOT ACTIVE · ${server.config.symbol} · ${reason}`;
+      status.className = server.last_reason.startsWith("RISK_REJECTED") ? "paperAutoStatus rejected" : server.last_reason.includes("SIMULATED_FILL") ? "paperAutoStatus accepted" : "paperAutoStatus watching";
+      status.textContent = `SERVER AUTOPILOT ACTIVE · ${configSymbol} · stop ${((server.config?.stop_loss_fraction ?? 0) * 100).toFixed(2)}% · ${reason}`;
     } else {
       status.className = "paperAutoStatus idle";
       status.textContent = `Paper autopilot off · ${reason}`;
@@ -313,7 +339,7 @@ function mountPaperAutopilot() {
       busy = false;
       setInputsDisabled(false);
       status.className = "paperAutoStatus error";
-      status.textContent = "Autopilot configuration is outside the allowed trigger, cooldown, quantity or spread bounds.";
+      status.textContent = "Enter an explicit stop-loss and keep all autopilot controls inside their allowed bounds.";
       toggle.disabled = false;
       return;
     }
