@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .runtime import JobCapability, JobSpec
 
-CATALOG_VERSION = "2026-09-02.1"
+CATALOG_VERSION = "2026-09-02.2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +32,28 @@ def build_job_catalog() -> dict[str, JobContract]:
                 "no financial side effects",
             ),
             owner_domain="market-data",
+        ),
+        JobContract(
+            spec=JobSpec(
+                "opportunity-scan",
+                JobCapability.QUANT_RESEARCH,
+                allowed_modes=frozenset(
+                    {"SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY", "LIVE_MONITORING"}
+                ),
+            ),
+            input_contract=(
+                "fact-only multiasset observations plus explicit regime/ranking policies"
+            ),
+            output_contract=(
+                "classified market states and ranked opportunities with incomplete evidence omitted"
+            ),
+            completion_criteria=(
+                "all thresholds and weights supplied explicitly",
+                "incomplete quantitative evidence omitted rather than synthesized",
+                "instrument and provenance fields preserved",
+                "no financial side effects",
+            ),
+            owner_domain="analytics",
         ),
         JobContract(
             spec=JobSpec(
