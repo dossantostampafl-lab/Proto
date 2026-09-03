@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from services.events.bus import EventBus
+from services.events.runtime import EventRuntime
 
 from .runtime import ProtoBrain
 
@@ -33,15 +34,19 @@ class AutonomousEventDispatcher:
     def __init__(
         self,
         *,
-        bus: EventBus,
         brain: ProtoBrain,
         stream: str,
         rules: tuple[EventTriggerRule, ...],
+        bus: EventBus | None = None,
+        runtime: EventRuntime | None = None,
         default_event_type: AutonomousEventType | None = None,
     ) -> None:
         if not stream.strip():
             raise ValueError("event stream must be non-empty")
-        self.bus = bus
+        if (bus is None) == (runtime is None):
+            raise ValueError("configure exactly one of bus or runtime")
+        self._bus = bus
+        self._runtime = runtime
         self.brain = brain
         self.stream = stream
         self.rules = {rule.event_type.value: rule for rule in rules}
@@ -53,6 +58,14 @@ class AutonomousEventDispatcher:
         self._ignored = 0
         self._last_error: str | None = None
 
+    def _resolved_bus(self) -> EventBus | None:
+        if self._bus is not None:
+            return self._bus
+        assert self._runtime is not None
+        if not self._runtime.snapshot().ready:
+            return None
+        return self._runtime.bus
+
     def status(self) -> dict[str, object]:
         return {
             "stream": self.stream,
@@ -61,6 +74,7 @@ class AutonomousEventDispatcher:
             "default_event_type": (
                 self.default_event_type.value if self.default_event_type is not None else None
             ),
+            "runtime_ready": self._resolved_bus() is not None,
             "processed": self._processed,
             "ignored": self._ignored,
             "last_error": self._last_error,
@@ -69,8 +83,12 @@ class AutonomousEventDispatcher:
         }
 
     async def drain(self) -> int:
+        bus = self._resolved_bus()
+        if bus is None:
+            return 0
+
         dispatched = 0
-        async for message in self.bus.subscribe(self.stream, after=self._cursor):
+        async for message in bus.subscribe(self.stream, after=self._cursor):
             self._cursor = message.message_id
             event_type = message.payload.get("event_type")
             if event_type is None and self.default_event_type is not None:
