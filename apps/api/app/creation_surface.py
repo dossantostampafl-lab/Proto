@@ -4,9 +4,9 @@ import hmac
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 
-from services.orchestration.creation_queries import list_creation_mission_runs
+from services.orchestration.creation_queries import list_creation_mission_runs, recent_creation_runs
 from services.orchestration.missions import Mission, MissionGateway, MissionOrigin, MissionReceipt
 
 from .orchestration_state import proto_brain
@@ -101,6 +101,32 @@ async def submit_creation_mission(
         )
     gateway = _gateway()
     return await gateway.accept(mission, identity_verified=True)
+
+
+@router.get("/activity")
+async def creation_activity(
+    limit: int = Query(default=50, ge=1, le=200),
+    x_proto_creation_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _verify_identity(x_proto_creation_token)
+    brain = _gateway().brain
+    runs = await recent_creation_runs(brain.store, limit)
+    jobs = [_job_payload(run) for run in runs]
+    running_states = {"QUEUED", "RUNNING", "RETRY_WAIT"}
+    failed_states = {"BLOCKED", "DEAD_LETTER"}
+    running_jobs = sum(1 for job in jobs if str(job["state"]) in running_states)
+    failed_jobs = sum(1 for job in jobs if str(job["state"]) in failed_states)
+    latest_result = next((job["result"] for job in jobs if job["result"] is not None), None)
+    latest_error = next((str(job["last_error"]) for job in jobs if job["last_error"]), None)
+    return {
+        "running_jobs": running_jobs,
+        "failed_jobs": failed_jobs,
+        "latest_result": latest_result,
+        "latest_error": latest_error,
+        "jobs": jobs,
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
 
 
 @router.get("/missions/{mission_id}")
