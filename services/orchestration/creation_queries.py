@@ -15,7 +15,9 @@ async def list_creation_mission_runs(store: Any, mission_id: str) -> list[Any]:
 
     session_factory = getattr(store, "session_factory", None)
     if session_factory is None:
-        raise RuntimeError("PROTO orchestration store does not support Creation mission queries")
+        raise RuntimeError(
+            "PROTO orchestration store does not support Creation mission queries"
+        )
 
     prefix = f"mission:{mission_id}:"
     async with session_factory() as session:
@@ -38,7 +40,9 @@ async def recent_creation_runs(store: Any, limit: int = 50) -> list[Any]:
 
     session_factory = getattr(store, "session_factory", None)
     if session_factory is None:
-        raise RuntimeError("PROTO orchestration store does not support Creation activity queries")
+        raise RuntimeError(
+            "PROTO orchestration store does not support Creation activity queries"
+        )
 
     async with session_factory() as session:
         records = (
