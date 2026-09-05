@@ -6,7 +6,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
-from services.orchestration.creation_queries import list_creation_mission_runs, recent_creation_runs
+from services.orchestration.creation_queries import (
+    list_creation_mission_runs,
+    recent_creation_runs,
+)
 from services.orchestration.missions import Mission, MissionGateway, MissionOrigin, MissionReceipt
 
 from .orchestration_state import proto_brain
@@ -116,8 +119,14 @@ async def creation_activity(
     failed_states = {"BLOCKED", "DEAD_LETTER"}
     running_jobs = sum(1 for job in jobs if str(job["state"]) in running_states)
     failed_jobs = sum(1 for job in jobs if str(job["state"]) in failed_states)
-    latest_result = next((job["result"] for job in jobs if job["result"] is not None), None)
-    latest_error = next((str(job["last_error"]) for job in jobs if job["last_error"]), None)
+    latest_result = next(
+        (job["result"] for job in jobs if job["result"] is not None),
+        None,
+    )
+    latest_error = next(
+        (str(job["last_error"]) for job in jobs if job["last_error"]),
+        None,
+    )
     return {
         "running_jobs": running_jobs,
         "failed_jobs": failed_jobs,
@@ -138,7 +147,10 @@ async def creation_mission_status(
     brain = _gateway().brain
     runs = await list_creation_mission_runs(brain.store, str(mission_id))
     if not runs:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Creation mission not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creation mission not found",
+        )
     jobs = [_job_payload(run) for run in runs]
     return {
         "mission_id": str(mission_id),
@@ -158,5 +170,8 @@ async def creation_job_status(
     brain = _gateway().brain
     run = await brain.store.get(run_id)
     if run is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Creation job run not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creation job run not found",
+        )
     return _job_payload(run)
