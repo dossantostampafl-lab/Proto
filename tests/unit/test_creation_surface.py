@@ -1,4 +1,5 @@
-from uuid import uuid4
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -59,3 +60,71 @@ async def test_creation_surface_rejects_non_creation_origin_before_enqueue(monke
             x_proto_creation_token="expected",
         )
     assert exc_info.value.status_code == 422
+
+
+class FakeCreationStore:
+    def __init__(self, runs):
+        self.runs = runs
+
+    async def list_for_mission(self, mission_id: str):
+        return self.runs
+
+    async def get(self, run_id: str):
+        return next((run for run in self.runs if run.id == run_id), None)
+
+
+def fake_run(run_id: str, state: str, result=None, last_error=None):
+    return SimpleNamespace(
+        id=run_id,
+        job_name="opportunity-scan",
+        mode="LIVE_MONITORING",
+        state=SimpleNamespace(value=state),
+        attempts=1,
+        max_attempts=3,
+        result=result,
+        last_error=last_error,
+        created_at=SimpleNamespace(isoformat=lambda: "2026-09-04T00:00:00+00:00"),
+        updated_at=SimpleNamespace(isoformat=lambda: "2026-09-04T00:00:01+00:00"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_creation_mission_status_requires_identity_and_aggregates_jobs(monkeypatch) -> None:
+    mission_id = UUID("550e8400-e29b-41d4-a716-446655440000")
+    runs = [fake_run("run-1", "RUNNING"), fake_run("run-2", "SUCCEEDED", {"count": 2})]
+    monkeypatch.setattr(creation_surface, "settings", Settings(creation_bridge_shared_secret="expected"))
+    monkeypatch.setattr(creation_surface, "proto_brain", SimpleNamespace(store=FakeCreationStore(runs)))
+
+    payload = await creation_surface.creation_mission_status(
+        mission_id, x_proto_creation_token="expected"
+    )
+
+    assert payload["mission_id"] == str(mission_id)
+    assert payload["state"] == "RUNNING"
+    assert [job["id"] for job in payload["jobs"]] == ["run-1", "run-2"]
+    assert payload["financial_connectivity"] is False
+    assert payload["real_money_execution"] is False
+
+
+@pytest.mark.asyncio
+async def test_creation_job_status_returns_result_and_never_financial_execution(monkeypatch) -> None:
+    run = fake_run("run-1", "SUCCEEDED", {"opportunity_count": 3})
+    monkeypatch.setattr(creation_surface, "settings", Settings(creation_bridge_shared_secret="expected"))
+    monkeypatch.setattr(creation_surface, "proto_brain", SimpleNamespace(store=FakeCreationStore([run])))
+
+    payload = await creation_surface.creation_job_status("run-1", x_proto_creation_token="expected")
+
+    assert payload["state"] == "SUCCEEDED"
+    assert payload["result"] == {"opportunity_count": 3}
+    assert payload["financial_connectivity"] is False
+    assert payload["real_money_execution"] is False
+
+
+@pytest.mark.asyncio
+async def test_creation_job_status_returns_404_for_unknown_job(monkeypatch) -> None:
+    monkeypatch.setattr(creation_surface, "settings", Settings(creation_bridge_shared_secret="expected"))
+    monkeypatch.setattr(creation_surface, "proto_brain", SimpleNamespace(store=FakeCreationStore([])))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creation_surface.creation_job_status("missing", x_proto_creation_token="expected")
+    assert exc_info.value.status_code == 404
