@@ -69,6 +69,9 @@ class FakeCreationStore:
     async def list_for_mission(self, mission_id: str):
         return self.runs
 
+    async def recent_creation_runs(self, limit: int):
+        return self.runs[:limit]
+
     async def get(self, run_id: str):
         return next((run for run in self.runs if run.id == run_id), None)
 
@@ -76,6 +79,7 @@ class FakeCreationStore:
 def fake_run(run_id: str, state: str, result=None, last_error=None):
     return SimpleNamespace(
         id=run_id,
+        idempotency_key=f"mission:550e8400-e29b-41d4-a716-446655440000:opportunity-scan",
         job_name="opportunity-scan",
         mode="LIVE_MONITORING",
         state=SimpleNamespace(value=state),
@@ -128,3 +132,24 @@ async def test_creation_job_status_returns_404_for_unknown_job(monkeypatch) -> N
     with pytest.raises(HTTPException) as exc_info:
         await creation_surface.creation_job_status("missing", x_proto_creation_token="expected")
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_creation_activity_exposes_recent_bridge_jobs_and_summary(monkeypatch) -> None:
+    runs = [
+        fake_run("run-1", "RUNNING"),
+        fake_run("run-2", "SUCCEEDED", {"opportunity_count": 3}),
+        fake_run("run-3", "DEAD_LETTER", None, "source unavailable"),
+    ]
+    monkeypatch.setattr(creation_surface, "settings", Settings(creation_bridge_shared_secret="expected"))
+    monkeypatch.setattr(creation_surface, "proto_brain", SimpleNamespace(store=FakeCreationStore(runs)))
+
+    payload = await creation_surface.creation_activity(limit=10, x_proto_creation_token="expected")
+
+    assert payload["running_jobs"] == 1
+    assert payload["failed_jobs"] == 1
+    assert payload["latest_result"] == {"opportunity_count": 3}
+    assert payload["latest_error"] == "source unavailable"
+    assert len(payload["jobs"]) == 3
+    assert payload["financial_connectivity"] is False
+    assert payload["real_money_execution"] is False
