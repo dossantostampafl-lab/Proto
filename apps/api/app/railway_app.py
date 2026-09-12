@@ -26,8 +26,8 @@ from .universe_surface import router as universe_router
 # Railway composes the public live surface at the application boundary. The
 # research router deliberately excludes /live so the live router and its lifespan
 # are registered exactly once in this process. Public reads remain available, but
-# every state-changing operator route is authenticated at this boundary. The
-# Creation bridge keeps its own independent service-to-service authentication.
+# every state-changing operator route is authenticated at the production boundary.
+# The Creation bridge keeps its own independent service-to-service authentication.
 app.include_router(live_router)
 app.include_router(event_router)
 app.include_router(paper_control_router)
@@ -109,9 +109,16 @@ _OPERATIONAL_EVENTS = {
 
 @app.middleware("http")
 async def operator_authentication_policy(request: Request, call_next) -> Response:
-    """Fail closed for public state changes while preserving Creation bridge auth."""
-    if request.method in _MUTATING_METHODS and not request.url.path.startswith(_CREATION_PREFIX):
-        expected = settings.operator_api_token
+    """Fail closed for production state changes while preserving local testability."""
+    expected = settings.operator_api_token
+    authentication_required = (
+        settings.app_env.strip().lower() == "production" or expected is not None
+    )
+    mutating_operator_route = (
+        request.method in _MUTATING_METHODS
+        and not request.url.path.startswith(_CREATION_PREFIX)
+    )
+    if authentication_required and mutating_operator_route:
         if expected is None:
             return JSONResponse(
                 status_code=503,
