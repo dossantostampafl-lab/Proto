@@ -5,6 +5,7 @@ from pathlib import Path
 from apps.api.app.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
+_TEST_OPERATOR_TOKEN = "o" * 32
 
 
 def test_railway_enables_orchestration_without_general_simulation_persistence() -> None:
@@ -34,6 +35,7 @@ def test_effective_orchestration_persistence_honors_explicit_switch() -> None:
 def test_production_durable_postgres_activates_orchestration_without_simulation() -> None:
     settings = Settings(
         app_env="production",
+        operator_api_token=_TEST_OPERATOR_TOKEN,
         orchestration_persistence_enabled=False,
         live_persistence_enabled=False,
         database_url="postgresql+asyncpg://proto:proto@db/proto",
@@ -57,6 +59,7 @@ def test_effective_orchestration_persistence_reuses_durable_live_postgres() -> N
 def test_effective_orchestration_persistence_never_derives_from_ephemeral_sqlite() -> None:
     settings = Settings(
         app_env="production",
+        operator_api_token=_TEST_OPERATOR_TOKEN,
         orchestration_persistence_enabled=False,
         live_persistence_enabled=True,
         database_url="sqlite+aiosqlite:///:memory:",

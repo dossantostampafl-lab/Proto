@@ -22,8 +22,12 @@ jobs:
       RAILWAY_PROJECT_ID: 55de030a-f957-4c7a-9441-de2a6c7212e7
       RAILWAY_SERVICE_ID: b67794ef-eadf-43cb-bd8a-da5397a7d9d5
       RAILWAY_ENVIRONMENT_ID: 5f30b2e7-d7e5-4027-b51c-c1993df1c650
+      RAILWAY_CLI_VERSION: 5.30.1
+      RAILWAY_CLI_AMD64_SHA256: 295d9657801a234bb197ba15ab3ea2ef76bb073d30f1703ca080b0f46ad20449
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Detect authenticated fallback availability
         id: auth
@@ -43,31 +47,41 @@ jobs:
             echo "No Railway token is configured; leaving deployment to the connected Railway GitHub service."
           fi
 
+      - name: Install checksum-verified Railway CLI
+        if: steps.auth.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="railway-v${RAILWAY_CLI_VERSION}-amd64.deb"
+          url="https://github.com/railwayapp/cli/releases/download/v${RAILWAY_CLI_VERSION}/${package}"
+          curl --fail --show-error --silent --location "$url" --output "/tmp/${package}"
+          echo "${RAILWAY_CLI_AMD64_SHA256}  /tmp/${package}" | sha256sum --check --strict
+          sudo dpkg --install "/tmp/${package}"
+          railway --version
+
       - name: Deploy exact main checkout to Railway with project token
         if: steps.auth.outputs.auth_kind == 'project'
-        uses: docker://ghcr.io/railwayapp/cli:latest
-        with:
-          args: >-
-            up . --ci
-            --project ${{ env.RAILWAY_PROJECT_ID }}
-            --environment ${{ env.RAILWAY_ENVIRONMENT_ID }}
-            --service ${{ env.RAILWAY_SERVICE_ID }}
-            --message "GitHub main ${{ github.sha }}"
+        shell: bash
         env:
           RAILWAY_TOKEN: ${{ env.RAILWAY_TOKEN }}
+        run: >-
+          railway up . --ci
+          --project "${RAILWAY_PROJECT_ID}"
+          --environment "${RAILWAY_ENVIRONMENT_ID}"
+          --service "${RAILWAY_SERVICE_ID}"
+          --message "GitHub main ${GITHUB_SHA}"
 
       - name: Deploy exact main checkout to Railway with workspace token
         if: steps.auth.outputs.auth_kind == 'workspace'
-        uses: docker://ghcr.io/railwayapp/cli:latest
-        with:
-          args: >-
-            up . --ci
-            --project ${{ env.RAILWAY_PROJECT_ID }}
-            --environment ${{ env.RAILWAY_ENVIRONMENT_ID }}
-            --service ${{ env.RAILWAY_SERVICE_ID }}
-            --message "GitHub main ${{ github.sha }}"
+        shell: bash
         env:
           RAILWAY_API_TOKEN: ${{ env.RAILWAY_API_TOKEN }}
+        run: >-
+          railway up . --ci
+          --project "${RAILWAY_PROJECT_ID}"
+          --environment "${RAILWAY_ENVIRONMENT_ID}"
+          --service "${RAILWAY_SERVICE_ID}"
+          --message "GitHub main ${GITHUB_SHA}"
 
       - name: Record fallback result
         shell: bash

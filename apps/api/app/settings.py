@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .safety_policy import SafetyPolicyError, validate_runtime_mode
@@ -11,6 +11,7 @@ _SYMBOL_RE = re.compile(r"^[A-Z0-9.-]{1,40}$")
 _ALLOWED_ALPACA_EQUITY_FEEDS = frozenset(
     {"iex", "sip", "delayed_sip", "otc", "boats", "overnight"}
 )
+_MIN_PRODUCTION_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
     brapi_market_data_token: str | None = None
     equity_market_data_max_age_seconds: float | None = Field(default=None, gt=0, le=3_600)
     creation_bridge_shared_secret: str | None = None
+    operator_api_token: str | None = None
     http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
     minimum_net_edge: float = Field(default=0.01, ge=0.0, le=1.0, allow_inf_nan=False)
     minimum_confidence: float = Field(default=0.55, ge=0.0, le=1.0, allow_inf_nan=False)
@@ -111,6 +113,7 @@ class Settings(BaseSettings):
         "alpaca_market_data_secret_key",
         "brapi_market_data_token",
         "creation_bridge_shared_secret",
+        "operator_api_token",
     )
     @classmethod
     def normalize_optional_secret(cls, value: str | None) -> str | None:
@@ -118,6 +121,24 @@ class Settings(BaseSettings):
             return None
         normalized = value.strip()
         return normalized or None
+
+    @model_validator(mode="after")
+    def enforce_production_authentication_strength(self) -> Settings:
+        if self.app_env.strip().lower() != "production":
+            return self
+        if (
+            self.operator_api_token is None
+            or len(self.operator_api_token) < _MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            raise ValueError("OPERATOR_API_TOKEN must be at least 32 characters in production")
+        if (
+            self.creation_bridge_shared_secret is not None
+            and len(self.creation_bridge_shared_secret) < _MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            raise ValueError(
+                "CREATION_BRIDGE_SHARED_SECRET must be at least 32 characters in production"
+            )
+        return self
 
     @staticmethod
     def _parse_symbol_csv(value: str) -> tuple[str, ...]:
