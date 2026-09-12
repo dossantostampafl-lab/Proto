@@ -9,6 +9,8 @@ class LiveBase(DeclarativeBase):
 
 
 def build_live_engine(database_url: str) -> AsyncEngine:
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return create_async_engine(database_url, pool_pre_ping=True)
 
 
