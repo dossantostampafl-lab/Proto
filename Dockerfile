@@ -32,7 +32,10 @@ COPY apps ./apps
 COPY services ./services
 COPY --from=web-build /web/dist ./apps/web/dist
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && useradd --create-home --uid 10001 proto
+
+USER proto
 
 EXPOSE 8000
 
