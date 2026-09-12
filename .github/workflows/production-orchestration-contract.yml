@@ -10,7 +10,7 @@ permissions:
 
 env:
   PROTO_PUBLIC_ORIGIN: https://proto-production-5b0d.up.railway.app
-  EXPECTED_PROTO_RELEASE: proto-brain-control-plane-v2
+  EXPECTED_PROTO_RELEASE: proto-brain-control-plane-v3
 
 jobs:
   railway-orchestration-contract:
