@@ -43,4 +43,8 @@ def test_creation_bridge_keeps_independent_authentication(monkeypatch) -> None:
     monkeypatch.setattr(settings, "operator_api_token", "o" * 32, raising=False)
     with TestClient(app) as client:
         response = client.post("/creation/missions", json={})
-    assert response.status_code != 401 or response.json().get("detail") != "Operator identity was not verified"
+    operator_rejection = (
+        response.status_code == 401
+        and response.json().get("detail") == "Operator identity was not verified"
+    )
+    assert not operator_rejection
