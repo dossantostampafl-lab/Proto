@@ -140,6 +140,17 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def enforce_production_persistence_boundary(self) -> Settings:
+        production = self.app_env.strip().lower() == "production"
+        live_monitoring = self.system_mode == "LIVE_MONITORING"
+        if production and live_monitoring and self.persistence_enabled:
+            raise ValueError(
+                "PERSISTENCE_ENABLED must be false in production LIVE_MONITORING; "
+                "use ORCHESTRATION_PERSISTENCE_ENABLED for durable orchestration state"
+            )
+        return self
+
     @staticmethod
     def _parse_symbol_csv(value: str) -> tuple[str, ...]:
         symbols = {item.strip().upper() for item in value.split(",") if item.strip()}
