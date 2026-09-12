@@ -126,7 +126,7 @@ assert.match(dockerfile, /VITE_API_BASE_URL=""/, "single-origin deploy must rema
 assert.match(dockerfile, /SYNTHETIC_RESEARCH_ENABLED=true/, "Railway image must explicitly enable isolated synthetic research");
 assert.match(dockerfile, /LIVE_PERSISTENCE_ENABLED=true/, "Railway image must preserve public live-history persistence");
 assert.doesNotMatch(dockerfile, /\n\s*PERSISTENCE_ENABLED=true/, "live deployment must not implicitly enable general simulation persistence");
-assert.match(dockerfile, /sha256sum src\/approved-terminal\.tsx/, "web image must bind a digest to the exact approved UI source");
+assert.match(dockerfile, /sha256sum src\/operator-auth\.ts src\/approved-terminal\.tsx/, "web image must bind its digest to operator auth and the approved UI source");
 assert.match(dockerfile, /proto-ui-source\.sha256/, "web image must carry the approved UI digest into dist");
 assert.match(pyproject, /"aiosqlite>=0\.21,<1"/, "runtime dependencies must include async sqlite driver used by default live persistence");
 assert.doesNotMatch(dockerfile, /proto-production-[^\s]+\.up\.railway\.app/, "bundle must not hardcode Railway hostname");
