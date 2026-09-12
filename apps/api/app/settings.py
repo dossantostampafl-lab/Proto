@@ -123,10 +123,13 @@ class Settings(BaseSettings):
         return normalized or None
 
     @model_validator(mode="after")
-    def enforce_production_authentication_strength(self) -> "Settings":
+    def enforce_production_authentication_strength(self) -> Settings:
         if self.app_env.strip().lower() != "production":
             return self
-        if self.operator_api_token is None or len(self.operator_api_token) < _MIN_PRODUCTION_SECRET_LENGTH:
+        if (
+            self.operator_api_token is None
+            or len(self.operator_api_token) < _MIN_PRODUCTION_SECRET_LENGTH
+        ):
             raise ValueError("OPERATOR_API_TOKEN must be at least 32 characters in production")
         if (
             self.creation_bridge_shared_secret is not None
