@@ -13,6 +13,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://prediction:prediction@postgres:5432/prediction_quant
       REDIS_URL: redis://redis:6379/0
       PERSISTENCE_ENABLED: "true"
+      CREATION_BRIDGE_SHARED_SECRET: ${CREATION_BRIDGE_SHARED_SECRET:-local-creation-proto-bridge-change-me-2026}
+      OPERATOR_API_TOKEN: ${OPERATOR_API_TOKEN:-}
       HTTP_RATE_LIMIT_PER_MINUTE: "600"
     ports:
       - "8000:8000"
