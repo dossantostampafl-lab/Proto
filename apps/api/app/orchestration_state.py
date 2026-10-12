@@ -149,7 +149,7 @@ proto_brain: ProtoBrain | None = None
 orchestration_supervisor: OrchestrationSupervisor | None = None
 
 if orchestration_store is not None:
-    proto_brain = ProtoBrain(store=orchestration_store, worker_id="railway-api-safe-worker")
+    proto_brain = ProtoBrain(store=orchestration_store, worker_id="proto-api-safe-worker")
     proto_brain.register(JOB_CATALOG["market-data-health"].spec, _market_data_health_job)
     proto_brain.register(JOB_CATALOG["opportunity-scan"].spec, _opportunity_scan_job)
     proto_brain.register(JOB_CATALOG["shadow-decision"].spec, _shadow_decision_job)

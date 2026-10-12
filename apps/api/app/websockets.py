@@ -6,12 +6,11 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from .settings import settings
+
 _DEFAULT_ALLOWED_ORIGINS = frozenset(
-    {
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://proto-production-5b0d.up.railway.app",
-    }
+    {"http://localhost:5173", "http://127.0.0.1:5173"}
+    | ({settings.public_origin} if settings.public_origin else set())
 )
 
 

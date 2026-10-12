@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 
 from apps.api.app import paper_control as module
 from apps.api.app.app_state import reset_runtime_state, runtime
+from apps.api.app.main import app
 from apps.api.app.models import SystemMode
-from apps.api.app.railway_app import app
 
 client = TestClient(app)
 

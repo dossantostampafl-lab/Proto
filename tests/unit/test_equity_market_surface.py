@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import apps.api.app.equity_market_surface as equity_surface
-from apps.api.app.railway_app import app
+from apps.api.app.main import app
 from apps.api.app.settings import settings
 from services.market_data import MarketEvent, MarketEventKind, MarketEventProvenance
 from services.market_data.equity_readonly import (

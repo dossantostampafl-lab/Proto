@@ -1,52 +1,47 @@
+"""The single Proto API application: research, simulation, paper, live monitoring and dashboard.
+
+`live_app.py` remains a separate, import-isolated read-only monitor for public deployments.
+"""
+
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-
-from services.quant.core import ProbabilityEstimate, compute_edge, estimate_probability
+from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .app_state import (
-    persistence_engine,
-    persistent_journal,
-    portfolio,
-    replay_session,
-    reset_runtime_state,
-    runtime,
-    simulator,
-)
-from .models import (
-    KillSwitchState,
-    MarketSnapshot,
-    PortfolioMarkRequest,
-    RuntimeState,
-    SimulationRequest,
-    SimulationResult,
-    SystemMode,
-)
-from .observability import LatencyTimer, access_log
-from .persistence import database_ready, init_database
-from .reconciliation_service import reconciliation_status as build_reconciliation_status
-from .replay import (
-    ReplaySeekRequest,
-    ReplaySpeedRequest,
-    ReplayStartRequest,
-)
+from .app_state import persistence_engine
+from .core_routes import router as core_router
+from .creation_surface import router as creation_router
+from .equity_market_surface import router as equity_market_router
+from .event_state import record_operational_event
+from .event_surface import router as event_router
+from .live_routes import router as live_router
+from .live_websockets import router as live_websocket_router
+from .observability import access_log
+from .orchestration_surface import router as orchestration_router
+from .paper_autonomy_bootstrap import router as paper_autonomy_router
+from .paper_autopilot import router as paper_autopilot_router
+from .paper_control import router as paper_control_router
+from .persistence import init_database
 from .research import metrics
 from .research import router as research_router
-from .risk_state import risk_snapshot
 from .settings import settings
-from .simulation_policy import authoritative_simulation_request
-from .websockets import hub
+from .shadow_control import router as shadow_control_router
+from .universe_surface import router as universe_router
 
 logger = logging.getLogger("proto.api")
-
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -55,7 +50,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
     if persistence_engine is not None:
         await persistence_engine.dispose()
-
 
 app = FastAPI(
     title="Prediction Market Quant Engine",
@@ -67,10 +61,27 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-Request-ID"],
+    allow_headers=["Content-Type", "X-Request-ID", "X-Proto-Operator-Token"],
 )
-app.include_router(research_router)
 
+# The research router deliberately excludes /live so the live router and its lifespan
+# are registered exactly once in this process.
+for router in (
+    research_router,
+    core_router,
+    live_router,
+    live_websocket_router,
+    event_router,
+    paper_control_router,
+    paper_autopilot_router,
+    paper_autonomy_router,
+    shadow_control_router,
+    orchestration_router,
+    universe_router,
+    equity_market_router,
+    creation_router,
+):
+    app.include_router(router)
 
 @app.middleware("http")
 async def observe_request(request: Request, call_next):
@@ -80,11 +91,7 @@ async def observe_request(request: Request, call_next):
         response = await call_next(request)
     except Exception:
         latency_ms = (perf_counter() - started) * 1_000
-        metrics.record_http(
-            path=request.url.path,
-            status_code=500,
-            latency_ms=latency_ms,
-        )
+        metrics.record_http(path=request.url.path, status_code=500, latency_ms=latency_ms)
         logger.exception(
             access_log(
                 request_id=request_id,
@@ -114,496 +121,164 @@ async def observe_request(request: Request, call_next):
     )
     return response
 
+_DASHBOARD_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
+_UI_SOURCE_DIGEST_FILE = _DASHBOARD_DIR / "proto-ui-source.sha256"
+_ORCHESTRATION_SOURCE_FILE = Path(__file__).with_name("orchestration_surface.py")
 
-@app.get("/health")
-def health() -> dict[str, object]:
-    return {
-        "status": "ok",
-        "mode": runtime.mode,
-        "version": __version__,
-        "persistence_enabled": settings.persistence_enabled,
-    }
+_DASHBOARD_RELEASE = "proto-brain-control-plane-v3"
+_DASHBOARD_UI_RELEASE = "operator-terminal-v4"
+_DASHBOARD_UI_SOURCE_SHA = (
+    _UI_SOURCE_DIGEST_FILE.read_text(encoding="utf-8").strip()
+    if _UI_SOURCE_DIGEST_FILE.is_file()
+    else ""
+)
+_ORCHESTRATION_SOURCE_SHA = (
+    hashlib.sha256(_ORCHESTRATION_SOURCE_FILE.read_bytes()).hexdigest()
+    if _ORCHESTRATION_SOURCE_FILE.is_file()
+    else ""
+)
+_GIT_COMMIT_SHA = os.getenv("PROTO_GIT_COMMIT_SHA", "").strip()
+_GIT_BRANCH = os.getenv("PROTO_GIT_BRANCH", "").strip()
+_DEPLOYMENT_ID = os.getenv("PROTO_DEPLOYMENT_ID", "").strip()
+_ENVIRONMENT_NAME = os.getenv("PROTO_ENVIRONMENT", "").strip()
 
-
-@app.get("/ready")
-async def ready(response: Response) -> dict[str, object]:
-    if persistence_engine is None:
-        return {
-            "status": "ready",
-            "database": "disabled",
-            "mode": runtime.mode,
-        }
-    ready_state = await database_ready(persistence_engine)
-    if not ready_state:
-        response.status_code = 503
-    return {
-        "status": "ready" if ready_state else "not_ready",
-        "database": "ready" if ready_state else "unavailable",
-        "mode": runtime.mode,
-    }
-
-
-@app.get("/metrics")
-def system_metrics() -> dict[str, object]:
-    return {
-        "mode": runtime.mode,
-        "real_money_execution": False,
-        **metrics.snapshot(),
-    }
-
-
-@app.get("/system/status", response_model=RuntimeState)
-def system_status() -> RuntimeState:
-    return runtime
-
-
-@app.post("/probability/estimate", response_model=ProbabilityEstimate)
-def probability(snapshot: MarketSnapshot) -> ProbabilityEstimate:
-    metrics.increment("probability_requests")
-    return estimate_probability(
-        market_probability=snapshot.market_probability,
-        volatility=snapshot.volatility,
-        imbalance=snapshot.imbalance,
+_CONTENT_SECURITY_POLICY = "; ".join(
+    (
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "font-src 'self' data:",
+        "connect-src 'self' ws: wss:",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
     )
+)
 
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_CREATION_PREFIX = "/creation/"
 
-@app.post("/edge/evaluate")
-def evaluate_edge_with_explicit_costs(
-    snapshot: MarketSnapshot,
-    fees: float | None = Query(default=None, ge=0.0),
-    slippage: float | None = Query(default=None, ge=0.0),
-    hedge_cost: float | None = Query(default=None, ge=0.0),
-    latency_penalty: float | None = Query(default=None, ge=0.0),
-) -> dict[str, object]:
-    metrics.increment("edge_requests")
-    provided = {
-        "fees": fees,
-        "slippage": slippage,
-        "hedge_cost": hedge_cost,
-        "latency_penalty": latency_penalty,
-    }
-    unavailable = [name for name, value in provided.items() if value is None]
-    if unavailable:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "status": "COSTS_UNAVAILABLE",
-                "cost_policy": "EXPLICIT_EXECUTION_COSTS_REQUIRED",
-                "unavailable_costs": unavailable,
+_OPERATIONAL_EVENTS = {
+    "/simulation/start": "SIMULATION_STARTED",
+    "/simulation/stop": "SIMULATION_STOPPED",
+    "/simulation/reset": "SIMULATION_RESET",
+    "/v1/simulate": "SIMULATION_REQUEST_PROCESSED",
+    "/v1/portfolio/mark": "PORTFOLIO_MARK_UPDATED",
+    "/killswitch/trigger": "KILL_SWITCH_TRIGGERED",
+    "/killswitch/reset": "KILL_SWITCH_RESET",
+    "/replay/start": "REPLAY_STARTED",
+    "/replay/pause": "REPLAY_PAUSED",
+    "/replay/resume": "REPLAY_RESUMED",
+    "/replay/step": "REPLAY_STEPPED",
+    "/replay/restart": "REPLAY_RESTARTED",
+    "/replay/seek": "REPLAY_SEEKED",
+    "/replay/speed": "REPLAY_SPEED_UPDATED",
+    "/replay/reset": "REPLAY_RESET",
+    "/paper/start": "PAPER_TRADING_STARTED",
+    "/paper/stop": "PAPER_TRADING_STOPPED",
+    "/paper/automation/start": "PAPER_AUTOPILOT_STARTED",
+    "/paper/automation/stop": "PAPER_AUTOPILOT_STOPPED",
+    "/shadow/start": "SHADOW_MODE_STARTED",
+    "/shadow/stop": "SHADOW_MODE_STOPPED",
+    "/shadow/evaluate": "SHADOW_DECISION_EVALUATED",
+    "/creation/missions": "CREATION_MISSION_SUBMITTED",
+}
+
+@app.middleware("http")
+async def operator_authentication_policy(request: Request, call_next) -> Response:
+    """Fail closed for production state changes while preserving local testability.
+
+    The Creation bridge keeps its own independent service-to-service authentication.
+    """
+    expected = settings.operator_api_token
+    authentication_required = (
+        settings.app_env.strip().lower() == "production" or expected is not None
+    )
+    mutating_operator_route = (
+        request.method in _MUTATING_METHODS
+        and not request.url.path.startswith(_CREATION_PREFIX)
+    )
+    if authentication_required and mutating_operator_route:
+        if expected is None:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Operator authentication is not configured"},
+            )
+        supplied = request.headers.get("X-Proto-Operator-Token")
+        if supplied is None or not hmac.compare_digest(supplied, expected):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Operator identity was not verified"},
+            )
+    return await call_next(request)
+
+@app.middleware("http")
+async def operational_audit_policy(request: Request, call_next) -> Response:
+    """Record completed state-changing commands without inspecting private bodies."""
+    response = await call_next(request)
+    event_type = _OPERATIONAL_EVENTS.get(request.url.path) if request.method == "POST" else None
+    if event_type is not None:
+        await record_operational_event(
+            event_type=event_type,
+            source="proto-api",
+            payload={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "request_id": response.headers.get("X-Request-ID"),
+                "financial_connectivity": False,
+                "real_money_execution": False,
             },
         )
+    return response
 
-    estimate = probability(snapshot)
-    spread_cost = max(snapshot.ask - snapshot.bid, 0.0) / max(
-        snapshot.ask + snapshot.bid,
-        1e-9,
+@app.middleware("http")
+async def dashboard_http_policy(request: Request, call_next) -> Response:
+    """Apply cache, browser-security, release and deployment provenance policy."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith(".html"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    elif path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
+    response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     )
-    uncertainty_penalty = estimate.uncertainty * 0.02
-    result = compute_edge(
-        model_probability=estimate.probability,
-        market_probability=snapshot.market_probability,
-        fees=float(fees),
-        slippage=float(slippage),
-        spread_cost=spread_cost,
-        hedge_cost=float(hedge_cost),
-        uncertainty_penalty=uncertainty_penalty,
-        latency_penalty=float(latency_penalty),
-        minimum_edge=settings.minimum_net_edge,
-    )
+    response.headers["X-Proto-Release"] = _DASHBOARD_RELEASE
+    response.headers["X-Proto-UI-Release"] = _DASHBOARD_UI_RELEASE
+    if _DASHBOARD_UI_SOURCE_SHA:
+        response.headers["X-Proto-UI-Source-SHA256"] = _DASHBOARD_UI_SOURCE_SHA
+    if _ORCHESTRATION_SOURCE_SHA:
+        response.headers["X-Proto-Orchestration-Source-SHA256"] = _ORCHESTRATION_SOURCE_SHA
+    if _GIT_COMMIT_SHA:
+        response.headers["X-Proto-Git-Commit-SHA"] = _GIT_COMMIT_SHA
+    if _DEPLOYMENT_ID:
+        response.headers["X-Proto-Deployment-ID"] = _DEPLOYMENT_ID
+    return response
+
+@app.get("/deployment/info", tags=["system"])
+def deployment_info() -> dict[str, object]:
+    """Expose non-secret build provenance for operator and production verification."""
     return {
-        **result.model_dump(),
-        "cost_policy": "EXPLICIT_EXECUTION_COSTS",
-        "costs_complete": True,
-        "known_costs": {
-            "fees": fees,
-            "slippage": slippage,
-            "spread_cost": spread_cost,
-            "hedge_cost": hedge_cost,
-            "latency_penalty": latency_penalty,
-            "uncertainty_penalty": uncertainty_penalty,
-        },
+        "release": _DASHBOARD_RELEASE,
+        "ui_release": _DASHBOARD_UI_RELEASE,
+        "ui_source_sha256": _DASHBOARD_UI_SOURCE_SHA or None,
+        "orchestration_source_sha256": _ORCHESTRATION_SOURCE_SHA or None,
+        "git_commit_sha": _GIT_COMMIT_SHA or None,
+        "git_branch": _GIT_BRANCH or None,
+        "deployment_id": _DEPLOYMENT_ID or None,
+        "environment": _ENVIRONMENT_NAME or None,
+        "financial_connectivity": False,
+        "real_money_execution": False,
     }
 
-
-@app.get("/risk")
-def risk() -> dict[str, object]:
-    return risk_snapshot()
-
-
-@app.post("/v1/simulate", response_model=SimulationResult)
-async def simulate(request: SimulationRequest) -> SimulationResult:
-    metrics.increment("simulation_requests")
-    if not runtime.running or runtime.kill_switch != KillSwitchState.ARMED:
-        metrics.increment("simulation_rejected")
-        return SimulationResult(accepted=False, reason="simulation halted")
-
-    effective_request = authoritative_simulation_request(
-        request,
-        portfolio.snapshot(),
-        max_order_notional=settings.simulation_max_order_notional,
-        max_position_notional=settings.simulation_max_position_notional,
-        max_slippage_bps=settings.simulation_max_slippage_bps,
-    )
-    with LatencyTimer(metrics):
-        result = simulator.simulate(effective_request)
-
-    if result.accepted and result.fill is not None:
-        if persistent_journal is not None:
-            try:
-                inserted = await persistent_journal.append(effective_request.order, result.fill)
-            except Exception:
-                metrics.increment("simulation_persistence_failures")
-                metrics.increment("simulation_rejected")
-                logger.exception("simulation persistence commit failed")
-                return SimulationResult(
-                    accepted=False,
-                    reason="simulation persistence unavailable",
-                )
-            if not inserted:
-                metrics.increment("simulation_duplicate_orders")
-                metrics.increment("simulation_rejected")
-                return SimulationResult(
-                    accepted=False,
-                    reason="duplicate simulated order",
-                )
-
-        applied = portfolio.apply_fill(effective_request.order, result.fill)
-        if not applied:
-            metrics.increment("simulation_duplicate_orders")
-            metrics.increment("simulation_rejected")
-            return SimulationResult(
-                accepted=False,
-                reason="duplicate simulated order",
-            )
-
-        metrics.increment("simulation_accepted")
-        fill_event = {
-            **result.fill.model_dump(mode="json"),
-            "market_id": effective_request.order.market_id,
-            "asset": effective_request.order.asset.value,
-            "side": effective_request.order.side.value,
-        }
-        await hub.broadcast(
-            "fills",
-            {"type": "fill", "data": fill_event},
-        )
-        await hub.broadcast(
-            "portfolio",
-            {"type": "portfolio", "data": portfolio.snapshot()},
-        )
-    else:
-        metrics.increment("simulation_rejected")
-    return result
-
-
-@app.get("/v1/portfolio")
-def get_portfolio() -> dict[str, object]:
-    return portfolio.snapshot()
-
-
-@app.post("/v1/portfolio/mark")
-async def mark_portfolio(request: PortfolioMarkRequest) -> dict[str, object]:
-    marks = {mark.asset: mark.price for mark in request.marks}
-    snapshot = portfolio.snapshot(marks)
-    await hub.broadcast("portfolio", {"type": "portfolio", "data": snapshot})
-    return snapshot
-
-
-@app.get("/v1/fills")
-async def get_fills(limit: int = Query(default=100, ge=1, le=1_000)) -> dict[str, object]:
-    entries = (
-        await persistent_journal.list(limit)
-        if persistent_journal is not None
-        else portfolio.journal(limit)
-    )
-    return {"mode": SystemMode.SIMULATION, "count": len(entries), "fills": entries}
-
-
-@app.get("/v1/reconciliation")
-async def reconciliation_status() -> dict[str, object]:
-    return await build_reconciliation_status()
-
-
-@app.post("/simulation/start", response_model=RuntimeState)
-async def simulation_start() -> RuntimeState:
-    if runtime.kill_switch != KillSwitchState.ARMED:
-        runtime.running = False
-        return runtime
-    replay_session.reset()
-    runtime.mode = SystemMode.SIMULATION
-    runtime.running = True
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
-
-
-@app.post("/simulation/stop", response_model=RuntimeState)
-async def simulation_stop() -> RuntimeState:
-    runtime.running = False
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
-
-
-@app.post("/simulation/reset", response_model=RuntimeState)
-async def simulation_reset() -> RuntimeState:
-    if persistent_journal is not None:
-        try:
-            await persistent_journal.start_new_session()
-        except Exception as error:
-            metrics.increment("simulation_session_reset_failures")
-            logger.exception("simulation session rotation failed")
-            raise HTTPException(
-                status_code=503,
-                detail="simulation persistence unavailable",
-            ) from error
-
-    reset_runtime_state()
-    replay_session.reset()
-    portfolio.reset()
-    metrics.reset()
-    metrics.increment("simulation_session_resets")
-    await hub.broadcast("portfolio", {"type": "portfolio", "data": portfolio.snapshot()})
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
-
-
-def _replay_speed_value(speed: str) -> int:
-    if speed == "MAX":
-        return 100
-    return int(speed.removesuffix("x"))
-
-
-def _replay_failure(error: RuntimeError) -> HTTPException:
-    return HTTPException(status_code=409, detail=str(error))
-
-
-async def _rotate_replay_persistence() -> None:
-    if persistent_journal is None:
-        return
-    try:
-        await persistent_journal.start_new_session()
-    except Exception as error:
-        metrics.increment("replay_persistence_rotation_failures")
-        logger.exception("replay persistence session rotation failed")
-        raise HTTPException(
-            status_code=503,
-            detail="replay persistence unavailable",
-        ) from error
-
-
-@app.get("/replay/status")
-def replay_status() -> dict[str, object]:
-    return {"mode": SystemMode.HISTORICAL_REPLAY, **replay_session.status()}
-
-
-@app.post("/replay/start")
-async def replay_start(request: ReplayStartRequest) -> dict[str, object]:
-    if runtime.kill_switch != KillSwitchState.ARMED:
-        raise HTTPException(status_code=409, detail="kill switch is not armed")
-
-    ReplaySessionProbe = type(replay_session)
-    probe = ReplaySessionProbe()
-    try:
-        probe.start(request)
-    except (RuntimeError, ValueError) as error:
-        raise _replay_failure(RuntimeError(str(error))) from error
-
-    await _rotate_replay_persistence()
-    status = replay_session.start(request)
-    runtime.mode = SystemMode.HISTORICAL_REPLAY
-    runtime.running = True
-    runtime.replay_speed = _replay_speed_value(request.speed)
-    metrics.increment("replay_session_starts")
-    await hub.broadcast("analytics", {"type": "replay", "data": status})
-    return {"mode": runtime.mode, **status}
-
-
-@app.post("/replay/pause")
-async def replay_pause() -> dict[str, object]:
-    try:
-        status = replay_session.pause()
-    except RuntimeError as error:
-        raise _replay_failure(error) from error
-    runtime.running = False
-    await hub.broadcast("analytics", {"type": "replay", "data": status})
-    return {"mode": runtime.mode, **status}
-
-
-@app.post("/replay/resume")
-async def replay_resume() -> dict[str, object]:
-    if runtime.kill_switch != KillSwitchState.ARMED:
-        raise HTTPException(status_code=409, detail="kill switch is not armed")
-    try:
-        status = replay_session.resume()
-    except RuntimeError as error:
-        raise _replay_failure(error) from error
-    runtime.mode = SystemMode.HISTORICAL_REPLAY
-    runtime.running = True
-    await hub.broadcast("analytics", {"type": "replay", "data": status})
-    return {"mode": runtime.mode, **status}
-
-
-@app.post("/replay/step")
-async def replay_step() -> dict[str, object]:
-    if runtime.kill_switch != KillSwitchState.ARMED:
-        raise HTTPException(status_code=409, detail="kill switch is not armed")
-    try:
-        frame = replay_session.step()
-    except RuntimeError as error:
-        raise _replay_failure(error) from error
-
-    status = replay_session.status()
-    if frame is None:
-        runtime.running = False
-        await hub.broadcast("analytics", {"type": "replay", "data": status})
-        return {"mode": runtime.mode, "frame": None, **status}
-
-    snapshot = frame.snapshot
-    mid = (snapshot.bid + snapshot.ask) / 2
-    spread = snapshot.ask - snapshot.bid
-    market_data = {
-        "timestamp": frame.timestamp,
-        "market_id": snapshot.market_id,
-        "symbol": snapshot.symbol,
-        "bid": snapshot.bid,
-        "ask": snapshot.ask,
-        "mid": mid,
-        "spread": spread,
-        "market_probability": snapshot.market_probability,
-        "volatility": snapshot.volatility,
-    }
-    orderbook = {
-        "timestamp": frame.timestamp,
-        "symbol": snapshot.symbol,
-        "best_bid": snapshot.bid,
-        "best_ask": snapshot.ask,
-        "bid_size": snapshot.bid_size,
-        "ask_size": snapshot.ask_size,
-        "mid_price": mid,
-        "spread": spread,
-        "imbalance": snapshot.imbalance,
-    }
-    await hub.broadcast("market-data", {"type": "market-data", "data": market_data})
-    await hub.broadcast("orderbook", {"type": "orderbook", "data": orderbook})
-    await hub.broadcast("analytics", {"type": "replay", "data": status})
-    metrics.increment("replay_session_steps")
-    if status["finished"]:
-        runtime.running = False
-    return {"mode": runtime.mode, "frame": market_data, **status}
-
-
-@app.post("/replay/restart")
-async def replay_restart() -> dict[str, object]:
-    if runtime.kill_switch != KillSwitchState.ARMED:
-        raise HTTPException(status_code=409, detail="kill switch is not armed")
-    if not replay_session.active:
-        raise _replay_failure(RuntimeError("replay session has not been started"))
-
-    await _rotate_replay_persistence()
-    status = replay_session.restart()
-    runtime.mode = SystemMode.HISTORICAL_REPLAY
-    runtime.running = True
-    metrics.increment("replay_session_restarts")
-    await hub.broadcast("analytics", {"type": "replay", "data": status})
-    return {"mode": runtime.mode, **status}
-
-
-@app.post("/replay/seek")
-async def replay_seek(request: ReplaySeekRequest) -> dict[str, object]:
-    replay_state = replay_session.status()
-    if not replay_state["active"]:
-        raise _replay_failure(RuntimeError("replay session has not been started"))
-    if request.cursor > int(replay_state["total_frames"]):
-        raise _replay_failure(RuntimeError("replay cursor exceeds total frames"))
-
-    await _rotate_replay_persistence()
-    status = replay_session.seek(request.cursor)
-    runtime.running = False
-    await hub.broadcast("analytics", {"type": "replay", "data": status})
-    return {"mode": runtime.mode, **status}
-
-
-@app.post("/replay/speed")
-async def replay_speed(request: ReplaySpeedRequest) -> dict[str, object]:
-    try:
-        status = replay_session.set_speed(request.speed)
-    except RuntimeError as error:
-        raise _replay_failure(error) from error
-    runtime.replay_speed = _replay_speed_value(request.speed)
-    await hub.broadcast("analytics", {"type": "replay", "data": status})
-    return {"mode": runtime.mode, **status}
-
-
-@app.post("/replay/reset")
-async def replay_reset() -> dict[str, object]:
-    replay_session.reset()
-    runtime.mode = SystemMode.HISTORICAL_REPLAY
-    runtime.running = False
-    runtime.replay_speed = 1
-    status = replay_session.status()
-    await hub.broadcast("analytics", {"type": "replay", "data": status})
-    return {"mode": runtime.mode, **status}
-
-
-@app.post("/killswitch/trigger", response_model=RuntimeState)
-async def killswitch_trigger() -> RuntimeState:
-    runtime.kill_switch = KillSwitchState.TRIGGERED
-    runtime.running = False
-    if replay_session.active and not replay_session.paused:
-        replay_session.pause()
-    metrics.increment("kill_switch_triggers")
-    await hub.broadcast("risk", {"type": "risk", "data": risk()})
-    return runtime
-
-
-@app.post("/killswitch/reset", response_model=RuntimeState)
-async def killswitch_reset() -> RuntimeState:
-    if runtime.kill_switch == KillSwitchState.LOCKED:
-        runtime.kill_switch = KillSwitchState.RESET_PENDING
-    else:
-        runtime.kill_switch = KillSwitchState.ARMED
-    await hub.broadcast("risk", {"type": "risk", "data": risk()})
-    return runtime
-
-
-@app.websocket("/ws/market-data")
-async def ws_market_data(websocket: WebSocket) -> None:
-    await hub.serve("market-data", websocket)
-
-
-@app.websocket("/ws/orderbook")
-async def ws_orderbook(websocket: WebSocket) -> None:
-    await hub.serve("orderbook", websocket)
-
-
-@app.websocket("/ws/signals")
-async def ws_signals(websocket: WebSocket) -> None:
-    await hub.serve("signals", websocket)
-
-
-@app.websocket("/ws/risk")
-async def ws_risk(websocket: WebSocket) -> None:
-    await hub.serve("risk", websocket)
-
-
-@app.websocket("/ws/portfolio")
-async def ws_portfolio(websocket: WebSocket) -> None:
-    await hub.serve("portfolio", websocket)
-
-
-@app.websocket("/ws/fills")
-async def ws_fills(websocket: WebSocket) -> None:
-    await hub.serve("fills", websocket)
-
-
-@app.websocket("/ws/analytics")
-async def ws_analytics(websocket: WebSocket) -> None:
-    await hub.serve("analytics", websocket)
+if _DASHBOARD_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=_DASHBOARD_DIR, html=True), name="dashboard")

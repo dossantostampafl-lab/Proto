@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from apps.api.app import app_state, main, safety_surface, surface
+from apps.api.app import app_state, safety_surface, surface
+from apps.api.app import core_routes as main
 from apps.api.app.models import KillSwitchState, SystemMode
 
 API_APP = Path("apps/api/app")
@@ -32,7 +33,7 @@ def test_analytics_surface_does_not_import_api_main() -> None:
 
 
 def test_api_main_delegates_reconciliation_boundary() -> None:
-    imports = _imports(API_APP / "main.py")
+    imports = _imports(API_APP / "core_routes.py")
     assert "services.events.reconciliation" not in imports
     assert ".reconciliation_service" in imports
 

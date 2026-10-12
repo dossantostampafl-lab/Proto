@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     equity_market_data_max_age_seconds: float | None = Field(default=None, gt=0, le=3_600)
     creation_bridge_shared_secret: str | None = None
     operator_api_token: str | None = None
+    # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
+    public_origin: str | None = None
     http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
     minimum_net_edge: float = Field(default=0.01, ge=0.0, le=1.0, allow_inf_nan=False)
     minimum_confidence: float = Field(default=0.55, ge=0.0, le=1.0, allow_inf_nan=False)
@@ -197,7 +199,7 @@ class Settings(BaseSettings):
 
         The dedicated switch remains the primary opt-in. In production, an explicitly
         configured durable PostgreSQL DATABASE_URL is itself sufficient evidence that
-        orchestration/decision-memory may reuse that database even when Railway-level
+        orchestration/decision-memory may reuse that database even when deployment-level
         environment variables override image defaults. This never enables simulation
         persistence and never relaxes the real-money execution boundary.
         """

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from apps.api.app.railway_app import app
+from apps.api.app.main import app
 from apps.api.app.settings import settings
 
 

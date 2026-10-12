@@ -5,7 +5,7 @@ COPY apps/web/package*.json ./
 RUN npm ci
 COPY apps/web ./
 # Single-origin deployment: the browser derives REST/WebSocket endpoints from
-# window.location.origin. Do not pin the Railway-generated hostname into the bundle.
+# window.location.origin. Do not pin the deployment hostname into the bundle.
 ENV VITE_API_BASE_URL=""
 RUN npm run build \
     && sha256sum src/operator-auth.ts src/approved-terminal.tsx >/dev/null \
@@ -39,4 +39,4 @@ USER proto
 
 EXPOSE 8000
 
-CMD ["/bin/sh", "-c", "exec uvicorn apps.api.app.railway_app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["/bin/sh", "-c", "exec uvicorn apps.api.app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

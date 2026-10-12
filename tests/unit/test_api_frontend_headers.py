@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from apps.api.app.railway_app import app
+from apps.api.app.main import app
 
 
-def test_railway_surface_sets_browser_security_headers() -> None:
+def test_api_surface_sets_browser_security_headers() -> None:
     with TestClient(app) as client:
         response = client.get("/health")
 

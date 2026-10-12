@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import HTTPException
 
-from apps.api.app import main as api_main
+from apps.api.app import core_routes as api_main
 from apps.api.app.models import KillSwitchState, MarketSnapshot
 from apps.api.app.replay import ReplayFrameInput, ReplaySeekRequest, ReplayStartRequest
 

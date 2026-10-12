@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.api.app import main
+from apps.api.app import core_routes as main
 from apps.api.app.models import (
     Asset,
     MarketSnapshot,

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 _TEST_OPERATOR_TOKEN = "o" * 32
 
 
-def test_railway_enables_orchestration_without_general_simulation_persistence() -> None:
+def test_api_enables_orchestration_without_general_simulation_persistence() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text()
     assert "APP_ENV=production" in dockerfile
     assert "ORCHESTRATION_PERSISTENCE_ENABLED=true" in dockerfile
