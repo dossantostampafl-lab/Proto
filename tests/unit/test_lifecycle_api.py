@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from apps.api.app.core_routes import router as core_router
 from apps.api.app.main import app
 from apps.api.app.settings import settings
 
@@ -29,7 +30,7 @@ def _edge_snapshot() -> dict[str, object]:
 def test_explicit_cost_edge_route_is_the_canonical_application_owner() -> None:
     candidates = [
         route
-        for route in app.routes
+        for route in core_router.routes
         if getattr(route, "path", None) == "/edge/evaluate"
         and "POST" in getattr(route, "methods", set())
     ]

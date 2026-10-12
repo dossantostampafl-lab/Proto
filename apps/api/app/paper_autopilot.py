@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from services.orchestration import DecisionMemoryEntry, DecisionStage
 
 from .app_state import decision_memory_store, portfolio, runtime
+from .core_routes import simulate
 from .live_monitor import live_monitor
-from .main import simulate
 from .models import KillSwitchState, SimulationRequest, SimulationResult, SystemMode
 from .paper_stop_loss import evaluate_stop_loss
 from .risk_state import simulation_execution_allowed

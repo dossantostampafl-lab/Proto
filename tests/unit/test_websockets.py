@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from apps.api.app.main import app
 
 client = TestClient(app)
-PRODUCTION_ORIGIN = "https://proto-production-5b0d.up.railway.app"
+PRODUCTION_ORIGIN = "https://proto.example.oraclecloud.test"
 
 
 def test_websocket_channels_accept_and_respond_to_ping() -> None:
@@ -23,7 +23,10 @@ def test_websocket_channels_accept_and_respond_to_ping() -> None:
             assert websocket.receive_json() == {"type": "pong", "channel": channel}
 
 
-def test_production_dashboard_origin_can_subscribe_to_live_market_data() -> None:
+def test_configured_public_origin_can_subscribe_to_live_market_data(monkeypatch) -> None:
+    from apps.api.app.websockets import hub
+
+    monkeypatch.setattr(hub, "_allowed_origins", hub._allowed_origins | {PRODUCTION_ORIGIN})
     with client.websocket_connect(
         "/ws/market-data",
         headers={"origin": PRODUCTION_ORIGIN},

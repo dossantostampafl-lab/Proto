@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from apps.api.app.main import app, portfolio
+from apps.api.app.app_state import portfolio
+from apps.api.app.main import app
 
 client = TestClient(app)
 

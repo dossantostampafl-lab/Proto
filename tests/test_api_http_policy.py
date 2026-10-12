@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from apps.api.app.railway_app import _DASHBOARD_RELEASE, _DASHBOARD_UI_RELEASE, app
+from apps.api.app.main import _DASHBOARD_RELEASE, _DASHBOARD_UI_RELEASE, app
 
 
-def test_railway_http_policy_exposes_security_and_release_headers() -> None:
+def test_api_http_policy_exposes_security_and_release_headers() -> None:
     with TestClient(app) as client:
         response = client.get("/health")
 
