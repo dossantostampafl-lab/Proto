@@ -336,6 +336,63 @@ class CanonicalPaperOMS:
             )
         )
 
+    async def _seed(
+        self,
+        connection: AsyncConnection,
+        snapshot: Mapping[str, Decimal],
+        now: datetime,
+    ) -> None:
+        """Initialize the paper account baseline once, without submitting."""
+        seeded = await connection.scalar(
+            select(opening_balances.c.asset)
+            .where(opening_balances.c.venue == self.adapter.venue.value)
+            .limit(1)
+        )
+        if seeded is None:
+            # The paper adapter may omit zero-balance assets. Persist
+            # known base and quote assets at zero so a later BUY can
+            # be followed by a reduce-only SELL under the same lock.
+            initial = {asset: Decimal(value) for asset, value in snapshot.items()}
+            for known in self._instruments.values():
+                if known.venue is self.adapter.venue:
+                    initial.setdefault(known.base_asset, Decimal("0"))
+                    initial.setdefault(known.quote_asset, Decimal("0"))
+            # All risk limits are denominated in BRL. Initial
+            # non-BRL inventory cannot be valued without marked
+            # prices and must not establish a fictitious baseline.
+            if initial.get("BRL", Decimal("0")) <= 0 or any(
+                amount != 0 for asset, amount in initial.items() if asset != "BRL"
+            ):
+                raise OrderRejected("opening_equity_not_certified")
+            for asset, amount in initial.items():
+                await connection.execute(
+                    insert(opening_balances).values(
+                        venue=self.adapter.venue.value,
+                        asset=asset,
+                        balance=_str(amount),
+                    )
+                )
+            await connection.execute(
+                insert(equity_checkpoints).values(
+                    venue=self.adapter.venue.value,
+                    day=now.date().isoformat(),
+                    start_of_day_equity=_str(initial["BRL"]),
+                    peak_equity=_str(initial["BRL"]),
+                )
+            )
+
+    async def bootstrap(self, *, now: datetime) -> None:
+        """Prepare durable paper balances and the constitutional BRL baseline."""
+
+        if self.adapter.real_money_execution:
+            raise OrderRejected("paper_only")
+        async with self._lock:
+            snapshot = await self.adapter.balances()
+            async with self.engine.begin() as connection:
+                if await self._halted(connection):
+                    raise OrderRejected("venue_halted")
+                await self._seed(connection, snapshot, now)
+
     async def place(
         self,
         intent: TradeIntent,
@@ -372,43 +429,7 @@ class CanonicalPaperOMS:
                     if await self._halted(connection):
                         raise OrderRejected("venue_halted")
 
-                    seeded = await connection.scalar(
-                        select(opening_balances.c.asset)
-                        .where(opening_balances.c.venue == intent.venue.value)
-                        .limit(1)
-                    )
-                    if seeded is None:
-                        # The paper adapter may omit zero-balance assets. Persist
-                        # known base and quote assets at zero so a later BUY can
-                        # be followed by a reduce-only SELL under the same lock.
-                        initial = {asset: Decimal(value) for asset, value in snapshot.items()}
-                        for known in self._instruments.values():
-                            if known.venue is intent.venue:
-                                initial.setdefault(known.base_asset, Decimal("0"))
-                                initial.setdefault(known.quote_asset, Decimal("0"))
-                        # All risk limits are denominated in BRL. Initial
-                        # non-BRL inventory cannot be valued without marked
-                        # prices and must not establish a fictitious baseline.
-                        if initial.get("BRL", Decimal("0")) <= 0 or any(
-                            amount != 0 for asset, amount in initial.items() if asset != "BRL"
-                        ):
-                            raise OrderRejected("opening_equity_not_certified")
-                        for asset, amount in initial.items():
-                            await connection.execute(
-                                insert(opening_balances).values(
-                                    venue=intent.venue.value,
-                                    asset=asset,
-                                    balance=_str(amount),
-                                )
-                            )
-                        await connection.execute(
-                            insert(equity_checkpoints).values(
-                                venue=intent.venue.value,
-                                day=now.date().isoformat(),
-                                start_of_day_equity=_str(initial["BRL"]),
-                                peak_equity=_str(initial["BRL"]),
-                            )
-                        )
+                    await self._seed(connection, snapshot, now)
                     # This reservation and the consumed permit rollback together
                     # if any part of the order INSERT fails.
                     await self._reserve(connection, intent, order_id)
