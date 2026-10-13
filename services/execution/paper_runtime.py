@@ -115,6 +115,12 @@ class Phase4PaperRuntime:
     async def risk_account(self, *, now: datetime) -> AccountState:
         if not self.running:
             raise OrderRejected("paper_runtime_not_running")
+        # A periodic worker alone leaves a race where new intents could be
+        # sized against drift that has not yet been observed. Gate every
+        # risk-increasing decision on an immediate venue reconciliation.
+        checked = await self.oms.reconcile(tolerance=Decimal("0"))
+        if not checked["ok"]:
+            raise OrderRejected("ledger_reconciliation_failed")
         return await self.oms.risk_account(now=now, quotes=self.quotes)
 
     async def execute_authorized(
