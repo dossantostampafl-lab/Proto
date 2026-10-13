@@ -118,3 +118,21 @@ async def test_signature_never_stored_in_durable_ledger(engine) -> None:
     assert len(rows) == 1
     assert "signature" not in rows[0]
     assert rows[0]["intent_fingerprint"] == order.fingerprint()
+
+
+async def test_order_transaction_rollback_restores_unused_permit(engine) -> None:
+    """The OMS must commit its order record and permit use together."""
+    signer = PermitSigner(KEY)
+    ledger = DurablePermitLedger(engine, signer)
+    order = trade()
+    permit = signer.issue(order, now=NOW)
+    with pytest.raises(RuntimeError, match="order insert failed"):
+        async with engine.begin() as connection:
+            await ledger.consume_in_transaction(
+                connection, permit, order, now=NOW
+            )
+            raise RuntimeError("order insert failed")
+
+    async with engine.connect() as connection:
+        assert (await connection.execute(select(consumed_permits))).all() == []
+    await ledger.consume(permit, order, now=NOW)
