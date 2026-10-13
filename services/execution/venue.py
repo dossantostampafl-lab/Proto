@@ -98,7 +98,7 @@ class PaperVenueAdapter:
         if simulated_venue not in {VenueId.PAPER, VenueId.BINANCE_SPOT}:
             raise ValueError("unsupported paper simulation venue")
         if any(instrument.venue is not simulated_venue for instrument in instruments):
-            raise ValueError("PaperVenueAdapter only trades PAPER instruments of its simulated venue")
+            raise ValueError("paper instrument venue must match the simulated venue")
         if fee_bps < 0 or slippage_bps < 0:
             raise ValueError("fee_bps and slippage_bps must be non-negative")
         self._simulated_venue = simulated_venue
