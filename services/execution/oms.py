@@ -75,7 +75,12 @@ balance_entries = Table(
     "execution_balance_entries",
     oms_metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("client_order_id", String(36), ForeignKey("execution_orders.client_order_id"), nullable=False),
+    Column(
+        "client_order_id",
+        String(36),
+        ForeignKey("execution_orders.client_order_id"),
+        nullable=False,
+    ),
     Column("venue", String(40), nullable=False),
     Column("asset", String(20), nullable=False),
     Column("amount", String(80), nullable=False),
@@ -94,7 +99,12 @@ opening_balances = Table(
 reservations = Table(
     "execution_reservations",
     oms_metadata,
-    Column("client_order_id", String(36), ForeignKey("execution_orders.client_order_id"), primary_key=True),
+    Column(
+        "client_order_id",
+        String(36),
+        ForeignKey("execution_orders.client_order_id"),
+        primary_key=True,
+    ),
     Column("venue", String(40), nullable=False),
     Column("asset", String(20), nullable=False),
     Column("total", String(80), nullable=False),
