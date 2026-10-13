@@ -189,3 +189,32 @@ async def test_ioc_limit_that_is_not_marketable_is_immediately_canceled() -> Non
     assert report.status is OrderStatus.CANCELED
     assert (await paper.query("PXabc")).status is OrderStatus.CANCELED
     assert (await paper.balances())["BRL"] == Decimal("10000")
+
+
+async def test_simulated_binance_instrument_stays_paper_only() -> None:
+    trade_spec = BTC.model_copy(
+        update={"venue": VenueId.BINANCE_SPOT, "instrument_id": "BINANCE_SPOT:BTCBRL"}
+    )
+    paper = PaperVenueAdapter(
+        instruments=(trade_spec,),
+        simulated_venue=VenueId.BINANCE_SPOT,
+        quotes=lambda _id: DEFAULT_QUOTE,
+        balances={"BRL": Decimal("10000"), "BTC": Decimal("0")},
+        fee_bps=Decimal("10"),
+        slippage_bps=Decimal("0"),
+        clock=lambda: NOW,
+    )
+    report = await paper.submit(
+        VenueOrder(
+            client_order_id="PXbinance-paper",
+            instrument_id="BINANCE_SPOT:BTCBRL",
+            side="BUY",
+            quantity=Decimal("0.01"),
+            order_type=OrderType.LIMIT,
+            limit_price=Decimal("350100"),
+        )
+    )
+    assert report.venue is VenueId.BINANCE_SPOT
+    assert report.status is OrderStatus.FILLED
+    assert paper.venue is VenueId.BINANCE_SPOT
+    assert paper.real_money_execution is False
