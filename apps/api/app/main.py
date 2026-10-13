@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .agent_surface import router as agent_router
 from .app_state import persistence_engine
 from .core_routes import router as core_router
 from .creation_surface import router as creation_router
@@ -84,6 +85,7 @@ for router in (
     equity_market_router,
     creation_router,
     signal_router,
+    agent_router,
 ):
     app.include_router(router)
 
