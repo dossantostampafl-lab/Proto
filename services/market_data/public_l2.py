@@ -14,9 +14,9 @@ from services.replay import ReplayEvent, ReplayPhase, ReplaySession
 from .contracts import BookLevel, DataSource, OrderBookSnapshot, ResearchAsset
 from .public_feed_parser import (
     MAX_EVENTS_PER_FRAME,
-    MAX_PUBLIC_FRAME_BYTES,
     SUPPORTED_PUBLIC_PRODUCTS,
     PublicCryptoFeedError,
+    decode_json_frame,
 )
 
 MAX_L2_UPDATES_PER_EVENT = 20_000
@@ -57,26 +57,26 @@ class PublicL2Frame(BaseModel):
     events: tuple[PublicL2Event, ...]
 
 
+def l2_event_payload(event: PublicL2Event) -> dict[str, object]:
+    """Canonical JSON-ready form of one L2 event, shared by live and corpus replay."""
+    return {
+        "product_id": event.product_id,
+        "asset": event.asset,
+        "event_type": event.event_type,
+        "updates": [
+            {
+                "side": update.side,
+                "price_level": str(update.price),
+                "new_quantity": str(update.quantity),
+                "event_time": update.event_time.isoformat(),
+            }
+            for update in event.updates
+        ],
+    }
+
+
 def _decode_payload(message: str | bytes | dict[str, Any]) -> dict[str, Any]:
-    try:
-        if isinstance(message, bytes):
-            if len(message) > MAX_PUBLIC_FRAME_BYTES:
-                raise PublicL2IntegrityError("public L2 payload exceeds size limit")
-            payload = json.loads(message.decode("utf-8"))
-        elif isinstance(message, str):
-            if len(message.encode("utf-8")) > MAX_PUBLIC_FRAME_BYTES:
-                raise PublicL2IntegrityError("public L2 payload exceeds size limit")
-            payload = json.loads(message)
-        else:
-            payload = dict(message)
-    except (
-        UnicodeDecodeError,
-        UnicodeEncodeError,
-        json.JSONDecodeError,
-        TypeError,
-        ValueError,
-    ) as error:
-        raise PublicL2IntegrityError("invalid public L2 payload") from error
+    payload = decode_json_frame(message, error_type=PublicL2IntegrityError, label="public L2")
     if not isinstance(payload, dict):
         raise PublicL2IntegrityError("public L2 payload must be an object")
     return payload
@@ -344,18 +344,7 @@ class PublicL2Book:
                 payload = {
                     "channel": "l2_data",
                     "wire_sequence": frame.sequence,
-                    "product_id": event.product_id,
-                    "asset": event.asset,
-                    "event_type": event.event_type,
-                    "updates": [
-                        {
-                            "side": update.side,
-                            "price_level": str(update.price),
-                            "new_quantity": str(update.quantity),
-                            "event_time": update.event_time.isoformat(),
-                        }
-                        for update in event.updates
-                    ],
+                    **l2_event_payload(event),
                 }
                 canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
                 event_id = sha256(

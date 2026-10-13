@@ -27,18 +27,23 @@ def _as_mapping(value: object) -> Mapping[str, Any]:
     return value
 
 
-def _decode_payload(message: str | bytes | Mapping[str, Any]) -> Mapping[str, Any]:
+def decode_json_frame(
+    message: str | bytes | Mapping[str, Any],
+    *,
+    error_type: type[PublicCryptoFeedError],
+    label: str,
+) -> Any:
+    """Decode one size-bounded JSON wire frame, raising ``error_type`` on failure."""
     try:
         if isinstance(message, bytes):
             if len(message) > MAX_PUBLIC_FRAME_BYTES:
-                raise PublicCryptoFeedError("public feed payload exceeds size limit")
-            payload = json.loads(message.decode("utf-8"))
-        elif isinstance(message, str):
+                raise error_type(f"{label} payload exceeds size limit")
+            return json.loads(message.decode("utf-8"))
+        if isinstance(message, str):
             if len(message.encode("utf-8")) > MAX_PUBLIC_FRAME_BYTES:
-                raise PublicCryptoFeedError("public feed payload exceeds size limit")
-            payload = json.loads(message)
-        else:
-            payload = dict(message)
+                raise error_type(f"{label} payload exceeds size limit")
+            return json.loads(message)
+        return dict(message)
     except (
         UnicodeDecodeError,
         UnicodeEncodeError,
@@ -46,8 +51,13 @@ def _decode_payload(message: str | bytes | Mapping[str, Any]) -> Mapping[str, An
         TypeError,
         ValueError,
     ) as error:
-        raise PublicCryptoFeedError("invalid public feed payload") from error
-    return _as_mapping(payload)
+        raise error_type(f"invalid {label} payload") from error
+
+
+def _decode_payload(message: str | bytes | Mapping[str, Any]) -> Mapping[str, Any]:
+    return _as_mapping(
+        decode_json_frame(message, error_type=PublicCryptoFeedError, label="public feed")
+    )
 
 
 def _parse_timestamp(value: object) -> datetime:

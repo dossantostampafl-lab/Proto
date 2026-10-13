@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Response, WebSocket
@@ -37,6 +38,7 @@ from .replay import (
 )
 from .research import metrics
 from .risk_state import risk_snapshot
+from .runtime_control import broadcast_runtime, start_runtime, stop_runtime
 from .settings import settings
 from .simulation_policy import authoritative_simulation_request
 from .websockets import hub
@@ -44,6 +46,7 @@ from .websockets import hub
 logger = logging.getLogger("proto.api")
 
 router = APIRouter()
+_simulation_lock = asyncio.Lock()
 
 
 @router.get("/health")
@@ -163,6 +166,13 @@ def risk() -> dict[str, object]:
 
 @router.post("/v1/simulate", response_model=SimulationResult)
 async def simulate(request: SimulationRequest) -> SimulationResult:
+    # Risk check, journal append and portfolio update form one critical section, so two
+    # concurrent orders can never both pass against the same pre-trade portfolio snapshot.
+    async with _simulation_lock:
+        return await _simulate_locked(request)
+
+
+async def _simulate_locked(request: SimulationRequest) -> SimulationResult:
     metrics.increment("simulation_requests")
     if not runtime.running or runtime.kill_switch != KillSwitchState.ARMED:
         metrics.increment("simulation_rejected")
@@ -257,27 +267,12 @@ async def reconciliation_status() -> dict[str, object]:
 
 @router.post("/simulation/start", response_model=RuntimeState)
 async def simulation_start() -> RuntimeState:
-    if runtime.kill_switch != KillSwitchState.ARMED:
-        runtime.running = False
-        return runtime
-    replay_session.reset()
-    runtime.mode = SystemMode.SIMULATION
-    runtime.running = True
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
+    return await start_runtime(SystemMode.SIMULATION)
 
 
 @router.post("/simulation/stop", response_model=RuntimeState)
 async def simulation_stop() -> RuntimeState:
-    runtime.running = False
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
+    return await stop_runtime()
 
 
 @router.post("/simulation/reset", response_model=RuntimeState)
@@ -299,10 +294,7 @@ async def simulation_reset() -> RuntimeState:
     metrics.reset()
     metrics.increment("simulation_session_resets")
     await hub.broadcast("portfolio", {"type": "portfolio", "data": portfolio.snapshot()})
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
+    await broadcast_runtime()
     return runtime
 
 

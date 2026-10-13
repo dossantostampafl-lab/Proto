@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from apps.api.app.research_persistence import persist_l2_baseline_evidence
 from services.market_data.l2_corpus_replay import PublicL2CorpusReplay
 from services.market_data.l2_corpus_storage import PublicL2CorpusWriter
 from services.market_data.public_l2 import PublicL2Frame, parse_public_l2_message
@@ -261,29 +260,3 @@ def test_invalid_git_sha_fails_closed(tmp_path: Path) -> None:
             config=_config(),
         )
 
-
-@pytest.mark.asyncio
-async def test_persistence_is_disabled_cleanly_without_engine(tmp_path: Path) -> None:
-    replay = _build_corpus(tmp_path / "btc-l2.jsonl")
-    evidence = build_l2_baseline_experiment_evidence(
-        replay,
-        asset="BTC",
-        git_sha=GIT_SHA,
-        config=_config(),
-    )
-
-    assert await persist_l2_baseline_evidence(None, evidence) == 0
-
-
-@pytest.mark.asyncio
-async def test_persistence_rejects_duplicate_experiment_ids(tmp_path: Path) -> None:
-    replay = _build_corpus(tmp_path / "btc-l2.jsonl")
-    evidence = build_l2_baseline_experiment_evidence(
-        replay,
-        asset="BTC",
-        git_sha=GIT_SHA,
-        config=_config(),
-    )
-
-    with pytest.raises(ValueError, match="duplicate experiment identities"):
-        await persist_l2_baseline_evidence(None, (evidence[0], evidence[0]))

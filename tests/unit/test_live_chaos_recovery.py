@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -84,10 +84,13 @@ class DeterministicFlakyJournal:
         }
 
 
-def _tick(sequence: int) -> MarketTick:
+def _tick(sequence: int, base: datetime | None = None) -> MarketTick:
+    # Deterministic, strictly increasing timestamps: the wall clock can step backwards
+    # (e.g. WSL/NTP resync), which the quality monitor rightly rejects as out-of-order.
+    start = base or datetime.now(UTC)
     price = 60_000.0 + sequence / 100.0
     return MarketTick(
-        timestamp=datetime.now(UTC),
+        timestamp=start + timedelta(milliseconds=sequence),
         venue="coinbase-public",
         symbol="BTC",
         bid=price,
@@ -111,8 +114,10 @@ async def test_required_durability_recovers_across_repeated_transient_failures()
 
     accepted = 0
     rejected = 0
+    # 1,000 ticks one millisecond apart, ending "now": never stale, never in the future.
+    base = datetime.now(UTC) - timedelta(seconds=1)
     for sequence in range(1, 1_001):
-        if await monitor.ingest_tick(_tick(sequence)):
+        if await monitor.ingest_tick(_tick(sequence, base)):
             accepted += 1
         else:
             rejected += 1

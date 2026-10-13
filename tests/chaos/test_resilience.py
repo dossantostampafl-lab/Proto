@@ -8,18 +8,15 @@ from services.events.journal import EventJournal
 from services.events.reconciliation import ReconciliationIssue, reconcile
 
 
-async def test_event_bus_retry_and_dead_letter_isolate_failed_messages() -> None:
+async def test_event_bus_dead_letter_isolates_failed_messages() -> None:
     bus = InMemoryEventBus()
     original_id = await bus.publish("signals", {"event_id": "signal-1", "status": "new"})
-    retry_id = await bus.retry("signals", {"event_id": "signal-1", "attempt": "2"})
     dead_id = await bus.dead_letter("signals", {"event_id": "signal-1", "reason": "poison"})
 
     original = [message async for message in bus.subscribe("signals")]
-    retries = [message async for message in bus.subscribe("signals.retry")]
     dead_letters = [message async for message in bus.subscribe("signals.dead_letter")]
 
     assert [message.message_id for message in original] == [original_id]
-    assert [message.message_id for message in retries] == [retry_id]
     assert [message.message_id for message in dead_letters] == [dead_id]
     assert dead_letters[0].payload["reason"] == "poison"
 

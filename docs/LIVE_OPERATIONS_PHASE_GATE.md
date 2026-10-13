@@ -71,7 +71,7 @@ The `CI` workflow contains a dedicated `live-release` job. It must:
 4. run the staging deployment contract tests;
 5. run the static live-isolation gate.
 
-The ordinary Python, Rust and web jobs still run independently, so the live release gate is additive rather than a replacement for the repository-wide CI.
+The ordinary Python and web jobs still run independently, so the live release gate is additive rather than a replacement for the repository-wide CI.
 
 ## Staging validation
 
@@ -93,7 +93,7 @@ Before promoting a release candidate to a remote environment:
 This phase can merge only when:
 
 - the `live-release` CI job is green;
-- repository Python, Rust and web CI jobs are green;
+- repository Python and web CI jobs are green;
 - Security is green;
 - Graphify is green on the exact PR head;
 - staging contracts and read-only safety invariants remain intact.

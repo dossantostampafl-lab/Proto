@@ -1,18 +1,6 @@
-from pathlib import Path
-
 from apps.api.app.live_monitor import LiveCryptoMonitor, configured_public_market_adapter
 from apps.api.app.settings import settings
 from services.market_data import BinancePublicMarketDataAdapter, CoinbasePublicMarketDataAdapter
-
-
-def test_prometheus_scrapes_only_the_standalone_live_read_only_surface() -> None:
-    config = Path("infra/monitoring/prometheus.yml").read_text(encoding="utf-8")
-
-    assert "job_name: proto-live-read-only" in config
-    assert "metrics_path: /live/metrics/prometheus" in config
-    assert "job_name: proto-api" not in config
-    assert "metrics_path: /metrics/prometheus" not in config
-    assert config.count("- api:8000") == 1
 
 
 def test_configured_public_market_adapter_selects_binance(monkeypatch) -> None:

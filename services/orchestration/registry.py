@@ -10,8 +10,6 @@ CATALOG_VERSION = "2026-09-03.1"
 @dataclass(frozen=True, slots=True)
 class JobContract:
     spec: JobSpec
-    input_contract: str
-    output_contract: str
     completion_criteria: tuple[str, ...]
     owner_domain: str
 
@@ -24,8 +22,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                 JobCapability.MARKET_DATA,
                 allowed_modes=frozenset({"LIVE_MONITORING"}),
             ),
-            input_contract="current public-feed health snapshot",
-            output_contract="normalized health/freshness assessment",
             completion_criteria=(
                 "BTC/ETH/SOL freshness evaluated",
                 "source provenance preserved",
@@ -47,12 +43,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                     }
                 ),
             ),
-            input_contract=(
-                "fact-only multiasset observations plus explicit regime/ranking policies"
-            ),
-            output_contract=(
-                "classified market states and ranked opportunities with incomplete evidence omitted"
-            ),
             completion_criteria=(
                 "all thresholds and weights supplied explicitly",
                 "incomplete quantitative evidence omitted rather than synthesized",
@@ -66,14 +56,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                 "shadow-decision",
                 JobCapability.QUANT_RESEARCH,
                 allowed_modes=frozenset({"SHADOW"}),
-            ),
-            input_contract=(
-                "fact-only decision lineage plus an explicit SimulationRequest built from observed "
-                "market data"
-            ),
-            output_contract=(
-                "authoritative SHADOW risk/fill evaluation and persisted SHADOW_ONLY "
-                "decision lineage"
             ),
             completion_criteria=(
                 "candidate contains no fabricated model or market fields",
@@ -90,10 +72,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                 JobCapability.QUANT_RESEARCH,
                 allowed_modes=frozenset({"SIMULATION", "SHADOW", "HISTORICAL_REPLAY"}),
             ),
-            input_contract=(
-                "versioned market/replay observations and explicit execution-cost inputs"
-            ),
-            output_contract="probability/fair-value/edge research result with lineage",
             completion_criteria=(
                 "input lineage persisted",
                 "cost provenance explicit",
@@ -107,8 +85,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                 JobCapability.CALIBRATION,
                 allowed_modes=frozenset({"SIMULATION", "SHADOW", "HISTORICAL_REPLAY"}),
             ),
-            input_contract="labeled probability observations and model identifier",
-            output_contract="Brier/log-loss/ECE/MCE/reliability metrics",
             completion_criteria=(
                 "labels are present",
                 "metrics computed without synthetic substitution",
@@ -122,8 +98,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                 JobCapability.RISK,
                 allowed_modes=frozenset({"SIMULATION", "SHADOW", "PAPER_TRADING"}),
             ),
-            input_contract="candidate action, exposure, liquidity and configured limits",
-            output_contract="independent approved/rejected risk decision",
             completion_criteria=(
                 "all configured limits evaluated",
                 "decision reason recorded",
@@ -137,8 +111,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                 JobCapability.REPLAY,
                 allowed_modes=frozenset({"HISTORICAL_REPLAY"}),
             ),
-            input_contract="immutable replay dataset/session definition",
-            output_contract="deterministic replay result and event lineage",
             completion_criteria=(
                 "session identifiers persisted",
                 "event ordering preserved",
@@ -152,8 +124,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                 JobCapability.PORTFOLIO,
                 allowed_modes=frozenset({"SIMULATION", "PAPER_TRADING"}),
             ),
-            input_contract="paper/simulation fills, positions and marks",
-            output_contract="portfolio/P&L/risk snapshot",
             completion_criteria=(
                 "positions reconciled from journal",
                 "P&L attribution computed from recorded fills/marks",
@@ -175,8 +145,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                     }
                 ),
             ),
-            input_contract="runtime health, event journal, persistence and feed metrics",
-            output_contract="operational health assessment",
             completion_criteria=(
                 "critical dependencies evaluated",
                 "staleness and journal integrity represented",
@@ -191,8 +159,6 @@ def build_job_catalog() -> dict[str, JobContract]:
                 requires_risk_gate=True,
                 allowed_modes=frozenset({"PAPER_TRADING"}),
             ),
-            input_contract="paper-only candidate action and independent risk context",
-            output_contract="paper execution decision/result",
             completion_criteria=(
                 "independent risk gate approved before handler invocation",
                 "event journal contains decision/result",

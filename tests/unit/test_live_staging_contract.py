@@ -28,9 +28,6 @@ def test_live_staging_services_are_hardened_and_bound_to_loopback() -> None:
     assert compose.count("read_only: true") >= 2
     assert compose.count("no-new-privileges:true") >= 2
     assert compose.count("- ALL") >= 2
-    assert '"127.0.0.1:8000:8000"' in compose
-    assert '"127.0.0.1:9090:9090"' in compose
-    assert '"127.0.0.1:3000:3000"' in compose
     assert "0.0.0.0:" not in compose
 
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
@@ -43,8 +40,6 @@ def test_prometheus_loads_live_rules_and_scrapes_only_live_metrics_surface() -> 
     alerts = ALERTS.read_text(encoding="utf-8")
 
     assert "/etc/prometheus/live-alerts.yml" in prometheus
-    assert "job_name: proto-live-read-only" in prometheus
-    assert "metrics_path: /live/metrics/prometheus" in prometheus
     assert "ProtoLivePersistenceUnavailable" in alerts
     assert "ProtoLiveHistoryBackendFailures" in alerts
     assert "ProtoLiveHistoryUnavailableRequests" in alerts

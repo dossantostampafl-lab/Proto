@@ -69,8 +69,9 @@ async def test_live_durability_runtime_persists_and_recovers_history(tmp_path: P
         assert persistence["healthy"] is True
 
         assert await monitor.ingest_tick(_tick()) is True
-        history = await monitor.persisted_history("BTC", limit=10)
-        assert history is not None
+        page = await monitor.persisted_history_page("BTC", limit=10)
+        assert page is not None
+        history = [row.as_dict() for row in page.items]
         assert len(history) == 1
         assert history[0]["sequence"] == 101
         assert history[0]["source"] == "PUBLIC_READ_ONLY_PERSISTED"
@@ -85,8 +86,9 @@ async def test_live_durability_runtime_persists_and_recovers_history(tmp_path: P
     restarted_runtime = LiveDurabilityRuntime()
     await restarted_runtime.start(monitor=restarted_monitor, settings=settings)
     try:
-        recovered = await restarted_monitor.persisted_history("BTC", limit=10)
-        assert recovered is not None
+        page = await restarted_monitor.persisted_history_page("BTC", limit=10)
+        assert page is not None
+        recovered = [row.as_dict() for row in page.items]
         assert [row["sequence"] for row in recovered] == [101]
         assert restarted_monitor.snapshot("BTC") is None
     finally:

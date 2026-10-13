@@ -62,6 +62,11 @@ def authoritative_simulation_request(
             requested_limits.max_order_to_book_ratio,
             settings.simulation_max_order_to_book_ratio,
         ),
+        max_position_quantity=min(requested_limits.max_position_quantity, settings.max_position),
+        max_open_positions=min(
+            requested_limits.max_open_positions,
+            settings.simulation_max_open_positions,
+        ),
     )
     return request.model_copy(
         update={
@@ -70,6 +75,7 @@ def authoritative_simulation_request(
             "current_gross_exposure": canonical_gross_exposure,
             "current_asset_exposure": canonical_asset_exposure,
             "current_drawdown": canonical_drawdown,
+            "current_open_positions": int(portfolio_snapshot.get("open_position_count", 0)),
             "limits": effective_limits,
             "server_execution_permitted": simulation_execution_allowed(),
         }

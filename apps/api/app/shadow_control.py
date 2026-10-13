@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .app_state import replay_session, runtime
+from .app_state import runtime
 from .models import KillSwitchState, RuntimeState, SimulationRequest, SystemMode
+from .runtime_control import start_runtime, stop_runtime
 from .shadow_engine import evaluate_shadow_candidate
-from .websockets import hub
 
 router = APIRouter(prefix="/shadow", tags=["shadow-control"])
 
@@ -18,28 +18,12 @@ async def start_shadow_mode() -> RuntimeState:
     the same server-authoritative risk and fill model as paper simulation, but the
     resulting hypothetical fill is never persisted or applied to portfolio state.
     """
-    if runtime.kill_switch != KillSwitchState.ARMED:
-        runtime.running = False
-        return runtime
-
-    replay_session.reset()
-    runtime.mode = SystemMode.SHADOW
-    runtime.running = True
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
+    return await start_runtime(SystemMode.SHADOW)
 
 
 @router.post("/stop", response_model=RuntimeState)
 async def stop_shadow_mode() -> RuntimeState:
-    runtime.running = False
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
+    return await stop_runtime()
 
 
 @router.get("/status")

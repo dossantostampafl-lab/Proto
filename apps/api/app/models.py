@@ -100,6 +100,8 @@ class RiskLimits(BaseModel):
     max_drawdown: float = Field(default=5_000, gt=0)
     max_volatility: float = Field(default=1.5, gt=0)
     max_order_to_book_ratio: float = Field(default=1.0, gt=0, le=1.0)
+    max_position_quantity: float = Field(default=10, gt=0)
+    max_open_positions: int = Field(default=10, ge=1)
 
 
 class SimulationRequest(BaseModel):
@@ -112,6 +114,7 @@ class SimulationRequest(BaseModel):
     current_gross_exposure: float = Field(default=0, ge=0)
     current_asset_exposure: float = Field(default=0, ge=0)
     current_drawdown: float = Field(default=0, ge=0)
+    current_open_positions: int = Field(default=0, ge=0)
     limits: RiskLimits = Field(default_factory=RiskLimits)
     server_execution_permitted: bool = True
 

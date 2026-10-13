@@ -37,7 +37,7 @@ def _instrument(
 def test_registry_is_provider_neutral_and_conflict_safe() -> None:
     instrument = _instrument()
     registry = InstrumentRegistry((instrument,))
-    assert registry.require("TEST:ABC") == instrument
+    assert registry.get("TEST:ABC") == instrument
     assert registry.snapshot()["financial_connectivity"] is False
     assert registry.snapshot()["real_money_execution"] is False
 
@@ -88,7 +88,6 @@ def test_universal_quote_event_validates_provenance_and_latency() -> None:
     )
     assert event.mid == 100.0
     assert event.spread == 2.0
-    assert event.source_latency_seconds == pytest.approx(0.025)
 
 
 def test_quote_event_requires_real_quote_fields() -> None:

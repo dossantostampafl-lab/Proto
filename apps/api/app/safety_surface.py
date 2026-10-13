@@ -10,6 +10,7 @@ from .metrics_state import metrics
 from .models import KillSwitchState
 from .reconciliation_service import reconciliation_status
 from .risk_state import risk_snapshot
+from .runtime_control import broadcast_runtime
 from .websockets import hub
 
 router = APIRouter(tags=["safety"])
@@ -31,13 +32,7 @@ async def enforce_reconciliation() -> dict[str, object]:
             "risk",
             {"type": "risk", "data": risk_snapshot()},
         )
-        await hub.broadcast(
-            "analytics",
-            {
-                "type": "runtime",
-                "data": runtime.model_dump(mode="json"),
-            },
-        )
+        await broadcast_runtime()
 
     return {
         **status,

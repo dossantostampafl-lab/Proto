@@ -20,10 +20,6 @@ class EventBus(Protocol):
 
     async def subscribe(self, stream: str, *, after: str = "0-0") -> AsyncIterator[BusMessage]: ...
 
-    async def ack(self, stream: str, group: str, message_id: str) -> int: ...
-
-    async def retry(self, stream: str, payload: Mapping[str, str]) -> str: ...
-
     async def dead_letter(self, stream: str, payload: Mapping[str, str]) -> str: ...
 
 
@@ -46,13 +42,6 @@ class InMemoryEventBus:
             seq = int(message.message_id.split("-", maxsplit=1)[0])
             if seq > after_seq:
                 yield message
-
-    async def ack(self, stream: str, group: str, message_id: str) -> int:
-        _ = (stream, group, message_id)
-        return 1
-
-    async def retry(self, stream: str, payload: Mapping[str, str]) -> str:
-        return await self.publish(f"{stream}.retry", payload)
 
     async def dead_letter(self, stream: str, payload: Mapping[str, str]) -> str:
         return await self.publish(f"{stream}.dead_letter", payload)
@@ -88,12 +77,6 @@ class RedisStreamsEventBus:
                     }
                     cursor = resolved_id
                     yield BusMessage(resolved_id, resolved_stream, resolved_payload)
-
-    async def ack(self, stream: str, group: str, message_id: str) -> int:
-        return int(await self._redis.xack(stream, group, message_id))
-
-    async def retry(self, stream: str, payload: Mapping[str, str]) -> str:
-        return await self.publish(f"{stream}.retry", payload)
 
     async def dead_letter(self, stream: str, payload: Mapping[str, str]) -> str:
         return await self.publish(f"{stream}.dead_letter", payload)

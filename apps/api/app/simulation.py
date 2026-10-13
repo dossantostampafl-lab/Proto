@@ -108,6 +108,11 @@ class RiskEngine:
             return False, "max drawdown exceeded"
         if projected_position_notional > request.limits.max_position_notional:
             return False, "max position notional exceeded"
+        if abs(projected_quantity) > request.limits.max_position_quantity and not risk_reducing:
+            return False, "max position quantity exceeded"
+        open_slots_full = request.current_open_positions >= request.limits.max_open_positions
+        if request.current_position_quantity == 0.0 and open_slots_full:
+            return False, "max open positions exceeded"
         if projected_gross_exposure > request.limits.max_gross_exposure:
             return False, "max gross exposure exceeded"
         if projected_concentration > request.limits.max_asset_concentration:
@@ -168,9 +173,6 @@ class PaperSimulator:
         rounding = ROUND_CEILING if side == Side.BUY else ROUND_FLOOR
         grid_ticks = ticks.to_integral_value(rounding=rounding)
         return grid_ticks * tick_size
-
-    def _price_on_grid(self, raw_price: float | Decimal, side: Side) -> float:
-        return float(self._price_on_grid_decimal(raw_price, side))
 
     def _depth_impact_bps(self, *, order_quantity: float, available_quantity: float) -> float:
         if available_quantity <= 0.0:

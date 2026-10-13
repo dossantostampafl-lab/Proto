@@ -7,7 +7,7 @@ Research terminal for deterministic market simulation, paper trading, and histor
 
 ## Quick start
 
-Requirements: Python 3.13+, Node 22+, and Rust 1.85.
+Requirements: Python 3.13+ and Node 22+.
 
 ```bash
 python -m pip install -e '.[dev]'
@@ -28,8 +28,9 @@ Open `http://localhost:5173`. The API is available at `http://localhost:8000`.
 ## What is included
 
 - probability, calibration, Hawkes, feature, sizing, Greeks, markout and P&L research primitives;
-- deterministic Rust risk gates with reservations, cumulative batch controls and volatility gating;
-- risk-admitted simulated execution: orders cannot become validated before the Rust risk gate approves them;
+- one server-side risk gate (`apps/api/app/simulation.py`): kill switch, order/position notional,
+  position quantity, open positions, exposure, concentration, drawdown, volatility, liquidity and
+  slippage limits; every paper order passes it inside one serialized critical section;
 - simulated fills, temporal portfolio exposure, P&L attribution, optional PostgreSQL journal, recovery and reconciliation;
 - replay start, pause, resume, step, seek, speed, restart and reset controls with deterministic replay/fill clocks;
 - WebSocket market data, order book, signal, risk, portfolio, fill and analytics channels;
@@ -38,7 +39,7 @@ Open `http://localhost:5173`. The API is available at `http://localhost:8000`.
 - fail-closed model promotion requiring recorded validation evidence;
 - request IDs, runtime/portfolio/temporal metrics, liveness, readiness and bounded WebSocket fan-out;
 - HUD dashboard (Command · Trade · Lab · Replay · System) with explicit data provenance — see [DESIGN.md](DESIGN.md);
-- Python, Rust, web, security and Graphify CI gates.
+- Python, web, compose, security and Graphify CI gates.
 
 ## Architecture
 
@@ -74,6 +75,7 @@ Only these modes are valid:
 - `SIMULATION`
 - `PAPER_TRADING`
 - `HISTORICAL_REPLAY`
+- `LIVE_MONITORING` (default: public read-only BTC/ETH/SOL telemetry)
 
 The API reports `real_money_execution: false` in risk and metrics responses. The kill switch
 halts simulation and replay processing.
@@ -90,9 +92,6 @@ halts simulation and replay processing.
 ```bash
 ruff check apps services tests
 pytest
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
 cd apps/web && npm run typecheck && npm run contract-check && npm run build && npm run bundle-check
 ```
 

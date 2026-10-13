@@ -17,7 +17,7 @@ from .l2_corpus_storage import (
     verify_public_l2_corpus,
 )
 from .public_feed_parser import MAX_EVENTS_PER_FRAME
-from .public_l2 import PublicL2Book, PublicL2Frame
+from .public_l2 import PublicL2Book, PublicL2Frame, l2_event_payload
 
 
 class PublicL2CorpusRecord(BaseModel):
@@ -103,7 +103,6 @@ def _event_payload(
     event_index: int,
     dataset_content_sha256: str,
 ) -> dict[str, object]:
-    event = record.frame.events[event_index]
     return {
         "channel": "l2_data",
         "dataset_content_sha256": dataset_content_sha256,
@@ -111,18 +110,7 @@ def _event_payload(
         "event_index": event_index,
         "connection_generation": record.connection_generation,
         "wire_sequence": record.frame.sequence,
-        "product_id": event.product_id,
-        "asset": event.asset,
-        "event_type": event.event_type,
-        "updates": [
-            {
-                "side": update.side,
-                "price_level": str(update.price),
-                "new_quantity": str(update.quantity),
-                "event_time": update.event_time.isoformat(),
-            }
-            for update in event.updates
-        ],
+        **l2_event_payload(record.frame.events[event_index]),
     }
 
 

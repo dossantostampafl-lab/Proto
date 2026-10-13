@@ -321,19 +321,6 @@ class SqlJobStore:
             record = await session.get(JobRunRecord, run_id)
             return record.as_run() if record is not None else None
 
-    async def list_dead_letters(self, limit: int = 100) -> list[JobRun]:
-        safe_limit = min(max(limit, 1), 1_000)
-        async with self.session_factory() as session:
-            records = (
-                await session.scalars(
-                    select(JobRunRecord)
-                    .where(JobRunRecord.state == JobState.DEAD_LETTER.value)
-                    .order_by(JobRunRecord.updated_at.desc())
-                    .limit(safe_limit)
-                )
-            ).all()
-            return [record.as_run() for record in records]
-
     async def _owned_running(
         self,
         session: AsyncSession,

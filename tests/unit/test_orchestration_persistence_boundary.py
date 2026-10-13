@@ -15,13 +15,6 @@ def test_api_enables_orchestration_without_general_simulation_persistence() -> N
     assert "\n    PERSISTENCE_ENABLED=true" not in dockerfile
 
 
-def test_settings_expose_separate_orchestration_persistence_switch() -> None:
-    settings = (ROOT / "apps/api/app/settings.py").read_text()
-    assert "orchestration_persistence_enabled: bool = False" in settings
-    assert "def orchestration_persistence_active" in settings
-    assert "def durable_database_configured" in settings
-
-
 def test_effective_orchestration_persistence_honors_explicit_switch() -> None:
     settings = Settings(
         orchestration_persistence_enabled=True,
@@ -77,15 +70,13 @@ def test_orchestration_engine_isolated_from_simulation_persistence() -> None:
     assert "DecisionMemoryStore(orchestration_engine)" in app_state
 
 
-def test_production_surface_exposes_only_sanitized_database_diagnostics() -> None:
-    surface = (ROOT / "apps/api/app/orchestration_surface.py").read_text()
-    assert "settings.durable_database_configured" in surface
-    assert '"database_driver": settings.database_driver' in surface
-    assert '"durable_backend": durable_backend' in surface
-    assert '"durable_safe_scope": safe_scope_ready and durable_backend' in surface
-    assert '"general_simulation_persistence_enabled": settings.persistence_enabled' in surface
-    assert (
-        '"orchestration_persistence_enabled": settings.orchestration_persistence_active'
-        in surface
-    )
-    assert '"database_url"' not in surface
+def test_orchestration_status_exposes_only_sanitized_database_diagnostics() -> None:
+    from fastapi.testclient import TestClient
+
+    from apps.api.app.main import app
+
+    body = TestClient(app).get("/orchestration/status").text
+
+    assert "database_driver" in body
+    assert "database_url" not in body
+    assert "://" not in body  # no DSN (and therefore no credentials) leaks

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from services.validation import (
@@ -15,18 +14,7 @@ from services.validation import (
 from .app_state import persistence_engine
 from .metrics_state import metrics
 from .research_persistence import persist_model_promotion_decision
-
-router = APIRouter(prefix="/research/validation", tags=["research", "validation"])
-
-
-def _json_safe(value: object) -> object:
-    if is_dataclass(value):
-        return _json_safe(asdict(value))
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    return value
+from .validation_surface import json_safe
 
 
 class PromotionEvidenceRequest(BaseModel):
@@ -116,7 +104,6 @@ class PromotionEvaluationRequest(BaseModel):
     policy: PromotionPolicyRequest = Field(default_factory=PromotionPolicyRequest)
 
 
-@router.post("/promotion/evaluate")
 async def promotion_evaluate_endpoint(
     request: PromotionEvaluationRequest,
 ) -> dict[str, object]:
@@ -140,7 +127,7 @@ async def promotion_evaluate_endpoint(
         "experiment_id": decision.experiment_id,
         "status": decision.status,
         "promotion_eligible": decision.promotion_eligible,
-        "checks": _json_safe(decision.checks),
+        "checks": json_safe(decision.checks),
         "failed_checks": list(decision.failed_checks),
         "decision_fingerprint": decision.decision_fingerprint,
         "paper_trading_only": decision.paper_trading_only,

@@ -70,7 +70,3 @@ class MarketEvent(BaseModel):
         if self.bid is None or self.ask is None:
             return None
         return self.ask - self.bid
-
-    @property
-    def source_latency_seconds(self) -> float:
-        return (self.received_at - self.observed_at).total_seconds()
