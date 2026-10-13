@@ -44,7 +44,7 @@ from .contracts import (
     TradeIntent,
     transition,
 )
-from .venue import VenueAdapter, VenueOrder
+from .venue import PaperVenueAdapter, VenueAdapter, VenueOrder
 
 oms_metadata = MetaData()
 
@@ -292,12 +292,28 @@ class CanonicalPaperOMS:
             raise OrderRejected("invalid_venue_grid")
         if intent.side == "BUY":
             asset = instrument.quote_asset
-            amount = intent.quantity * intent.limit_price
+            if not isinstance(self.adapter, PaperVenueAdapter):
+                raise OrderRejected("paper_fee_schedule_unavailable")
+            amount = intent.quantity * intent.limit_price * (
+                Decimal("1") + self.adapter.max_fee_bps / Decimal("10000")
+            )
         else:
             if not intent.reduce_only:
                 raise OrderRejected("sell_requires_reduce_only")
             asset = instrument.base_asset
             amount = intent.quantity
+        # Serialize reservations against the same asset under PostgreSQL.
+        # On SQLite, a writer conflict fails closed rather than double-spending.
+        locked = await connection.scalar(
+            select(opening_balances.c.asset)
+            .where(
+                opening_balances.c.venue == intent.venue.value,
+                opening_balances.c.asset == asset,
+            )
+            .with_for_update()
+        )
+        if locked is None:
+            raise OrderRejected("ledger_asset_not_initialized")
         if await self._available_locked(connection, asset) < amount:
             raise OrderRejected("insufficient_available_balance")
         await connection.execute(
