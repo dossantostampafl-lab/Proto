@@ -114,6 +114,12 @@ class PaperVenueAdapter:
     def real_money_execution(self) -> bool:
         return False
 
+    @property
+    def max_fee_bps(self) -> Decimal:
+        """Upper bound used for paper reservations before submitting an order."""
+
+        return self._fee_bps
+
     async def submit(self, order: VenueOrder) -> ExecutionReport:
         existing = self._orders.get(order.client_order_id)
         if existing is not None:
