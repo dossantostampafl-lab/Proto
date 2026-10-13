@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__
+from . import __version__, phase4_surface
 from .agent_surface import router as agent_router
 from .app_state import orchestration_engine, persistence_engine
 from .core_routes import router as core_router
@@ -35,9 +35,8 @@ from .orchestration_surface import router as orchestration_router
 from .paper_autonomy_bootstrap import router as paper_autonomy_router
 from .paper_autopilot import router as paper_autopilot_router
 from .paper_control import router as paper_control_router
-from .phase4_surface import router as execution_router
-from . import phase4_surface
 from .persistence import init_database
+from .phase4_surface import router as execution_router
 from .research import metrics
 from .research import router as research_router
 from .risk_surface import governor as risk_governor
