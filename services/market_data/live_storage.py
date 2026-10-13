@@ -63,13 +63,6 @@ class LiveTickJournal(Protocol):
         connection_generation: int,
     ) -> bool: ...
 
-    async def list_recent(
-        self,
-        *,
-        symbol: str,
-        limit: int = 100,
-    ) -> Sequence[PersistedLiveTick]: ...
-
     async def list_page(
         self,
         *,

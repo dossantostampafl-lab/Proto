@@ -62,14 +62,6 @@ class DeterministicFlakyJournal:
         )
         return True
 
-    async def list_recent(
-        self,
-        *,
-        symbol: str,
-        limit: int = 100,
-    ) -> list[PersistedLiveTick]:
-        return [row for row in reversed(self.rows) if row.tick.symbol == symbol][:limit]
-
     async def prune_before(self, cutoff: datetime) -> int:
         before = len(self.rows)
         self.rows = [row for row in self.rows if row.received_at >= cutoff]
@@ -84,13 +76,15 @@ class DeterministicFlakyJournal:
         }
 
 
-def _tick(sequence: int, base: datetime | None = None) -> MarketTick:
-    # Deterministic, strictly increasing timestamps: the wall clock can step backwards
-    # (e.g. WSL/NTP resync), which the quality monitor rightly rejects as out-of-order.
-    start = base or datetime.now(UTC)
+def _tick(sequence: int, previous: datetime | None = None) -> MarketTick:
+    # Fresh but strictly increasing timestamps. A fixed window goes stale (>10 s) when a
+    # loaded machine is slow, and the raw wall clock can step backwards (WSL/NTP resync);
+    # the quality monitor rightly rejects both, so neither may leak into this test.
+    now = datetime.now(UTC)
+    timestamp = now if previous is None else max(now, previous + timedelta(microseconds=1))
     price = 60_000.0 + sequence / 100.0
     return MarketTick(
-        timestamp=start + timedelta(milliseconds=sequence),
+        timestamp=timestamp,
         venue="coinbase-public",
         symbol="BTC",
         bid=price,
@@ -114,10 +108,11 @@ async def test_required_durability_recovers_across_repeated_transient_failures()
 
     accepted = 0
     rejected = 0
-    # 1,000 ticks one millisecond apart, ending "now": never stale, never in the future.
-    base = datetime.now(UTC) - timedelta(seconds=1)
+    previous: datetime | None = None
     for sequence in range(1, 1_001):
-        if await monitor.ingest_tick(_tick(sequence, base)):
+        tick = _tick(sequence, previous)
+        previous = tick.timestamp
+        if await monitor.ingest_tick(tick):
             accepted += 1
         else:
             rejected += 1

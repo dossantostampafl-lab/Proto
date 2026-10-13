@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Server cap on absolute paper position size per asset, in units.
     max_position: float = Field(default=10.0, gt=0.0, allow_inf_nan=False)
     simulation_max_open_positions: int = Field(default=10, ge=1, le=1_000)
+    # When true, risk-increasing paper orders must clear minimum_net_edge and
+    # minimum_confidence, computed server-side with the simulator's own costs.
+    simulation_edge_gate_enabled: bool = False
     max_notional: float = Field(default=100_000.0, gt=0.0, allow_inf_nan=False)
     max_daily_drawdown: float = Field(default=5_000.0, gt=0.0, allow_inf_nan=False)
     simulation_max_order_notional: float = Field(

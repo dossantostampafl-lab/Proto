@@ -102,6 +102,9 @@ class RiskLimits(BaseModel):
     max_order_to_book_ratio: float = Field(default=1.0, gt=0, le=1.0)
     max_position_quantity: float = Field(default=10, gt=0)
     max_open_positions: int = Field(default=10, ge=1)
+    # Optional research gates for risk-increasing orders (None = not enforced).
+    min_net_edge: float | None = Field(default=None, ge=0, le=1)
+    min_confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class SimulationRequest(BaseModel):

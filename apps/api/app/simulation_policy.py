@@ -5,6 +5,12 @@ from .risk_state import simulation_execution_allowed
 from .settings import settings
 
 
+def _strictest_floor(requested: float | None, server: float | None) -> float | None:
+    """A client may ask for a stricter minimum, never a looser one."""
+    floors = [value for value in (requested, server) if value is not None]
+    return max(floors) if floors else None
+
+
 def authoritative_simulation_request(
     request: SimulationRequest,
     portfolio_snapshot: dict[str, object],
@@ -66,6 +72,14 @@ def authoritative_simulation_request(
         max_open_positions=min(
             requested_limits.max_open_positions,
             settings.simulation_max_open_positions,
+        ),
+        min_net_edge=_strictest_floor(
+            requested_limits.min_net_edge,
+            settings.minimum_net_edge if settings.simulation_edge_gate_enabled else None,
+        ),
+        min_confidence=_strictest_floor(
+            requested_limits.min_confidence,
+            settings.minimum_confidence if settings.simulation_edge_gate_enabled else None,
         ),
     )
     return request.model_copy(

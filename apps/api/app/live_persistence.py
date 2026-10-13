@@ -278,15 +278,6 @@ class AsyncSqlLiveTickJournal:
                 self._last_maintenance_error = type(error.__cause__ or error).__name__
         return True
 
-    async def list_recent(
-        self,
-        *,
-        symbol: str,
-        limit: int = 100,
-    ) -> list[PersistedLiveTick]:
-        page = await self.list_page(symbol=symbol, limit=limit)
-        return list(page.items)
-
     async def list_page(
         self,
         *,

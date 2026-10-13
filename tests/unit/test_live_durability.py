@@ -65,14 +65,6 @@ class RecordingJournal:
             )
         return self.inserted
 
-    async def list_recent(
-        self,
-        *,
-        symbol: str,
-        limit: int = 100,
-    ) -> list[PersistedLiveTick]:
-        return [row for row in reversed(self.rows) if row.tick.symbol == symbol][:limit]
-
     async def list_page(
         self,
         *,

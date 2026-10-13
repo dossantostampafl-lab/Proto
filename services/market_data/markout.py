@@ -5,10 +5,18 @@ from datetime import datetime, timedelta
 from statistics import median
 from typing import Literal
 
-from .l2_corpus_replay import PublicL2ReplaySnapshot
+from .contracts import OrderBookSnapshot
 
 Side = Literal["BUY", "SELL"]
 DEFAULT_MARKOUT_HORIZONS_MS = (100, 500, 1_000, 5_000, 30_000)
+
+
+@dataclass(frozen=True, slots=True)
+class PublicL2ReplaySnapshot:
+    record_index: int
+    connection_generation: int
+    wire_sequence: int
+    snapshot: OrderBookSnapshot
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 
 import pytest
@@ -7,7 +7,6 @@ from apps.api.app.live_monitor import LiveCryptoMonitor
 from services.market_data import (
     LiveTickJournalError,
     MarketTick,
-    PersistedLiveTick,
     PersistedLiveTickPage,
     PublicFeedHealth,
 )
@@ -55,15 +54,6 @@ class FailOnceJournal:
         if self.calls == 1:
             raise LiveTickJournalError("temporary write failure")
         return True
-
-    async def list_recent(
-        self,
-        *,
-        symbol: str,
-        limit: int = 100,
-    ) -> Sequence[PersistedLiveTick]:
-        del symbol, limit
-        return ()
 
     async def list_page(
         self,
