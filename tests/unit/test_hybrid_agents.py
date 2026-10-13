@@ -525,3 +525,20 @@ async def test_promotion_needs_enough_cases() -> None:
     result = await evaluate_reviewer(cases, OracleReviewer(losers), {BTC_ID: BTC})
     assert result.promotable is False
     assert result.reason == "needs at least 50 cases"
+
+
+async def test_pipeline_awaits_durable_portfolio_provider_before_sizing() -> None:
+    async def portfolio_from_ledger(_instrument_id: str) -> PortfolioView:
+        return PortfolioView(equity=Decimal("5000"), position_quantity=Decimal("0"))
+
+    worker = HybridDecisionPipeline(
+        instruments={BTC_ID: BTC},
+        reviewer=DeterministicReviewer(),
+        quotes=lambda instrument_id: QUOTE,
+        portfolio=portfolio_from_ledger,
+        clock=lambda: NOW,
+    )
+    decision = await worker.evaluate(BTC_ID, [signal()])
+    assert decision.outcome is DecisionOutcome.APPROVED
+    assert decision.proposal is not None
+    assert decision.proposal.quantity == Decimal("0.00142")
