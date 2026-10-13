@@ -11,13 +11,22 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.risk.engine import AccountState
 from services.risk.permits import PermitSigner
 
-from .contracts import ExecutionReport, RiskPermit, TradableInstrument, TradeIntent, VenueId
-from .oms import CanonicalPaperOMS, OrderRejected
+from .contracts import (
+    TERMINAL_ORDER_STATUSES,
+    ExecutionReport,
+    OrderStatus,
+    RiskPermit,
+    TradableInstrument,
+    TradeIntent,
+    VenueId,
+)
+from .oms import CanonicalPaperOMS, OrderRejected, order_records, reservations
 from .venue import PaperVenueAdapter, Quote
 
 
@@ -74,6 +83,32 @@ class Phase4PaperRuntime:
         if self._task is not None and self.background_failure is not None:
             raise OrderRejected("reconciliation_supervisor_failed")
         await self.oms.bootstrap(now=now)
+        # After a clean restart the paper adapter has no broker-side state.
+        # Hydrate it solely from the durable ledger when all historical orders
+        # are terminal. Pending/UNKNOWN orders require manual recovery instead.
+        async with self.oms.engine.connect() as connection:
+            statuses = (
+                await connection.execute(
+                    select(order_records.c.status).where(
+                        order_records.c.venue == self.adapter.venue.value
+                    )
+                )
+            ).scalars().all()
+            outstanding = (
+                await connection.execute(
+                    select(reservations.c.remaining).where(
+                        reservations.c.venue == self.adapter.venue.value
+                    )
+                )
+            ).scalars().all()
+            if (
+                any(OrderStatus(value) not in TERMINAL_ORDER_STATUSES for value in statuses)
+                or any(Decimal(value) > 0 for value in outstanding)
+            ):
+                raise OrderRejected("unsettled_orders_require_recovery")
+            if statuses:
+                verified_balances = await self.oms._balances_locked(connection)
+                self.adapter.restore_closed_balances(verified_balances)
         result = await self.oms.reconcile(tolerance=Decimal("0"))
         if not result["ok"]:
             raise OrderRejected("startup_reconciliation_failed")
