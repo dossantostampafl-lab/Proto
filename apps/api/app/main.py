@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .agent_surface import router as agent_router
-from .app_state import persistence_engine
+from .app_state import orchestration_engine, persistence_engine
 from .core_routes import router as core_router
 from .creation_surface import router as creation_router
 from .equity_market_surface import router as equity_market_router
@@ -35,9 +35,12 @@ from .orchestration_surface import router as orchestration_router
 from .paper_autonomy_bootstrap import router as paper_autonomy_router
 from .paper_autopilot import router as paper_autopilot_router
 from .paper_control import router as paper_control_router
+from .phase4_surface import router as execution_router
+from . import phase4_surface
 from .persistence import init_database
 from .research import metrics
 from .research import router as research_router
+from .risk_surface import governor as risk_governor
 from .risk_surface import router as risk_router
 from .settings import settings
 from .shadow_control import router as shadow_control_router
@@ -52,9 +55,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if persistence_engine is not None:
         await init_database(persistence_engine)
     await operational_journal.start()
-    yield
-    if persistence_engine is not None:
-        await persistence_engine.dispose()
+    if settings.canonical_paper_oms_enabled:
+        engine = persistence_engine if persistence_engine is not None else orchestration_engine
+        if engine is None:
+            raise RuntimeError("canonical paper OMS requires a durable database engine")
+        await phase4_surface.start(engine, risk_governor().engine._signer)
+    try:
+        yield
+    finally:
+        await phase4_surface.stop()
+        if persistence_engine is not None:
+            await persistence_engine.dispose()
 
 app = FastAPI(
     title="Prediction Market Quant Engine",
@@ -88,6 +99,7 @@ for router in (
     signal_router,
     agent_router,
     risk_router,
+    execution_router,
 ):
     app.include_router(router)
 
