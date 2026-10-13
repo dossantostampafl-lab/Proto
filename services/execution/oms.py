@@ -22,6 +22,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    UniqueConstraint,
     insert,
     select,
     update,
@@ -69,6 +70,28 @@ order_records = Table(
     Column("venue_order_id", String(80), nullable=True),
     Column("reason", String(200), nullable=True),
     Column("reported_at", DateTime(timezone=True), nullable=False),
+)
+
+fill_records = Table(
+    "execution_fills",
+    oms_metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column(
+        "client_order_id",
+        String(36),
+        ForeignKey("execution_orders.client_order_id"),
+        nullable=False,
+    ),
+    Column("venue_order_id", String(80), nullable=True),
+    Column("delta_quantity", String(80), nullable=False),
+    Column("cumulative_quantity", String(80), nullable=False),
+    Column("delta_notional", String(80), nullable=False),
+    Column("delta_fee", String(80), nullable=False),
+    Column("fee_asset", String(20), nullable=True),
+    Column("reported_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "client_order_id", "cumulative_quantity", name="uq_execution_fill_cumulative"
+    ),
 )
 
 balance_entries = Table(
@@ -472,6 +495,18 @@ class CanonicalPaperOMS:
                 raise OrderRejected("non_monotonic_venue_report")
             instrument = self._instruments[row["instrument_id"]]
             if delta_qty > 0:
+                await connection.execute(
+                    insert(fill_records).values(
+                        client_order_id=report.client_order_id,
+                        venue_order_id=report.venue_order_id,
+                        delta_quantity=_str(delta_qty),
+                        cumulative_quantity=_str(report.filled_quantity),
+                        delta_notional=_str(delta_notional),
+                        delta_fee=_str(delta_fee),
+                        fee_asset=report.fee_asset,
+                        reported_at=report.reported_at,
+                    )
+                )
                 sign = Decimal("1") if row["side"] == "BUY" else Decimal("-1")
                 for asset, amount in (
                     (instrument.base_asset, delta_qty * sign),
