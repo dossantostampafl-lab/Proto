@@ -20,6 +20,7 @@ from .contracts import (
     OrderStatus,
     OrderType,
     PositiveDecimal,
+    TimeInForce,
     TradableInstrument,
     VenueId,
     _Contract,
@@ -37,6 +38,8 @@ class VenueOrder(_Contract):
     quantity: PositiveDecimal
     order_type: OrderType
     limit_price: PositiveDecimal | None = None
+    time_in_force: TimeInForce = TimeInForce.GTC
+    reduce_only: bool = False
 
     @model_validator(mode="after")
     def validate_price(self) -> VenueOrder:
@@ -191,6 +194,8 @@ class PaperVenueAdapter:
                 violation = instrument.order_violation(order.quantity, order.limit_price)
                 if violation is not None:
                     return self._reject(order, violation)
+                if order.time_in_force is TimeInForce.IOC:
+                    return self._report(order, OrderStatus.CANCELED)
                 return self._report(order, OrderStatus.ACKNOWLEDGED)
             price = min(price, order.limit_price) if buying else max(price, order.limit_price)
 
