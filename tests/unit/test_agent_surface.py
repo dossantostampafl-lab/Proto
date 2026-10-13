@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from apps.api.app import agent_surface, main, signal_surface
+from apps.api.app import agent_surface, main, risk_surface, signal_surface
 from apps.api.app.event_state import operational_journal
 from apps.api.app.settings import Settings
 from services.agents import DeterministicReviewer
@@ -25,10 +25,11 @@ def configure(monkeypatch, **overrides) -> Settings:
     }
     values.update(overrides)
     configured = Settings(**values)
-    for module in (main, signal_surface, agent_surface):
+    for module in (main, signal_surface, agent_surface, risk_surface):
         monkeypatch.setattr(module, "settings", configured)
     signal_surface.reset_signal_state()
     agent_surface.reset_agent_state()
+    risk_surface.reset_risk_state()
     return configured
 
 
@@ -37,6 +38,7 @@ def _reset():
     yield
     signal_surface.reset_signal_state()
     agent_surface.reset_agent_state()
+    risk_surface.reset_risk_state()
 
 
 def live_snapshot(symbol: str, *, venue: str = "BINANCE", age: float = 1.0):
@@ -88,9 +90,13 @@ def test_accepted_signal_triggers_a_journaled_paper_proposal(monkeypatch) -> Non
     assert decision["proposal"]["side"] == "BUY"
     assert decision["proposal"]["stage"] == "PAPER"
     assert decision["order_authority"] is False
-    events = [e.event_type for e in operational_journal.journal.recent(2)]
-    assert events == ["TRADINGVIEW_SIGNAL_ACCEPTED", "AGENT_DECISION"]
-    assert operational_journal.journal.head_sequence == before + 2
+    events = [e.event_type for e in operational_journal.journal.recent(3)]
+    assert events == ["TRADINGVIEW_SIGNAL_ACCEPTED", "AGENT_DECISION", "RISK_DECISION"]
+    assert operational_journal.journal.head_sequence == before + 3
+    risk = operational_journal.journal.recent(1)[0].payload
+    assert risk["approved"] is True
+    assert risk["intent_fingerprint"] == decision["proposal_fingerprint"]
+    assert "signature" not in json.dumps(risk)
 
 
 def test_brl_pairs_abstain_without_a_brl_quote(monkeypatch) -> None:

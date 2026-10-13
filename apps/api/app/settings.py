@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     agent_effort: str = "low"
     agent_timeout_seconds: float = Field(default=15.0, gt=0.0, le=60.0, allow_inf_nan=False)
     agent_stop_distance: float = Field(default=0.02, gt=0.0, lt=0.5, allow_inf_nan=False)
+    # Risk Engine (Phase 3). Unset key -> ephemeral per-process key (permits live seconds).
+    risk_permit_signing_key: str | None = None
+    risk_permit_ttl_seconds: float = Field(default=10.0, gt=0.0, le=60.0, allow_inf_nan=False)
+    risk_stop_distance: float = Field(default=0.02, gt=0.0, lt=0.5, allow_inf_nan=False)
+    risk_price_collar_bps: float = Field(default=50.0, gt=0.0, le=500.0, allow_inf_nan=False)
+    risk_max_quote_age_seconds: float = Field(default=10.0, gt=0.0, le=60.0, allow_inf_nan=False)
     operator_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
     public_origin: str | None = None
@@ -158,6 +164,7 @@ class Settings(BaseSettings):
         "creation_bridge_shared_secret",
         "operator_api_token",
         "tradingview_webhook_secret",
+        "risk_permit_signing_key",
     )
     @classmethod
     def normalize_optional_secret(cls, value: str | None) -> str | None:
@@ -188,6 +195,13 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "TRADINGVIEW_WEBHOOK_SECRET must be at least 32 characters in production"
+            )
+        if (
+            self.risk_permit_signing_key is not None
+            and len(self.risk_permit_signing_key) < _MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            raise ValueError(
+                "RISK_PERMIT_SIGNING_KEY must be at least 32 characters in production"
             )
         if not self.tradingview_ip_allowlist_enabled:
             raise ValueError("TRADINGVIEW_IP_ALLOWLIST_ENABLED must stay true in production")
