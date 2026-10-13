@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -35,7 +35,7 @@ async def paper_account(tmp_path):
         return Quote(
             bid=Decimal("349990"),
             ask=Decimal("350010"),
-            observed_at=datetime.now(UTC),
+            observed_at=datetime.now(UTC) - timedelta(milliseconds=100),
         )
 
     worker = Phase4PaperRuntime(
