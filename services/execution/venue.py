@@ -93,11 +93,15 @@ class PaperVenueAdapter:
         fee_bps: Decimal,
         slippage_bps: Decimal,
         clock: Callable[[], datetime] = _utc_now,
+        simulated_venue: VenueId = VenueId.PAPER,
     ) -> None:
-        if any(instrument.venue is not VenueId.PAPER for instrument in instruments):
-            raise ValueError("PaperVenueAdapter only trades PAPER instruments")
+        if simulated_venue not in {VenueId.PAPER, VenueId.BINANCE_SPOT}:
+            raise ValueError("unsupported paper simulation venue")
+        if any(instrument.venue is not simulated_venue for instrument in instruments):
+            raise ValueError("PaperVenueAdapter only trades PAPER instruments of its simulated venue")
         if fee_bps < 0 or slippage_bps < 0:
             raise ValueError("fee_bps and slippage_bps must be non-negative")
+        self._simulated_venue = simulated_venue
         self._instruments = {item.instrument_id: item for item in instruments}
         self._quotes = quotes
         self._balances = {asset: Decimal(amount) for asset, amount in balances.items()}
@@ -108,7 +112,7 @@ class PaperVenueAdapter:
 
     @property
     def venue(self) -> VenueId:
-        return VenueId.PAPER
+        return self._simulated_venue
 
     @property
     def real_money_execution(self) -> bool:
@@ -158,7 +162,7 @@ class PaperVenueAdapter:
         reason: str | None = None,
     ) -> ExecutionReport:
         return ExecutionReport(
-            venue=VenueId.PAPER,
+            venue=self._simulated_venue,
             client_order_id=order.client_order_id,
             venue_order_id=f"paper-{order.client_order_id}",
             instrument_id=order.instrument_id,
