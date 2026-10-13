@@ -19,6 +19,7 @@ dependencies = [
   "aiosqlite>=0.21,<1",
   "httpx>=0.28,<1",
   "websockets>=17,<18",
+  "anthropic>=1.13,<2",
 ]
 
 [project.optional-dependencies]

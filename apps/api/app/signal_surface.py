@@ -17,6 +17,7 @@ from services.signals.tradingview import (
     TradingViewIngestor,
 )
 
+from .agent_surface import on_signal_accepted
 from .event_state import JournalUnavailable, record_operational_event
 from .security import SlidingWindowRateLimiter, request_client_key
 from .settings import settings
@@ -123,6 +124,7 @@ async def tradingview_webhook(request: Request) -> dict[str, object]:
             ) from exc
         if recorded.created:
             _recent.append(result.signal)
+            on_signal_accepted(result.signal)
         else:
             # Journaled before a restart or after the in-memory dedupe window evicted it.
             outcome = IngestOutcome.DUPLICATE

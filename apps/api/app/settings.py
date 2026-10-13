@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     tradingview_max_alert_age_seconds: float = Field(
         default=30.0, gt=0.0, le=300.0, allow_inf_nan=False
     )
+    # Hybrid agent pipeline (Phase 2). Proposals only: no order authority.
+    agent_pipeline_enabled: bool = False
+    # "deterministic" approves every sized candidate; "claude" adds the AI reviewer,
+    # which may only reduce, defer or veto. Switch only after the offline gate passes.
+    agent_reviewer: str = "deterministic"
+    agent_model: str = "claude-opus-5-5"
+    agent_effort: str = "low"
+    agent_timeout_seconds: float = Field(default=15.0, gt=0.0, le=60.0, allow_inf_nan=False)
+    agent_stop_distance: float = Field(default=0.02, gt=0.0, lt=0.5, allow_inf_nan=False)
     operator_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
     public_origin: str | None = None
@@ -109,6 +118,22 @@ class Settings(BaseSettings):
         except SafetyPolicyError as error:
             raise ValueError(str(error)) from error
         return value.strip().upper()
+
+    @field_validator("agent_reviewer")
+    @classmethod
+    def enforce_agent_reviewer(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"deterministic", "claude"}:
+            raise ValueError("agent_reviewer must be deterministic or claude")
+        return normalized
+
+    @field_validator("agent_effort")
+    @classmethod
+    def enforce_agent_effort(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"low", "medium", "high", "xhigh", "max"}:
+            raise ValueError("agent_effort must be low, medium, high, xhigh or max")
+        return normalized
 
     @field_validator("live_market_source")
     @classmethod
