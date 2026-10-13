@@ -35,11 +35,6 @@ def validate_runtime_mode(system_mode: str) -> SafetyPolicyState:
     )
 
 
-def validate_sandbox_mode(system_mode: str) -> SafetyPolicyState:
-    """Backward-compatible runtime validator retained for existing imports."""
-    return validate_runtime_mode(system_mode)
-
-
 def policy_snapshot(system_mode: str) -> dict[str, object]:
     state = validate_runtime_mode(system_mode)
     return {

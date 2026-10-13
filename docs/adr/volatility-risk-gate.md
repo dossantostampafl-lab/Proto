@@ -1,6 +1,6 @@
 # Volatility Risk Gate
 
-The Rust risk engine exposes `RiskManager::evaluate_with_volatility` for deterministic market-specific volatility gating in research, simulation, replay, and paper-trading paths.
+The Python risk gate (`RiskEngine.validate` in `apps/api/app/simulation.py`) rejects new risk when snapshot volatility exceeds `max_volatility`, in simulation, replay and paper trading. Risk-reducing orders stay allowed.
 
 ## Policy
 

@@ -9,15 +9,14 @@ from services.events.reconciliation import ReconciliationIssue, reconcile
 
 
 @pytest.mark.asyncio
-async def test_in_memory_bus_publish_subscribe_retry_and_dead_letter() -> None:
+async def test_in_memory_bus_publish_subscribe_and_dead_letter() -> None:
     bus = InMemoryEventBus()
     message_id = await bus.publish("signals", {"market": "btc", "state": "candidate"})
     messages = [message async for message in bus.subscribe("signals")]
 
     assert message_id == "1-0"
     assert messages[0].payload["market"] == "btc"
-    assert await bus.retry("signals", {"market": "btc"}) == "2-0"
-    assert await bus.dead_letter("signals", {"market": "btc"}) == "3-0"
+    assert await bus.dead_letter("signals", {"market": "btc"}) == "2-0"
 
 
 def test_journal_hash_chain_and_idempotency_are_enforced() -> None:

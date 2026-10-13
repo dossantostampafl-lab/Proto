@@ -7,7 +7,6 @@ Proto uses benchmark-driven engineering: external projects are studied for matur
 - License verified: MIT.
 - Role: prediction-market architecture and risk benchmark.
 - Patterns studied: fail-closed/veto-only risk gates, reservations for working orders, cumulative batch checks, correlated exposure limits, reconciliation gating, deterministic paper execution.
-- Proto adaptation: Rust risk hardening keeps Proto's existing `rust_decimal` risk model and adds reservations, batch evaluation and reconciliation semantics. The implementation is expressed in Proto types and tests rather than importing the external crate graph.
 
 ## spencerfletcher/market-maker
 

@@ -14,5 +14,6 @@ def test_api_http_policy_exposes_security_and_release_headers() -> None:
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "default-src 'self'" in response.headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert "connect-src 'self' ws: wss:" in response.headers["content-security-policy"]
     assert "payment=()" in response.headers["permissions-policy"]

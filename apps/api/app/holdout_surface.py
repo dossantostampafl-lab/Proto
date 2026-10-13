@@ -4,7 +4,7 @@ from dataclasses import asdict
 from datetime import datetime
 from math import isfinite
 
-from fastapi import APIRouter, HTTPException
+from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from services.validation.experiments import stable_fingerprint
@@ -22,8 +22,6 @@ from .holdout_persistence import (
     persist_frozen_holdout_seal,
 )
 from .metrics_state import metrics
-
-router = APIRouter(prefix="/holdout", tags=["research", "validation", "holdout"])
 
 
 def _aware(value: datetime) -> bool:
@@ -142,7 +140,6 @@ def _evidence_from_request(request: FrozenHoldoutEvaluationRequest) -> FrozenHol
     )
 
 
-@router.post("/seal")
 async def seal_holdout(request: FrozenHoldoutSealRequest) -> dict[str, object]:
     if persistence_engine is None:
         metrics.increment("validation_holdout_seal_rejected")
@@ -172,7 +169,6 @@ async def seal_holdout(request: FrozenHoldoutSealRequest) -> dict[str, object]:
     }
 
 
-@router.post("/evaluate")
 async def evaluate_holdout(request: FrozenHoldoutEvaluationRequest) -> dict[str, object]:
     if persistence_engine is None:
         metrics.increment("validation_holdout_evaluation_rejected")

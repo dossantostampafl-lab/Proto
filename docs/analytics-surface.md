@@ -87,4 +87,4 @@ The existing `simulation_fills` table remains the typed fill journal used by the
 
 ## Validation gates
 
-Pull requests run the normal Python/Rust/Web CI plus dependency-security audits for Python, Rust, and npm. Chaos tests exercise event retry/dead-letter isolation, idempotency, hash-chain tamper detection, and reconciliation divergence. Local performance tests protect microstructure and probability/edge research paths with deterministic p95 budgets.
+Pull requests run the normal Python/Web CI plus dependency-security audits for Python and npm. Chaos tests exercise event retry/dead-letter isolation, idempotency, hash-chain tamper detection, and reconciliation divergence. Local performance tests protect microstructure and probability/edge research paths with deterministic p95 budgets.

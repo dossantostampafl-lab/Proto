@@ -36,6 +36,11 @@ for (const label of ["LIVE PUBLIC", "SYNTHETIC RESEARCH", "PAPER / SIM", "FINANC
   assert.ok(code.includes(label), `missing provenance/boundary label: ${label}`);
 }
 assert.doesNotMatch(code, /\b(withdraw|deposit|broker order|live order|real[- ]money order)\b/i, "no real-money affordances");
+assert.doesNotMatch(code, /\blive (market p|model p|edge|probability)\b/i, "research probability/edge must never be labelled live");
+const command = files.find(([p]) => p.endsWith("Command.tsx"))?.[1] ?? "";
+for (const source of ["live", "research", "paper"]) {
+  assert.ok(command.includes(`source="${source}"`), `Command view must tag ${source} panels`);
+}
 
 // Every operator command of the previous terminal is still reachable.
 for (const endpoint of [

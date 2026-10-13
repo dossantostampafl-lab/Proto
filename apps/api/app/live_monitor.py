@@ -249,17 +249,6 @@ class LiveCryptoMonitor:
             end_at=end_at,
         )
 
-    async def persisted_history(
-        self,
-        symbol: str,
-        *,
-        limit: int = 100,
-    ) -> list[dict[str, object]] | None:
-        page = await self.persisted_history_page(symbol, limit=limit)
-        if page is None:
-            return None
-        return [row.as_dict() for row in page.items]
-
     def _sync_connection_generation(self, generation: int) -> None:
         if generation == self._connection_generation:
             return

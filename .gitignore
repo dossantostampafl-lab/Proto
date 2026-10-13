@@ -15,4 +15,3 @@ target/
 *.log
 graphify-out/
 *.egg-info/
-graphify-out/

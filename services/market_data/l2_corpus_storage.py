@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -20,16 +20,6 @@ CORPUS_VENUE = "COINBASE"
 
 class PublicL2CorpusError(RuntimeError):
     """Raised when a public L2 corpus cannot be persisted or verified safely."""
-
-
-class PublicL2CorpusSink(Protocol):
-    def append_message(
-        self,
-        message: str | bytes | dict[str, Any],
-        *,
-        connection_generation: int,
-    ) -> None:
-        """Append one validated public L2 wire message to a research corpus."""
 
 
 class PublicL2DatasetProvenance(BaseModel):

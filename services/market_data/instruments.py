@@ -87,12 +87,6 @@ class InstrumentRegistry:
     def get(self, instrument_id: str) -> Instrument | None:
         return self._instruments.get(instrument_id)
 
-    def require(self, instrument_id: str) -> Instrument:
-        instrument = self.get(instrument_id)
-        if instrument is None:
-            raise KeyError(f"unknown instrument_id: {instrument_id}")
-        return instrument
-
     def list(
         self,
         *,

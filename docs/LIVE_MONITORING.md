@@ -125,6 +125,6 @@ WebSocket channels `market-data` and `orderbook` carry only normalized public mo
 
 Every change remains behind the normal CI, Security and Graphify workflows. Graphify is used to inspect cross-module coupling and guide safe refactors. The public live monitor depends on the `PublicMarketDataAdapter` protocol rather than a concrete transport implementation, public parsing is isolated from the transport adapter, live HTTP presentation is isolated in `live_routes.py`, and live coverage/readiness evaluation is split into pure functions for deterministic testing.
 
-The Security workflow keeps Python, Web and Rust dependency audits independent. The Rust scanner is version-pinned for reproducible runs while the active dependency graph is checked before the single documented lockfile-only `rkyv` advisory exception is applied.
+The Security workflow keeps Python and Web dependency audits independent.
 
 The live monitor must remain independently testable without external network access. Unit and integration tests inject canonical ticks or a read-only adapter stub rather than depending on the public WebSocket.

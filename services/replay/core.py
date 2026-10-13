@@ -86,22 +86,6 @@ class ReplayEngine:
     def ordered_events(self) -> tuple[ReplayEvent, ...]:
         return self._ordered_events
 
-    def events_visible_at(self, as_of: datetime) -> tuple[ReplayEvent, ...]:
-        if as_of.tzinfo is None or as_of.utcoffset() is None:
-            raise ValueError("replay visibility timestamp must be timezone-aware")
-        return tuple(event for event in self._ordered_events if event.observed_at <= as_of)
-
-    def events_between(self, start: datetime, end: datetime) -> tuple[ReplayEvent, ...]:
-        if start.tzinfo is None or start.utcoffset() is None:
-            raise ValueError("replay start timestamp must be timezone-aware")
-        if end.tzinfo is None or end.utcoffset() is None:
-            raise ValueError("replay end timestamp must be timezone-aware")
-        if end < start:
-            raise ValueError("replay end timestamp must be on or after start")
-        return tuple(
-            event for event in self._ordered_events if start <= event.observed_at <= end
-        )
-
     def fingerprint(self) -> str:
         canonical = self.session.model_dump_json(exclude_none=False)
         return sha256(canonical.encode("utf-8")).hexdigest()

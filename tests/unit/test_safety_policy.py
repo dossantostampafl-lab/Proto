@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from apps.api.app.safety_policy import SafetyPolicyError, policy_snapshot, validate_sandbox_mode
+from apps.api.app.safety_policy import SafetyPolicyError, policy_snapshot, validate_runtime_mode
 from apps.api.app.settings import Settings
 
 
@@ -10,7 +10,7 @@ from apps.api.app.settings import Settings
     ["SIMULATION", "PAPER_TRADING", "HISTORICAL_REPLAY"],
 )
 def test_allowed_sandbox_modes(mode: str) -> None:
-    state = validate_sandbox_mode(mode)
+    state = validate_runtime_mode(mode)
 
     assert state.synthetic_only is True
     assert state.live_market_data is False
@@ -20,7 +20,7 @@ def test_allowed_sandbox_modes(mode: str) -> None:
 
 
 def test_live_monitoring_allows_market_data_but_not_financial_connectivity() -> None:
-    state = validate_sandbox_mode("LIVE_MONITORING")
+    state = validate_runtime_mode("LIVE_MONITORING")
 
     assert state.synthetic_only is False
     assert state.live_market_data is True
@@ -30,7 +30,7 @@ def test_live_monitoring_allows_market_data_but_not_financial_connectivity() -> 
 
 def test_policy_rejects_live_trading_mode() -> None:
     with pytest.raises(SafetyPolicyError):
-        validate_sandbox_mode("LIVE_TRADING")
+        validate_runtime_mode("LIVE_TRADING")
 
 
 def test_settings_fail_closed_for_unknown_mode() -> None:

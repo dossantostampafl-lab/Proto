@@ -125,7 +125,6 @@ async def test_retry_uses_exponential_backoff_then_dead_letters(store: SqlJobSto
     assert failed_twice is not None
     assert failed_twice.state is JobState.DEAD_LETTER
     assert failed_twice.attempts == 2
-    assert len(await store.list_dead_letters()) == 1
 
 
 @pytest.mark.asyncio

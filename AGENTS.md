@@ -16,7 +16,7 @@ CI publishes `graphify-code-knowledge-graph` with `graph.json` and `GRAPH_REPORT
 
 ## Workstreams
 
-Keep implementation separated into architecture, Python, Rust, data, frontend, tests, security, and performance workstreams. Validate cross-workstream changes through CI before merge.
+Keep implementation separated into architecture, Python, data, frontend, tests, security, and performance workstreams. Validate cross-workstream changes through CI before merge.
 
 ## Financial execution boundary
 

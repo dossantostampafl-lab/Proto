@@ -48,7 +48,6 @@ def test_paper_portfolio_applies_an_order_only_once() -> None:
 
     assert portfolio.snapshot() == first
     assert len(portfolio.journal()) == 1
-    assert portfolio.has_order(order.id) is True
 
 
 @pytest.mark.asyncio

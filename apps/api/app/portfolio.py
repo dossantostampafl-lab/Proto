@@ -133,9 +133,6 @@ class PaperPortfolio:
         self._slippage_cost = ZERO
         self._realized_pnl_high_watermark = ZERO
 
-    def has_order(self, order_id: object) -> bool:
-        return str(order_id) in self._seen_order_ids
-
     def _realized_pnl_after_fees(self) -> Decimal:
         return sum(
             (position.realized_pnl - position.fees for position in self._positions.values()),

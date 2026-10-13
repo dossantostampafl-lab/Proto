@@ -8,7 +8,7 @@ Status legend: `DONE` = implemented in Proto's active path; `DEFER` = useful fol
 
 | Capability | Proto status | Decision | Evidence / notes |
 |---|---|---|---|
-| Fail-closed/veto-only risk gate | DONE | Keep | Rust risk path blocks on hard limits, reconciliation and kill-switch state. |
+| Fail-closed/veto-only risk gate | DONE | Keep | Python risk gate (`apps/api/app/simulation.py`) blocks on hard limits, open positions, position size and kill-switch state. |
 | Working-order reservations | DONE | Keep | Pending orders consume market/asset/correlated capacity. |
 | Atomic cumulative batch risk | DONE | Keep | Batch candidates use staged reservations and fail atomically. |
 | Reconciliation-before-risk readiness | DONE | Keep | Stateful gate refuses risk until reconciled. |
@@ -16,7 +16,7 @@ Status legend: `DONE` = implemented in Proto's active path; `DEFER` = useful fol
 | Session loss/drawdown rails | DONE | Keep | Drawdown limits and kill-switch semantics are active. |
 | Execution price collar | DONE | Keep | Explicit execution-side price-collar validation was added. |
 | IOC/FOK/marketable-limit semantics | DONE | Keep | Simulator covers GTC/IOC/FOK, partial fills and marketable limits. |
-| Deterministic price-time / queue realism | DONE | Keep | L2 queue-ahead/depletion model is implemented in Rust. |
+| Deterministic price-time / queue realism | REMOVED | Revisit | The Rust-only queue model was never wired to the simulator and was deleted. |
 | Configurable latency/fee friction | DONE | Keep | Latency, fee, tick-grid and impact configuration are explicit. |
 | Idempotent ambiguous-submit recovery | DEFER | Defer | Persistence/idempotency exist; live venue resend logic is irrelevant without live transmission. |
 | Venue deadman/cancel-all | REJECT | Exclude | No real-money venue execution. |

@@ -77,8 +77,8 @@ def test_default_execution_friction_is_explicit_and_nonzero() -> None:
 def test_tick_grid_rounding_is_adverse_by_side() -> None:
     simulator = PaperSimulator(SimulationConfig(tick_size=0.05))
 
-    assert simulator._price_on_grid(100.021, Side.BUY) == pytest.approx(100.05)
-    assert simulator._price_on_grid(100.029, Side.SELL) == pytest.approx(100.0)
+    assert float(simulator._price_on_grid_decimal(100.021, Side.BUY)) == pytest.approx(100.05)
+    assert float(simulator._price_on_grid_decimal(100.029, Side.SELL)) == pytest.approx(100.0)
 
 
 def test_depth_impact_is_monotonic_and_convex() -> None:

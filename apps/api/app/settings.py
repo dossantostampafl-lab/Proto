@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
     minimum_net_edge: float = Field(default=0.01, ge=0.0, le=1.0, allow_inf_nan=False)
     minimum_confidence: float = Field(default=0.55, ge=0.0, le=1.0, allow_inf_nan=False)
+    # Server cap on absolute paper position size per asset, in units.
     max_position: float = Field(default=10.0, gt=0.0, allow_inf_nan=False)
+    simulation_max_open_positions: int = Field(default=10, ge=1, le=1_000)
     max_notional: float = Field(default=100_000.0, gt=0.0, allow_inf_nan=False)
     max_daily_drawdown: float = Field(default=5_000.0, gt=0.0, allow_inf_nan=False)
     simulation_max_order_notional: float = Field(

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .app_state import replay_session, runtime
+from .app_state import runtime
 from .models import KillSwitchState, RuntimeState, SystemMode
 from .paper_autopilot import paper_autopilot
-from .websockets import hub
+from .runtime_control import start_runtime, stop_runtime
 
 router = APIRouter(prefix="/paper", tags=["paper-control"])
 
@@ -18,18 +18,7 @@ async def start_paper_trading() -> RuntimeState:
     market monitor remains independent and continues to provide BTC/ETH/SOL
     quotes. No financial connectivity is created by this transition.
     """
-    if runtime.kill_switch != KillSwitchState.ARMED:
-        runtime.running = False
-        return runtime
-
-    replay_session.reset()
-    runtime.mode = SystemMode.PAPER_TRADING
-    runtime.running = True
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
+    return await start_runtime(SystemMode.PAPER_TRADING)
 
 
 @router.post("/stop", response_model=RuntimeState)
@@ -37,12 +26,7 @@ async def stop_paper_trading() -> RuntimeState:
     """Stop paper execution and disarm its persistent server autopilot."""
     if paper_autopilot.running:
         await paper_autopilot.stop()
-    runtime.running = False
-    await hub.broadcast(
-        "analytics",
-        {"type": "runtime", "data": runtime.model_dump(mode="json")},
-    )
-    return runtime
+    return await stop_runtime()
 
 
 @router.get("/status")

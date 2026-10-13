@@ -80,21 +80,6 @@ def test_candle_enforces_time_and_ohlc_invariants() -> None:
         )
 
 
-def test_binary_contract_exposes_implied_probability_and_spread() -> None:
-    observed = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
-    contract = BinaryContractSnapshot(
-        market_id="btc-threshold",
-        underlying_asset="BTC",
-        yes_bid=0.48,
-        yes_ask=0.52,
-        observed_at=observed,
-        expires_at=observed + timedelta(hours=1),
-    )
-
-    assert contract.implied_probability == 0.5
-    assert contract.probability_spread == pytest.approx(0.04)
-
-
 def test_contracts_reject_non_finite_or_naive_inputs() -> None:
     with pytest.raises(ValidationError):
         BookLevel(price=math.inf, size=1.0)

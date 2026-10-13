@@ -58,7 +58,7 @@ Implemented:
 - strictly risk-reducing close semantics during volatility spikes;
 - execution price collar;
 - kill switch;
-- exact Rust monetary arithmetic.
+- exact Decimal monetary arithmetic in the paper simulator.
 
 ### Execution simulation
 
@@ -72,7 +72,7 @@ Implemented:
 - adverse side-aware tick-grid rounding;
 - Decimal fill-grid/notional/fee arithmetic on the active Python simulator path;
 - depth/participation-sensitive market impact;
-- reservation-aware Rust execution admission: an order cannot become `Validated` until risk and volatility gates approve it;
+- server-side risk admission: no paper order fills until the risk, volatility and position gates approve it inside one serialized critical section;
 - immediate working-order capacity reservation after execution admission;
 - no live order submission.
 
@@ -121,7 +121,7 @@ Implemented:
 - effective independent/correlated trial accounting;
 - one-shot frozen holdout evidence and fail-closed model-promotion gates;
 - delay-injection and timestamp-shuffle negative controls;
-- research API surfaces and API-backed Validation Lab with no fabricated metrics.
+- research API surfaces and the dashboard Lab view, with no fabricated metrics.
 
 ## Frontend telemetry
 
@@ -154,13 +154,10 @@ A research release candidate requires all of these to pass on the same current h
 - Python Ruff;
 - complete Python pytest suite;
 - targeted mutation-safety gate;
-- Rust fmt;
-- Rust clippy with warnings denied;
-- Rust workspace tests;
 - Web TypeScript typecheck;
 - Web production build;
 - live-release/recovery contract gates;
-- Python/Rust/Web dependency security audits;
+- Python/Web dependency security audits;
 - Graphify architecture workflow.
 
 ## Software-scope closure

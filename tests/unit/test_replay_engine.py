@@ -60,33 +60,6 @@ def test_same_timestamp_orders_by_phase_before_fill() -> None:
     ]
 
 
-def test_future_events_are_not_visible_to_replay_clock() -> None:
-    observed_at = datetime(2026, 8, 31, 17, 0, tzinfo=UTC)
-    session = ReplaySession(
-        session_id="anti-lookahead",
-        events=(
-            _event(
-                "past",
-                observed_at=observed_at,
-                phase=ReplayPhase.MARKET_DATA,
-                stream="market",
-                sequence=1,
-            ),
-            _event(
-                "future",
-                observed_at=observed_at + timedelta(seconds=1),
-                phase=ReplayPhase.MARKET_DATA,
-                stream="market",
-                sequence=2,
-            ),
-        ),
-    )
-
-    visible = ReplayEngine(session).events_visible_at(observed_at)
-
-    assert [event.event_id for event in visible] == ["past"]
-
-
 def test_same_session_has_stable_fingerprint_and_order() -> None:
     observed_at = datetime(2026, 8, 31, 17, 0, tzinfo=UTC)
     session = ReplaySession(

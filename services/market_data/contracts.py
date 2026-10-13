@@ -111,11 +111,3 @@ class BinaryContractSnapshot(BaseModel):
         if self.expires_at <= self.observed_at:
             raise ValueError("expires_at must be after observed_at")
         return self
-
-    @property
-    def implied_probability(self) -> float:
-        return (self.yes_bid + self.yes_ask) / 2.0
-
-    @property
-    def probability_spread(self) -> float:
-        return self.yes_ask - self.yes_bid

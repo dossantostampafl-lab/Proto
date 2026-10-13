@@ -157,8 +157,9 @@ async def test_required_persistence_accepts_only_after_durable_append() -> None:
     assert status["persisted_current_connection"] == 1
     assert status["idempotent_hits_current_connection"] == 0
 
-    persisted = await monitor.persisted_history("BTC", limit=10)
-    assert persisted is not None
+    page = await monitor.persisted_history_page("BTC", limit=10)
+    assert page is not None
+    persisted = [row.as_dict() for row in page.items]
     assert persisted[0]["sequence"] == 7
     assert persisted[0]["source"] == "PUBLIC_READ_ONLY_PERSISTED"
     assert persisted[0]["financial_connectivity"] is False
