@@ -9,6 +9,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.ext.asyncio import AsyncEngine
+
 from services.events import (
     DuplicateEvent,
     EventJournal,
@@ -19,7 +21,7 @@ from services.events import (
     SqlJournalStore,
 )
 
-from .app_state import persistence_engine
+from .app_state import orchestration_engine, persistence_engine
 from .settings import settings
 
 logger = logging.getLogger("proto.events")
@@ -194,8 +196,28 @@ class OperationalJournal:
         logger.critical("operational journal integrity failure: %s", reason)
 
 
+def choose_operational_journal_engine(
+    *,
+    persistence_engine: AsyncEngine | None,
+    orchestration_engine: AsyncEngine | None,
+    canonical_paper_oms_enabled: bool,
+) -> AsyncEngine | None:
+    """A paper OMS may never use a memory-only operational audit journal."""
+
+    if persistence_engine is not None:
+        return persistence_engine
+    if canonical_paper_oms_enabled:
+        return orchestration_engine
+    return None
+
+
+_journal_engine = choose_operational_journal_engine(
+    persistence_engine=persistence_engine,
+    orchestration_engine=orchestration_engine,
+    canonical_paper_oms_enabled=settings.canonical_paper_oms_enabled,
+)
 operational_journal = OperationalJournal(
-    SqlJournalStore(persistence_engine) if persistence_engine is not None else None
+    SqlJournalStore(_journal_engine) if _journal_engine is not None else None
 )
 
 
