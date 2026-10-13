@@ -163,15 +163,16 @@ Qualquer falha rebaixa o caminho automaticamente para um estado mais seguro.
 
 Ciclo de cada PR: PLAN → IMPLEMENT → TEST → AUDIT → FIND DEFECTS → FIX → RETEST → RE-AUDIT.
 
-## Decisões pendentes do dono
+## Decisões do dono
 
-1. **Cripto:** Binance (recomendado; já integrada para dados) ou outra?
-2. **B3:** qual corretora? Ela tem API, ou vamos usar MetaTrader 5 (host Windows)?
-3. **Forex:** qual corretora? Ela aceita conta brasileira?
-4. **Canary:** capital inicial por venue. Sugestão: o menor valor que a corretora permite, dentro de R$10.000 de
-   referência.
-5. **Hospedagem do executor:** Oracle Cloud (já documentado) ou outro? O executor fica separado da API pública.
-6. **TradingView:** qual plano você tem? Webhook exige plano pago e 2FA.
+| Tema | Decisão |
+|---|---|
+| Cripto | Binance (spot) |
+| B3 | XP, via MetaTrader 5 em VM Windows. Confirmar com a XP que MT5 para B3 e ordens automáticas são permitidos na conta |
+| Hospedagem do executor | Oracle Cloud, em instância separada e subnet privada (ver `docs/adr/venues-and-executor-hosting.md`) |
+| Forex | A definir. Fica fora do escopo até escolher uma corretora |
+| Capital do canary | A definir antes da Fase 6 |
+| Plano do TradingView | A confirmar antes da Fase 1. O webhook exige plano pago e 2FA |
 
 ## Fora de escopo
 
