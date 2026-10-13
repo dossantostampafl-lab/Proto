@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -302,3 +302,61 @@ async def test_partial_fill_is_refreshed_without_resubmission(database):
         fills = (await connection.execute(select(fill_records))).mappings().all()
     assert len(fills) == 2
     assert sum((Decimal(f["delta_quantity"]) for f in fills), Decimal("0")) == Decimal("0.01")
+
+
+async def test_fee_aware_reservation_rejects_order_before_consuming_permit(database):
+    signer = PermitSigner(KEY)
+    broker = venue(initial="3502")
+    manager = oms(database, broker, signer)
+    request = intent(price="350100")
+    with pytest.raises(OrderRejected, match="insufficient_available_balance"):
+        await manager.place(request, signer.issue(request, now=NOW), now=NOW)
+    assert (await broker.balances())["BRL"] == Decimal("3502")
+    async with database.connect() as connection:
+        assert (await connection.execute(select(consumed_permits))).all() == []
+        assert (await connection.execute(select(order_records))).all() == []
+
+
+async def test_expired_risk_permit_never_submits_order(database):
+    signer = PermitSigner(KEY)
+    broker = venue()
+    manager = oms(database, broker, signer)
+    request = intent()
+    with pytest.raises(Exception, match="expired"):
+        await manager.place(
+            request,
+            signer.issue(request, now=NOW),
+            now=NOW + timedelta(seconds=11),
+        )
+    async with database.connect() as connection:
+        assert (await connection.execute(select(consumed_permits))).all() == []
+
+
+async def test_unknown_order_never_resubmitted_while_venue_unavailable(database):
+    class UnreachableVenue(PaperVenueAdapter):
+        submit_count = 0
+
+        async def submit(self, order):
+            self.submit_count += 1
+            raise TimeoutError("venue unreachable")
+
+        async def query(self, client_order_id):
+            raise TimeoutError("still unavailable")
+
+    signer = PermitSigner(KEY)
+    broker = UnreachableVenue(
+        instruments=(BTC,),
+        quotes=lambda _: QUOTE,
+        balances={"BRL": Decimal("10000"), "BTC": Decimal("0")},
+        fee_bps=Decimal("10"),
+        slippage_bps=Decimal("0"),
+        clock=lambda: NOW,
+    )
+    request = intent()
+    manager = oms(database, broker, signer)
+    permit = signer.issue(request, now=NOW)
+    first = await manager.place(request, permit, now=NOW)
+    assert first.status is OrderStatus.UNKNOWN
+    second = await manager.place(request, permit, now=NOW)
+    assert second.status is OrderStatus.UNKNOWN
+    assert broker.submit_count == 1
