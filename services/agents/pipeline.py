@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
+from inspect import isawaitable
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -102,7 +103,7 @@ class HybridDecisionPipeline:
         instruments: Mapping[str, TradableInstrument],
         reviewer: AgentReviewer,
         quotes: Callable[[str], Quote | None],
-        portfolio: Callable[[str], PortfolioView],
+        portfolio: Callable[[str], PortfolioView | Awaitable[PortfolioView]],
         recorder: Callable[[AgentDecision], Awaitable[None]] | None = None,
         fusion_policy: FusionPolicy = DEFAULT_FUSION_POLICY,
         sizing_policy: SizingPolicy = DEFAULT_SIZING_POLICY,
@@ -145,6 +146,8 @@ class HybridDecisionPipeline:
         else:
             quote = self._quotes(instrument_id)
             view = self._portfolio(instrument_id)
+            if isawaitable(view):
+                view = await view
             candidate = build_candidate(
                 fusion,
                 instrument=instrument,
