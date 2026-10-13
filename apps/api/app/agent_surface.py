@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter, deque
+from collections.abc import Awaitable
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -35,6 +36,7 @@ from services.execution.constitution import REFERENCE_CAPITAL
 from services.execution.venue import Quote
 from services.risk import RiskDecision
 
+from . import phase4_surface
 from .event_state import JournalUnavailable, record_operational_event
 from .live_monitor import live_monitor  # noqa: F401  (re-exported for tests)
 from .market_quotes import live_quote as _market_quote
@@ -96,7 +98,17 @@ def live_quote(instrument_id: str) -> Quote | None:
     return _market_quote(instrument_id, market_source=settings.live_market_source)
 
 
-def _portfolio(_instrument_id: str) -> PortfolioView:
+def _portfolio(instrument_id: str) -> PortfolioView | Awaitable[PortfolioView]:
+    if settings.canonical_paper_oms_enabled:
+
+        async def durable_portfolio() -> PortfolioView:
+            account = await phase4_surface.risk_account(now=datetime.now(UTC))
+            return PortfolioView(
+                equity=account.equity,
+                position_quantity=account.positions.get(instrument_id, Decimal("0")),
+            )
+
+        return durable_portfolio()
     return PortfolioView(equity=REFERENCE_CAPITAL, position_quantity=Decimal("0"))
 
 
@@ -114,6 +126,8 @@ async def _record(decision: AgentDecision) -> None:
     except JournalUnavailable:
         _record_failures += 1
         logger.exception("agent decision %s was not journaled", decision.decision_id)
+        if settings.canonical_paper_oms_enabled:
+            raise
 
 
 def pipeline() -> HybridDecisionPipeline:
@@ -149,6 +163,15 @@ async def _evaluate(instrument_id: str) -> tuple[AgentDecision, RiskDecision | N
 
     decision = await pipeline().evaluate(instrument_id, list(_signals))
     risk = await assess_risk(decision.proposal) if decision.proposal is not None else None
+    if (
+        settings.canonical_paper_oms_enabled
+        and risk is not None
+        and risk.permit is not None
+        and decision.proposal is not None
+    ):
+        await phase4_surface.execute_order(
+            decision.proposal, risk.permit, now=datetime.now(UTC)
+        )
     return decision, risk
 
 
