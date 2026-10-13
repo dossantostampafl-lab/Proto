@@ -123,6 +123,7 @@ async def _journal(event_type: str, payload: dict[str, object], key: str | None 
 async def assess(intent: TradeIntent) -> RiskDecision:
     """Assess one proposal and journal the outcome (without the permit signature)."""
 
+    quote = live_quote(intent.instrument_id, market_source=settings.live_market_source)
     now = datetime.now(UTC)
     account = (
         await phase4_surface.risk_account(now=now)
@@ -132,8 +133,8 @@ async def assess(intent: TradeIntent) -> RiskDecision:
     decision = governor().assess(
         intent,
         account=account,
-        quote=live_quote(intent.instrument_id, market_source=settings.live_market_source),
-        now=now,
+        quote=quote,
+        now=datetime.now(UTC),
         external_global_kill=_external_global_kill(),
     )
     record = {
