@@ -20,8 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from services.events import journal_metadata
-from services.risk.durable_permits import permit_metadata
 from services.orchestration import DecisionMemoryBase, OrchestrationBase
+from services.risk.durable_permits import permit_metadata
 
 from .models import Fill, SimulationOrder
 from .portfolio import PaperPortfolio
