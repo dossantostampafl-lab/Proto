@@ -374,8 +374,10 @@ async def test_position_can_be_sold_when_initial_snapshot_omits_zero_base_asset(
     )
     manager = oms(database, broker, signer)
     buy = intent()
-    assert (await manager.place(buy, signer.issue(buy, now=NOW), now=NOW)).status is OrderStatus.FILLED
+    buy_report = await manager.place(buy, signer.issue(buy, now=NOW), now=NOW)
+    assert buy_report.status is OrderStatus.FILLED
     sell = intent(price="349900")
     sell = sell.model_copy(update={"side": "SELL", "reduce_only": True})
-    assert (await manager.place(sell, signer.issue(sell, now=NOW), now=NOW)).status is OrderStatus.FILLED
+    sell_report = await manager.place(sell, signer.issue(sell, now=NOW), now=NOW)
+    assert sell_report.status is OrderStatus.FILLED
     assert (await manager.reconcile())["ok"] is True
