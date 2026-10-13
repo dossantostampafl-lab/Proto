@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -238,3 +239,31 @@ async def test_ioc_intent_is_not_left_as_a_resting_reservation(database):
     async with database.connect() as connection:
         row = (await connection.execute(select(reservations))).mappings().one()
     assert Decimal(row["remaining"]) == 0
+
+
+async def test_periodic_reconciliation_detects_drift_and_stops_on_signal(database):
+    signer = PermitSigner(KEY)
+    broker = venue()
+    manager = oms(database, broker, signer)
+    request = intent()
+    await manager.place(request, signer.issue(request, now=NOW), now=NOW)
+    broker._balances["BRL"] -= Decimal("5")
+    stop = asyncio.Event()
+    checked = 0
+    original = manager.reconcile
+
+    async def one_cycle(*, tolerance=Decimal("0")):
+        nonlocal checked
+        checked += 1
+        result = await original(tolerance=tolerance)
+        stop.set()
+        return result
+
+    manager.reconcile = one_cycle
+    await manager.reconciliation_loop(stop, interval_seconds=0.01)
+    assert checked == 1
+    async with database.connect() as connection:
+        from services.execution.oms import venue_halts
+
+        halt = (await connection.execute(select(venue_halts))).mappings().one()
+    assert halt["reason"] == "balance_divergence"
