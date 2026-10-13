@@ -379,6 +379,8 @@ class CanonicalPaperOMS:
                 quantity=intent.quantity,
                 order_type=intent.order_type,
                 limit_price=intent.limit_price,
+                time_in_force=intent.time_in_force,
+                reduce_only=intent.reduce_only,
             )
             try:
                 report = await self.adapter.submit(order)
