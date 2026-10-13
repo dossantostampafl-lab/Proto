@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     brapi_market_data_token: str | None = None
     equity_market_data_max_age_seconds: float | None = Field(default=None, gt=0, le=3_600)
     creation_bridge_shared_secret: str | None = None
+    # TradingView webhook (Phase 1). Unset secret keeps the endpoint closed (503).
+    tradingview_webhook_secret: str | None = None
+    tradingview_instruments: str = (
+        "BINANCE_SPOT:BTCBRL,BINANCE_SPOT:ETHBRL,BINANCE_SPOT:SOLBRL"
+    )
+    tradingview_ip_allowlist_enabled: bool = True
+    # Trust the right-most X-Forwarded-For entry; only behind our own reverse proxy.
+    tradingview_trust_forwarded_for: bool = False
+    tradingview_max_alert_age_seconds: float = Field(
+        default=30.0, gt=0.0, le=300.0, allow_inf_nan=False
+    )
     operator_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
     public_origin: str | None = None
@@ -121,6 +132,7 @@ class Settings(BaseSettings):
         "brapi_market_data_token",
         "creation_bridge_shared_secret",
         "operator_api_token",
+        "tradingview_webhook_secret",
     )
     @classmethod
     def normalize_optional_secret(cls, value: str | None) -> str | None:
@@ -145,6 +157,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "CREATION_BRIDGE_SHARED_SECRET must be at least 32 characters in production"
             )
+        if (
+            self.tradingview_webhook_secret is not None
+            and len(self.tradingview_webhook_secret) < _MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            raise ValueError(
+                "TRADINGVIEW_WEBHOOK_SECRET must be at least 32 characters in production"
+            )
+        if not self.tradingview_ip_allowlist_enabled:
+            raise ValueError("TRADINGVIEW_IP_ALLOWLIST_ENABLED must stay true in production")
         return self
 
     @model_validator(mode="after")
@@ -165,6 +186,12 @@ class Settings(BaseSettings):
         if invalid:
             raise ValueError("equity symbol allowlists contain invalid symbol syntax")
         return tuple(sorted(symbols))
+
+    @property
+    def tradingview_instrument_allowlist(self) -> frozenset[str]:
+        return frozenset(
+            item.strip().upper() for item in self.tradingview_instruments.split(",") if item.strip()
+        )
 
     @property
     def alpaca_equity_allowlist(self) -> tuple[str, ...]:
