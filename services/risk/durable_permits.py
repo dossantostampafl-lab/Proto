@@ -11,7 +11,7 @@ from datetime import datetime
 
 from sqlalchemy import Column, DateTime, MetaData, String, Table, UniqueConstraint, insert, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from services.execution import ReleaseStage, RiskPermit, TradeIntent
 
@@ -42,26 +42,37 @@ class DurablePermitLedger:
         self._engine = engine
         self._signer = signer
 
-    async def consume(
-        self, permit: RiskPermit, intent: TradeIntent, *, now: datetime
+    async def consume_in_transaction(
+        self,
+        connection: AsyncConnection,
+        permit: RiskPermit,
+        intent: TradeIntent,
+        *,
+        now: datetime,
     ) -> None:
+        """Use the caller's transaction so a failed order INSERT rolls back its permit."""
+
         self._signer.verify(permit, intent, now=now)
         if intent.stage not in {ReleaseStage.PAPER, ReleaseStage.SHADOW}:
             raise PermitRejected("stage_not_certified")
+        await connection.execute(
+            insert(consumed_permits).values(
+                permit_id=str(permit.permit_id),
+                intent_id=str(intent.intent_id),
+                intent_fingerprint=intent.fingerprint(),
+                client_order_id=intent.client_order_id(0),
+                consumed_at=now,
+            )
+        )
 
+    async def consume(
+        self, permit: RiskPermit, intent: TradeIntent, *, now: datetime
+    ) -> None:
         permit_id = str(permit.permit_id)
         order_id = intent.client_order_id(0)
         try:
             async with self._engine.begin() as connection:
-                await connection.execute(
-                    insert(consumed_permits).values(
-                        permit_id=permit_id,
-                        intent_id=str(intent.intent_id),
-                        intent_fingerprint=intent.fingerprint(),
-                        client_order_id=order_id,
-                        consumed_at=now,
-                    )
-                )
+                await self.consume_in_transaction(connection, permit, intent, now=now)
         except IntegrityError as exc:
             # Only a verified duplicate is mapped to a domain rejection.
             # Database/operational failures always propagate (fail closed).
