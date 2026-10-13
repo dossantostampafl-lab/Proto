@@ -267,3 +267,38 @@ async def test_periodic_reconciliation_detects_drift_and_stops_on_signal(databas
 
         halt = (await connection.execute(select(venue_halts))).mappings().one()
     assert halt["reason"] == "balance_divergence"
+
+
+async def test_partial_fill_is_refreshed_without_resubmission(database):
+    class DelayedSecondFill(PaperVenueAdapter):
+        async def submit(self, order):
+            completed = await super().submit(order)
+            assert completed.status is OrderStatus.FILLED
+            return completed.model_copy(
+                update={
+                    "status": OrderStatus.PARTIALLY_FILLED,
+                    "filled_quantity": Decimal("0.004"),
+                    "fee": Decimal("1.40004"),
+                }
+            )
+
+    signer = PermitSigner(KEY)
+    broker = DelayedSecondFill(
+        instruments=(BTC,),
+        quotes=lambda _: QUOTE,
+        balances={"BRL": Decimal("10000"), "BTC": Decimal("0")},
+        fee_bps=Decimal("10"),
+        slippage_bps=Decimal("0"),
+        clock=lambda: NOW,
+    )
+    manager = oms(database, broker, signer)
+    request = intent()
+    partial = await manager.place(request, signer.issue(request, now=NOW), now=NOW)
+    assert partial.status is OrderStatus.PARTIALLY_FILLED
+    completed = await manager.refresh(request.client_order_id(0))
+    assert completed.status is OrderStatus.FILLED
+    assert (await manager.reconcile())["ok"] is True
+    async with database.connect() as connection:
+        fills = (await connection.execute(select(fill_records))).mappings().all()
+    assert len(fills) == 2
+    assert sum((Decimal(f["delta_quantity"]) for f in fills), Decimal("0")) == Decimal("0.01")
