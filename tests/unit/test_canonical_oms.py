@@ -381,3 +381,42 @@ async def test_position_can_be_sold_when_initial_snapshot_omits_zero_base_asset(
     sell_report = await manager.place(sell, signer.issue(sell, now=NOW), now=NOW)
     assert sell_report.status is OrderStatus.FILLED
     assert (await manager.reconcile())["ok"] is True
+
+
+async def test_risk_account_reads_positions_equity_and_exposure_from_durable_ledger(database):
+    signer = PermitSigner(KEY)
+    broker = venue()
+    manager = oms(database, broker, signer)
+    buy = intent()
+    await manager.place(buy, signer.issue(buy, now=NOW), now=NOW)
+    account = await manager.risk_account(now=NOW, quotes=lambda instrument_id: QUOTE)
+    assert account.positions == {"PAPER:BTCBRL": Decimal("0.01")}
+    assert account.equity == Decimal("9996.29990")
+    assert account.gross_exposure == Decimal("3500.10")
+    assert account.start_of_day_equity == Decimal("10000")
+    assert account.peak_equity == Decimal("10000")
+    after_restart = await oms(database, broker, signer).risk_account(
+        now=NOW, quotes=lambda instrument_id: QUOTE
+    )
+    assert after_restart == account
+
+
+async def test_risk_account_refuses_to_value_open_position_without_fresh_quote(database):
+    signer = PermitSigner(KEY)
+    manager = oms(database, venue(), signer)
+    buy = intent()
+    await manager.place(buy, signer.issue(buy, now=NOW), now=NOW)
+    with pytest.raises(OrderRejected, match="market_data_unavailable"):
+        await manager.risk_account(now=NOW, quotes=lambda instrument_id: None)
+
+
+async def test_risk_account_includes_outstanding_order_reservations_in_exposure(database):
+    signer = PermitSigner(KEY)
+    manager = oms(database, venue(), signer)
+    buy = intent(price="340000", amount="0.02")
+    report = await manager.place(buy, signer.issue(buy, now=NOW), now=NOW)
+    assert report.status is OrderStatus.ACKNOWLEDGED
+    account = await manager.risk_account(now=NOW, quotes=lambda instrument_id: QUOTE)
+    assert account.positions == {}
+    assert account.gross_exposure >= Decimal("6800")
+    assert account.equity == Decimal("10000")
