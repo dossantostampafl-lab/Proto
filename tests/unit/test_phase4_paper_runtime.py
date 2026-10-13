@@ -138,3 +138,41 @@ async def test_risk_account_refuses_new_sizing_before_supervisor_sees_balance_dr
             await service.risk_account(now=NOW)
     finally:
         await service.stop()
+
+
+async def test_restart_restores_closed_paper_balances_from_durable_ledger(database):
+    signer = PermitSigner(KEY)
+    before = runtime(database, signer)
+    await before.start(now=NOW)
+    request = trade()
+    report = await before.execute_authorized(
+        request, signer.issue(request, now=NOW), now=NOW
+    )
+    assert report.status is OrderStatus.FILLED
+    assert (await before.adapter.balances())["BTC"] == Decimal("0.003")
+    await before.stop()
+    after = runtime(database, signer)
+    await after.start(now=NOW)
+    try:
+        assert (await after.adapter.balances())["BTC"] == Decimal("0.003")
+        account = await after.risk_account(now=NOW)
+        assert account.positions[BTC.instrument_id] == Decimal("0.003")
+        assert (await after.oms.reconcile())["ok"] is True
+    finally:
+        await after.stop()
+
+
+async def test_restart_rejects_unresolved_paper_orders_without_resubmitting(database):
+    signer = PermitSigner(KEY)
+    before = runtime(database, signer)
+    await before.start(now=NOW)
+    resting = trade()
+    resting = resting.model_copy(update={"limit_price": Decimal("340000")})
+    accepted = await before.execute_authorized(
+        resting, signer.issue(resting, now=NOW), now=NOW
+    )
+    assert accepted.status is OrderStatus.ACKNOWLEDGED
+    await before.stop()
+    after = runtime(database, signer)
+    with pytest.raises(OrderRejected, match="unsettled_orders_require_recovery"):
+        await after.start(now=NOW)
