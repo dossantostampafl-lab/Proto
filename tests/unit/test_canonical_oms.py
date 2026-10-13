@@ -14,6 +14,7 @@ from services.execution import (
     OrderStatus,
     OrderType,
     ReleaseStage,
+    TimeInForce,
     TradableInstrument,
     TradeIntent,
     VenueId,
@@ -49,7 +50,7 @@ BTC = TradableInstrument(
 QUOTE = Quote(bid=Decimal("349990"), ask=Decimal("350010"), observed_at=NOW)
 
 
-def intent(*, price="350100", amount="0.01", stage=ReleaseStage.PAPER):
+def intent(*, price="350100", amount="0.01", stage=ReleaseStage.PAPER, tif=TimeInForce.GTC):
     return TradeIntent(
         intent_id=uuid4(),
         instrument_id=BTC.instrument_id,
@@ -58,6 +59,7 @@ def intent(*, price="350100", amount="0.01", stage=ReleaseStage.PAPER):
         quantity=Decimal(amount),
         order_type=OrderType.LIMIT,
         limit_price=Decimal(price),
+        time_in_force=tif,
         strategy_id="integration",
         model_version="v1",
         signal_ids=(uuid4(),),
@@ -219,3 +221,15 @@ async def test_unknown_report_itself_halts_venue_before_next_order(database):
     second = intent()
     with pytest.raises(OrderRejected, match="venue_halted"):
         await manager.place(second, signer.issue(second, now=NOW), now=NOW)
+
+
+async def test_ioc_intent_is_not_left_as_a_resting_reservation(database):
+    signer = PermitSigner(KEY)
+    broker = venue()
+    manager = oms(database, broker, signer)
+    request = intent(price="340000", tif=TimeInForce.IOC)
+    result = await manager.place(request, signer.issue(request, now=NOW), now=NOW)
+    assert result.status is OrderStatus.CANCELED
+    async with database.connect() as connection:
+        row = (await connection.execute(select(reservations))).mappings().one()
+    assert Decimal(row["remaining"]) == 0
