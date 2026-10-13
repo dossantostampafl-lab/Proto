@@ -39,6 +39,8 @@ from .research import metrics
 from .research import router as research_router
 from .settings import settings
 from .shadow_control import router as shadow_control_router
+from .signal_surface import TRADINGVIEW_WEBHOOK_PATH
+from .signal_surface import router as signal_router
 from .universe_surface import router as universe_router
 
 logger = logging.getLogger("proto.api")
@@ -80,6 +82,7 @@ for router in (
     universe_router,
     equity_market_router,
     creation_router,
+    signal_router,
 ):
     app.include_router(router)
 
@@ -190,7 +193,8 @@ _OPERATIONAL_EVENTS = {
 async def operator_authentication_policy(request: Request, call_next) -> Response:
     """Fail closed for production state changes while preserving local testability.
 
-    The Creation bridge keeps its own independent service-to-service authentication.
+    The Creation bridge and the TradingView webhook keep their own independent
+    authentication (TradingView cannot send custom headers).
     """
     expected = settings.operator_api_token
     authentication_required = (
@@ -199,6 +203,7 @@ async def operator_authentication_policy(request: Request, call_next) -> Respons
     mutating_operator_route = (
         request.method in _MUTATING_METHODS
         and not request.url.path.startswith(_CREATION_PREFIX)
+        and request.url.path != TRADINGVIEW_WEBHOOK_PATH
     )
     if authentication_required and mutating_operator_route:
         if expected is None:
