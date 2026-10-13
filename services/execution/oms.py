@@ -368,12 +368,20 @@ class CanonicalPaperOMS:
                         .limit(1)
                     )
                     if seeded is None:
-                        for asset, amount in snapshot.items():
+                        # The paper adapter may omit zero-balance assets. Persist
+                        # known base and quote assets at zero so a later BUY can
+                        # be followed by a reduce-only SELL under the same lock.
+                        initial = {asset: Decimal(value) for asset, value in snapshot.items()}
+                        for known in self._instruments.values():
+                            if known.venue is intent.venue:
+                                initial.setdefault(known.base_asset, Decimal("0"))
+                                initial.setdefault(known.quote_asset, Decimal("0"))
+                        for asset, amount in initial.items():
                             await connection.execute(
                                 insert(opening_balances).values(
                                     venue=intent.venue.value,
                                     asset=asset,
-                                    balance=_str(Decimal(amount)),
+                                    balance=_str(amount),
                                 )
                             )
                     # This reservation and the consumed permit rollback together
