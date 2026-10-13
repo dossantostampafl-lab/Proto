@@ -92,6 +92,13 @@ def upgrade() -> None:
         ),
     )
     op.create_table(
+        "execution_equity_checkpoints",
+        sa.Column("venue", sa.String(40), primary_key=True),
+        sa.Column("day", sa.String(10), nullable=False),
+        sa.Column("start_of_day_equity", sa.String(80), nullable=False),
+        sa.Column("peak_equity", sa.String(80), nullable=False),
+    )
+    op.create_table(
         "execution_venue_halts",
         sa.Column("venue", sa.String(40), primary_key=True),
         sa.Column("reason", sa.String(200), nullable=False),
@@ -101,6 +108,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("execution_venue_halts")
+    op.drop_table("execution_equity_checkpoints")
     op.drop_table("execution_reservations")
     op.drop_table("execution_opening_balances")
     op.drop_table("execution_balance_entries")
