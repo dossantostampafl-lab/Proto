@@ -196,3 +196,26 @@ async def test_reconciliation_drift_halts_all_new_venue_orders(database):
     second = intent()
     with pytest.raises(OrderRejected, match="venue_halted"):
         await manager.place(second, signer.issue(second, now=NOW), now=NOW)
+
+
+async def test_unknown_report_itself_halts_venue_before_next_order(database):
+    class UncertainPaper(PaperVenueAdapter):
+        async def submit(self, order):
+            return self._report(order, OrderStatus.UNKNOWN)
+
+    signer = PermitSigner(KEY)
+    broker = UncertainPaper(
+        instruments=(BTC,),
+        quotes=lambda _: QUOTE,
+        balances={"BRL": Decimal("10000"), "BTC": Decimal("0")},
+        fee_bps=Decimal("10"),
+        slippage_bps=Decimal("0"),
+        clock=lambda: NOW,
+    )
+    manager = oms(database, broker, signer)
+    first = intent()
+    result = await manager.place(first, signer.issue(first, now=NOW), now=NOW)
+    assert result.status is OrderStatus.UNKNOWN
+    second = intent()
+    with pytest.raises(OrderRejected, match="venue_halted"):
+        await manager.place(second, signer.issue(second, now=NOW), now=NOW)
