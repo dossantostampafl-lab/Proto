@@ -420,3 +420,18 @@ async def test_risk_account_includes_outstanding_order_reservations_in_exposure(
     assert account.positions == {}
     assert account.gross_exposure >= Decimal("6800")
     assert account.equity == Decimal("10000")
+
+
+async def test_bootstrap_initializes_account_before_any_order_for_risk(database):
+    signer = PermitSigner(KEY)
+    manager = oms(database, venue(), signer)
+    await manager.bootstrap(now=NOW)
+    account = await manager.risk_account(now=NOW, quotes=lambda instrument_id: QUOTE)
+    assert account.equity == Decimal("10000")
+    assert account.start_of_day_equity == Decimal("10000")
+    assert account.peak_equity == Decimal("10000")
+    assert account.positions == {}
+    assert (await manager.reconcile())["ok"] is True
+    async with database.connect() as connection:
+        assert (await connection.execute(select(order_records))).all() == []
+        assert (await connection.execute(select(consumed_permits))).all() == []
