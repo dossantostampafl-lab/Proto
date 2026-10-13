@@ -126,3 +126,15 @@ async def test_reconciliation_supervisor_runs_and_stops_cleanly(database):
     await service.stop()
     assert not service.running
     assert service.background_failure is None
+
+
+async def test_risk_account_refuses_new_sizing_before_supervisor_sees_balance_drift(database):
+    signer = PermitSigner(KEY)
+    service = runtime(database, signer)
+    await service.start(now=NOW)
+    try:
+        service.adapter._balances["BRL"] -= Decimal("5")
+        with pytest.raises(OrderRejected, match="ledger_reconciliation_failed"):
+            await service.risk_account(now=NOW)
+    finally:
+        await service.stop()
