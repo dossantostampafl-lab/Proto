@@ -8,8 +8,7 @@ COPY apps/web ./
 # window.location.origin. Do not pin the deployment hostname into the bundle.
 ENV VITE_API_BASE_URL=""
 RUN npm run build \
-    && sha256sum src/operator-auth.ts src/approved-terminal.tsx >/dev/null \
-    && cat index.html src/operator-auth.ts src/approved-terminal.tsx src/autonomy-control-deck.ts \
+    && find index.html src -type f | sort | xargs cat \
        | sha256sum | awk '{print $1}' > dist/proto-ui-source.sha256
 
 FROM python:3.13-slim

@@ -1,13 +1,19 @@
 from fastapi.testclient import TestClient
 
+from apps.api.app.live_routes import router as live_router
 from apps.api.app.main import app
 
 client = TestClient(app)
 
 
 def test_live_monitoring_http_surface_has_no_mutating_controls() -> None:
-    assert client.post("/live/start").status_code == 404
-    assert client.post("/live/stop").status_code == 404
+    # 404 without a built dashboard; 405 when the static dashboard is mounted at "/".
+    assert client.post("/live/start").status_code in {404, 405}
+    assert client.post("/live/stop").status_code in {404, 405}
+    for route in live_router.routes:
+        methods = getattr(route, "methods", None)
+        if methods is not None:
+            assert methods <= {"GET", "HEAD"}, route.path
 
 
 def test_live_monitoring_http_surface_exposes_expected_read_only_routes() -> None:
