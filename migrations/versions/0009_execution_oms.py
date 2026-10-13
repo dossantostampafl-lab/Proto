@@ -42,6 +42,26 @@ def upgrade() -> None:
         sa.Column("reported_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_table(
+        "execution_fills",
+        sa.Column("id", sa.Integer(), autoincrement=True, primary_key=True),
+        sa.Column("client_order_id", sa.String(36), nullable=False),
+        sa.Column("venue_order_id", sa.String(80), nullable=True),
+        sa.Column("delta_quantity", sa.String(80), nullable=False),
+        sa.Column("cumulative_quantity", sa.String(80), nullable=False),
+        sa.Column("delta_notional", sa.String(80), nullable=False),
+        sa.Column("delta_fee", sa.String(80), nullable=False),
+        sa.Column("fee_asset", sa.String(20), nullable=True),
+        sa.Column("reported_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["client_order_id"], ["execution_orders.client_order_id"]
+        ),
+        sa.UniqueConstraint(
+            "client_order_id",
+            "cumulative_quantity",
+            name="uq_execution_fill_cumulative",
+        ),
+    )
+    op.create_table(
         "execution_balance_entries",
         sa.Column("id", sa.Integer(), autoincrement=True, primary_key=True),
         sa.Column("client_order_id", sa.String(36), nullable=False),
@@ -84,4 +104,5 @@ def downgrade() -> None:
     op.drop_table("execution_reservations")
     op.drop_table("execution_opening_balances")
     op.drop_table("execution_balance_entries")
+    op.drop_table("execution_fills")
     op.drop_table("execution_orders")
