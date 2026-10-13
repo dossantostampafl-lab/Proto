@@ -13,7 +13,7 @@ import asyncio
 import logging
 from collections import Counter, deque
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,9 +33,12 @@ from services.execution import Signal
 from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import REFERENCE_CAPITAL
 from services.execution.venue import Quote
+from services.risk import RiskDecision
 
 from .event_state import JournalUnavailable, record_operational_event
-from .live_monitor import live_monitor
+from .live_monitor import live_monitor  # noqa: F401  (re-exported for tests)
+from .market_quotes import live_quote as _market_quote
+from .risk_surface import assess as assess_risk
 from .settings import settings
 
 logger = logging.getLogger("proto.agents")
@@ -90,24 +93,7 @@ def _reviewer():
 
 
 def live_quote(instrument_id: str) -> Quote | None:
-    """Live public quote for BINANCE_SPOT:<BASE>USDT when the monitor streams Binance."""
-
-    venue, _, symbol = instrument_id.partition(":")
-    if venue != "BINANCE_SPOT" or not symbol.endswith("USDT"):
-        return None
-    if settings.live_market_source != "BINANCE":
-        return None
-    snapshot = live_monitor.snapshot(symbol.removesuffix("USDT"))
-    if snapshot is None or str(snapshot.get("venue", "")).upper() != "BINANCE":
-        return None
-    try:
-        return Quote(
-            bid=Decimal(str(snapshot["bid"])),
-            ask=Decimal(str(snapshot["ask"])),
-            observed_at=datetime.fromisoformat(str(snapshot["timestamp"])),
-        )
-    except (KeyError, InvalidOperation, ValueError):
-        return None
+    return _market_quote(instrument_id, market_source=settings.live_market_source)
 
 
 def _portfolio(_instrument_id: str) -> PortfolioView:
@@ -158,8 +144,12 @@ def reset_agent_state() -> None:
     _record_failures = 0
 
 
-async def _evaluate(instrument_id: str) -> AgentDecision:
-    return await pipeline().evaluate(instrument_id, list(_signals))
+async def _evaluate(instrument_id: str) -> tuple[AgentDecision, RiskDecision | None]:
+    """Run the pipeline, then send any proposal to the Risk Engine for a permit."""
+
+    decision = await pipeline().evaluate(instrument_id, list(_signals))
+    risk = await assess_risk(decision.proposal) if decision.proposal is not None else None
+    return decision, risk
 
 
 def on_signal_accepted(signal: Signal) -> None:
@@ -214,5 +204,9 @@ async def evaluate_now(request: EvaluateRequest) -> dict[str, object]:
 
     if request.instrument_id not in PAPER_INSTRUMENTS:
         raise HTTPException(422, "instrument is not supported")
-    decision = await _evaluate(request.instrument_id)
-    return {"decision": decision.to_dict(), "evaluated_at": datetime.now(UTC).isoformat()}
+    decision, risk = await _evaluate(request.instrument_id)
+    return {
+        "decision": decision.to_dict(),
+        "risk": risk.to_dict() if risk is not None else None,
+        "evaluated_at": datetime.now(UTC).isoformat(),
+    }
