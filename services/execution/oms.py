@@ -382,7 +382,10 @@ class CanonicalPaperOMS:
             )
             try:
                 report = await self.adapter.submit(order)
-                return await self._apply(report)
+                committed = await self._apply(report)
+                if committed.status is OrderStatus.UNKNOWN:
+                    await self._halt("adapter_report_unknown", now)
+                return committed
             except Exception:
                 # No retry here: the adapter may have filled before losing ACK.
                 await self._mark_unknown(order_id, now)
