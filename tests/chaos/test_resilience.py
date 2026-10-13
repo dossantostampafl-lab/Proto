@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from services.events.bus import InMemoryEventBus
-from services.events.journal import EventJournal
+from services.events.journal import DuplicateEvent, EventJournal
 from services.events.reconciliation import ReconciliationIssue, reconcile
 
 
@@ -32,7 +32,7 @@ def test_duplicate_idempotency_key_is_rejected_under_replay_pressure() -> None:
         idempotency_key="command-1",
     )
 
-    with pytest.raises(ValueError, match="duplicate idempotency_key"):
+    with pytest.raises(DuplicateEvent, match="duplicate idempotency_key"):
         journal.append(
             event_type="fill.simulated",
             source="chaos-test",
@@ -49,10 +49,10 @@ def test_hash_chain_detects_in_memory_payload_corruption() -> None:
         source="chaos-test",
         payload={"approved": True},
     )
-    assert journal.verify() is True
+    assert journal.verify_window() is True
 
-    journal._events[0] = replace(event, payload={"approved": False})
-    assert journal.verify() is False
+    journal._window[0] = replace(event, payload_json='{"approved":false}')
+    assert journal.verify_window() is False
 
 
 def test_reconciliation_detects_position_and_journal_divergence() -> None:

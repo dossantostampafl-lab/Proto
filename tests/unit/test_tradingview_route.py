@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.app import main, signal_surface
-from apps.api.app.event_state import event_journal
+from apps.api.app.event_state import operational_journal
 from apps.api.app.settings import Settings
 
 SECRET = "w" * 32
@@ -23,7 +23,9 @@ def client(monkeypatch) -> TestClient:
     monkeypatch.setattr(signal_surface, "settings", configured)
     monkeypatch.setattr(main, "settings", configured)
     signal_surface.reset_signal_state()
-    yield TestClient(main.app)
+    test_client = TestClient(main.app)
+    test_client.app_settings = configured  # type: ignore[attr-defined]
+    yield test_client
     signal_surface.reset_signal_state()
 
 
@@ -45,28 +47,28 @@ def alert(**overrides: object) -> dict[str, object]:
 def test_webhook_accepts_alert_without_operator_token_and_grants_no_order_authority(
     client: TestClient,
 ) -> None:
-    before = len(event_journal.snapshot())
+    before = operational_journal.journal.head_sequence
     response = client.post("/v1/signals/tradingview", content=json.dumps(alert()))
     assert response.status_code == 200
     payload = response.json()
     assert payload["outcome"] == "ACCEPTED"
     assert payload["order_authority"] is False
     assert payload["real_money_execution"] is False
-    events = event_journal.snapshot()
-    assert len(events) == before + 1
-    assert events[-1]["event_type"] == "TRADINGVIEW_SIGNAL_ACCEPTED"
-    assert SECRET not in json.dumps(events[-1], default=str)
+    events = operational_journal.journal.recent(1)
+    assert operational_journal.journal.head_sequence == before + 1
+    assert events[-1].event_type == "TRADINGVIEW_SIGNAL_ACCEPTED"
+    assert SECRET not in events[-1].payload_json
 
 
 def test_duplicate_webhook_is_acknowledged_once_in_the_journal(client: TestClient) -> None:
     body = json.dumps(alert(alert_id="dup-1"))
     first = client.post("/v1/signals/tradingview", content=body)
-    before = len(event_journal.snapshot())
+    before = operational_journal.journal.head_sequence
     second = client.post("/v1/signals/tradingview", content=body)
     assert second.status_code == 200
     assert second.json()["outcome"] == "DUPLICATE"
     assert second.json()["signal_id"] == first.json()["signal_id"]
-    assert len(event_journal.snapshot()) == before
+    assert operational_journal.journal.head_sequence == before
 
 
 def test_wrong_secret_is_rejected_with_a_stable_code(client: TestClient) -> None:
@@ -168,3 +170,24 @@ def test_instrument_allowlist_is_parsed_and_normalized() -> None:
     assert configured.tradingview_instrument_allowlist == frozenset(
         {"BINANCE_SPOT:BTCBRL", "XP_B3:PETR4"}
     )
+
+
+def test_signal_is_not_accepted_when_the_journal_cannot_record_it(
+    client: TestClient, monkeypatch
+) -> None:
+    from apps.api.app import event_state
+
+    async def unavailable(**_kwargs):
+        raise event_state.JournalUnavailable("database is down")
+
+    monkeypatch.setattr(signal_surface, "record_operational_event", unavailable)
+    body = json.dumps(alert(alert_id="durable-1"))
+    response = client.post("/v1/signals/tradingview", content=body)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "journal_unavailable"
+    assert client.get("/v1/signals/recent").json()["signals"] == []
+
+    monkeypatch.undo()
+    monkeypatch.setattr(signal_surface, "settings", client.app_settings)
+    retry = client.post("/v1/signals/tradingview", content=body)
+    assert retry.json()["outcome"] == "ACCEPTED"

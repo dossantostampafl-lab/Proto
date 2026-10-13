@@ -157,3 +157,11 @@ class TradingViewIngestor:
             if len(self._seen) > self._capacity:
                 self._seen.popitem(last=False)
         return IngestResult(IngestOutcome.ACCEPTED, signal)
+
+    def forget(self, signal: Signal) -> None:
+        """Undo dedupe for a signal that could not be recorded downstream."""
+
+        with self._lock:
+            for key, seen in list(self._seen.items()):
+                if seen.signal_id == signal.signal_id:
+                    del self._seen[key]
