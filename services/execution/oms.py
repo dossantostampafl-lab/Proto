@@ -582,25 +582,38 @@ class CanonicalPaperOMS:
             )
             return report
 
-    async def resolve_unknown(self, client_order_id: str) -> ExecutionReport:
-        """The only path out of UNKNOWN is a query, never a second submit."""
+    async def refresh(self, client_order_id: str) -> ExecutionReport:
+        """Poll the venue for a cumulative status; never submit again."""
 
         row = await self._row(client_order_id)
         if row is None:
             raise OrderRejected("unknown_client_order")
-        if row["status"] != OrderStatus.UNKNOWN.value:
+        if OrderStatus(row["status"]) in TERMINAL_ORDER_STATUSES:
             return self._report(row)
         try:
             report = await self.adapter.query(client_order_id)
         except Exception:
-            return self._report(row)
+            report = None
         if report is None:
-            return self._report(row)
+            await self._mark_unknown(client_order_id, datetime.now(UTC))
+            latest = await self._row(client_order_id)
+            assert latest is not None
+            return self._report(latest)
         try:
-            return await self._apply(report)
+            result = await self._apply(report)
         except Exception:
-            self._local_halt = True
-            raise
+            await self._mark_unknown(client_order_id, datetime.now(UTC))
+            latest = await self._row(client_order_id)
+            assert latest is not None
+            return self._report(latest)
+        if result.status is OrderStatus.UNKNOWN:
+            await self._mark_unknown(client_order_id, datetime.now(UTC))
+        return result
+
+    async def resolve_unknown(self, client_order_id: str) -> ExecutionReport:
+        """The only path out of UNKNOWN is a query, never a second submit."""
+
+        return await self.refresh(client_order_id)
 
     async def cancel(self, client_order_id: str) -> ExecutionReport:
         row = await self._row(client_order_id)
@@ -623,6 +636,22 @@ class CanonicalPaperOMS:
 
         if tolerance < 0:
             raise ValueError("tolerance must be >= 0")
+        # Read venue reports for all unsettled orders before balance comparison.
+        # This captures late and partial fills, and marks missing orders UNKNOWN.
+        async with self.engine.connect() as connection:
+            pending = (
+                await connection.execute(
+                    select(order_records.c.client_order_id).where(
+                        order_records.c.venue == self.adapter.venue.value,
+                        order_records.c.status.not_in(
+                            [item.value for item in TERMINAL_ORDER_STATUSES]
+                        ),
+                    )
+                )
+            ).scalars().all()
+        for order_id in pending:
+            await self.refresh(order_id)
+
         async with self.engine.connect() as connection:
             initialized = await connection.scalar(
                 select(opening_balances.c.asset)
