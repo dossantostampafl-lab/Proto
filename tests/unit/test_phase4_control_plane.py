@@ -133,3 +133,19 @@ def test_paper_execution_flag_requires_durable_storage_and_stable_permit_key():
         risk_permit_signing_key=KEY,
     )
     assert configured.canonical_paper_oms_enabled is True
+
+
+def test_paper_execution_audit_uses_durable_orchestration_engine_when_needed():
+    from apps.api.app.event_state import choose_operational_journal_engine
+
+    fallback_engine = object()
+    assert choose_operational_journal_engine(
+        persistence_engine=None,
+        orchestration_engine=fallback_engine,
+        canonical_paper_oms_enabled=True,
+    ) is fallback_engine
+    assert choose_operational_journal_engine(
+        persistence_engine=None,
+        orchestration_engine=fallback_engine,
+        canonical_paper_oms_enabled=False,
+    ) is None
