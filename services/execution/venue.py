@@ -151,6 +151,16 @@ class PaperVenueAdapter:
     async def balances(self) -> dict[str, Decimal]:
         return dict(self._balances)
 
+    def restore_closed_balances(self, balances: Mapping[str, Decimal]) -> None:
+        """Recover a new paper adapter from a verified closed-order SQL ledger."""
+
+        if self._orders:
+            raise ValueError("cannot restore a paper adapter holding active orders")
+        restored = {asset: Decimal(amount) for asset, amount in balances.items()}
+        if any(amount < 0 or not amount.is_finite() for amount in restored.values()):
+            raise ValueError("cannot restore invalid paper balances")
+        self._balances = restored
+
     def _report(
         self,
         order: VenueOrder,
