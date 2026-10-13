@@ -714,6 +714,12 @@ class CanonicalPaperOMS:
             return self._report(row)
 
     async def reconcile(self, *, tolerance: Decimal = Decimal("0")) -> dict[str, object]:
+        """Serialize reconciliation with order dispatch to avoid false drift halts."""
+
+        async with self._lock:
+            return await self._reconcile_locked(tolerance=tolerance)
+
+    async def _reconcile_locked(self, *, tolerance: Decimal) -> dict[str, object]:
         """Mismatch against paper venue halts new orders (never auto releases)."""
 
         if tolerance < 0:
