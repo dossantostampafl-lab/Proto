@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -149,3 +150,16 @@ def test_paper_execution_audit_uses_durable_orchestration_engine_when_needed():
         orchestration_engine=fallback_engine,
         canonical_paper_oms_enabled=False,
     ) is None
+
+
+async def test_canonical_oms_boot_refuses_memory_only_audit_journal(
+    monkeypatch, paper_account
+):
+    worker, quote = paper_account
+    configure(monkeypatch, worker, quote)
+    monkeypatch.setattr(phase4_surface, "_runtime", None)
+    monkeypatch.setattr(
+        phase4_surface, "operational_journal", SimpleNamespace(store=None)
+    )
+    with pytest.raises(RuntimeError, match="durable audit"):
+        await phase4_surface.start(worker.oms.engine, PermitSigner(KEY.encode()))
