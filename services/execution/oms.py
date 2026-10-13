@@ -134,6 +134,15 @@ reservations = Table(
     Column("remaining", String(80), nullable=False),
 )
 
+equity_checkpoints = Table(
+    "execution_equity_checkpoints",
+    oms_metadata,
+    Column("venue", String(40), primary_key=True),
+    Column("day", String(10), nullable=False),
+    Column("start_of_day_equity", String(80), nullable=False),
+    Column("peak_equity", String(80), nullable=False),
+)
+
 venue_halts = Table(
     "execution_venue_halts",
     oms_metadata,
@@ -376,6 +385,13 @@ class CanonicalPaperOMS:
                             if known.venue is intent.venue:
                                 initial.setdefault(known.base_asset, Decimal("0"))
                                 initial.setdefault(known.quote_asset, Decimal("0"))
+                        # All risk limits are denominated in BRL. Initial
+                        # non-BRL inventory cannot be valued without marked
+                        # prices and must not establish a fictitious baseline.
+                        if initial.get("BRL", Decimal("0")) <= 0 or any(
+                            amount != 0 for asset, amount in initial.items() if asset != "BRL"
+                        ):
+                            raise OrderRejected("opening_equity_not_certified")
                         for asset, amount in initial.items():
                             await connection.execute(
                                 insert(opening_balances).values(
@@ -384,6 +400,14 @@ class CanonicalPaperOMS:
                                     balance=_str(amount),
                                 )
                             )
+                        await connection.execute(
+                            insert(equity_checkpoints).values(
+                                venue=intent.venue.value,
+                                day=now.date().isoformat(),
+                                start_of_day_equity=_str(initial["BRL"]),
+                                peak_equity=_str(initial["BRL"]),
+                            )
+                        )
                     # This reservation and the consumed permit rollback together
                     # if any part of the order INSERT fails.
                     await self._reserve(connection, intent, order_id)
@@ -695,6 +719,13 @@ class CanonicalPaperOMS:
         if diffs:
             await self._halt("balance_divergence", datetime.now(UTC))
         return {"ok": not diffs, "differences": diffs, "venue": self.adapter.venue.value}
+
+    async def risk_account(self, *, now: datetime, quotes) -> "AccountState":
+        """Materialize the risk governor's account from persisted BRL ledger marks."""
+
+        from .accounting import risk_account
+
+        return await risk_account(self, now=now, quotes=quotes)
 
     async def reconciliation_loop(
         self,
