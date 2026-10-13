@@ -1,25 +1,27 @@
 {
   "name": "proto-web",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "contract-check": "node scripts/frontend-contract-check.mjs && node scripts/validation-lifecycle-check.mjs && node scripts/navigation-contract-check.mjs && node scripts/paper-order-contract-check.mjs && node scripts/tablet-layout-contract-check.mjs && node scripts/paper-autopilot-contract-check.mjs && node scripts/autonomy-control-deck-contract-check.mjs",
+    "contract-check": "node scripts/contract-check.mjs",
     "bundle-check": "node scripts/bundle-budget-check.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "@fontsource/chakra-petch": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
   }
 }

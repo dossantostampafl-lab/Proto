@@ -27,7 +27,7 @@ Open `http://localhost:5173`. The API is available at `http://localhost:8000`.
 
 ## What is included
 
-- probability, calibration, Hawkes, feature, sizing, hedge, Greeks, markout and P&L research primitives;
+- probability, calibration, Hawkes, feature, sizing, Greeks, markout and P&L research primitives;
 - deterministic Rust risk gates with reservations, cumulative batch controls and volatility gating;
 - risk-admitted simulated execution: orders cannot become validated before the Rust risk gate approves them;
 - simulated fills, temporal portfolio exposure, P&L attribution, optional PostgreSQL journal, recovery and reconciliation;
@@ -36,9 +36,36 @@ Open `http://localhost:5173`. The API is available at `http://localhost:8000`.
 - multi-asset terminal telemetry for lifecycle, Greeks, Hawkes, expiry, positions, P&L and temporal exposure;
 - purged walk-forward, DSR, PBO, CPCV, White Reality Check, Hansen SPA, frozen holdout, Monte Carlo, regime and parameter-stability validation;
 - fail-closed model promotion requiring recorded validation evidence;
-- API-backed Validation Lab with no fabricated performance telemetry;
 - request IDs, runtime/portfolio/temporal metrics, liveness, readiness and bounded WebSocket fan-out;
-- Python, Rust, web, security, live-release and Graphify CI gates.
+- HUD dashboard (Command · Trade · Lab · Replay · System) with explicit data provenance — see [DESIGN.md](DESIGN.md);
+- Python, Rust, web, security and Graphify CI gates.
+
+## Architecture
+
+| Entry point | Purpose |
+|---|---|
+| `apps.api.app.main:app` | The application: research, simulation, paper, replay, live monitor, operator auth and the built dashboard (`apps/web/dist`) on one origin. |
+| `apps.api.app.live_app:app` | Import-isolated, GET-only public monitor (`Dockerfile.api`, `docker-compose.live.yml`). It cannot load simulation or execution code. |
+
+Core research/simulation routes live in `apps/api/app/core_routes.py`; everything else is a router included by `main.py`.
+
+## Deploy (Oracle Cloud)
+
+The root `Dockerfile` builds the dashboard and the API into one image. On an Oracle Cloud compute instance:
+
+```bash
+docker build -t proto .
+docker run -d --restart unless-stopped -p 8000:8000 \
+  -e PUBLIC_ORIGIN=https://<your-domain> \
+  -e OPERATOR_API_TOKEN=<32+ char secret> \
+  -e DATABASE_URL=postgresql+asyncpg://... \
+  proto
+```
+
+`PUBLIC_ORIGIN` allows the dashboard's WebSocket origin; `OPERATOR_API_TOKEN` is required for every
+state-changing command in production (enter it once in System → Operator). Optional build provenance:
+`PROTO_GIT_COMMIT_SHA`, `PROTO_GIT_BRANCH`, `PROTO_DEPLOYMENT_ID`, `PROTO_ENVIRONMENT`. Put TLS in front
+(Oracle Load Balancer or a reverse proxy) and open only 443 in the security list.
 
 ## Safety modes
 
@@ -66,7 +93,7 @@ pytest
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
-cd apps/web && npm run typecheck && npm run build
+cd apps/web && npm run typecheck && npm run contract-check && npm run build && npm run bundle-check
 ```
 
 Passing software gates establishes software/research readiness only. Claims about durable financial

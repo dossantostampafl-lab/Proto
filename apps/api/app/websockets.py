@@ -9,7 +9,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 from .settings import settings
 
 _DEFAULT_ALLOWED_ORIGINS = frozenset(
-    {"http://localhost:5173", "http://127.0.0.1:5173"}
+    # Vite dev server and the single-origin local server (API + built dashboard).
+    {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000", "http://127.0.0.1:8000"}
     | ({settings.public_origin} if settings.public_origin else set())
 )
 

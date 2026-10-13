@@ -1,0 +1,66 @@
+// Frontend safety and wiring contracts. Checks what the dashboard does, not how a line is spelled.
+import assert from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const SRC = fileURLToPath(new URL("../src", import.meta.url));
+
+async function sources(dir) {
+  const out = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...await sources(path));
+    else if (/\.(tsx?|css)$/.test(entry.name)) out.push([path, await readFile(path, "utf8")]);
+  }
+  return out;
+}
+
+const files = await sources(SRC);
+const code = files.filter(([p]) => !p.endsWith(".css")).map(([, s]) => s).join("\n");
+const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
+
+// One React owner of the DOM.
+assert.equal((index.match(/<script /g) ?? []).length, 1, "index.html must have a single entry script");
+assert.match(index, /src="\/src\/main\.tsx"/, "main.tsx must be the entry point");
+for (const [pattern, why] of [
+  [/innerHTML/, "no raw HTML injection"],
+  [/window\.prompt/, "no prompt() credential capture"],
+  [/window\.fetch\s*=/, "no global fetch monkey-patching"],
+  [/document\.createElement/, "no imperative DOM outside React"],
+  [/localStorage/, "operator token must not outlive the browser session"],
+]) assert.doesNotMatch(code, pattern, why);
+
+// Provenance and the financial boundary stay visible.
+for (const label of ["LIVE PUBLIC", "SYNTHETIC RESEARCH", "PAPER / SIM", "FINANCIAL CONNECTIVITY OFF", "REAL MONEY EXECUTION OFF", "Display risk score"]) {
+  assert.ok(code.includes(label), `missing provenance/boundary label: ${label}`);
+}
+assert.doesNotMatch(code, /\b(withdraw|deposit|broker order|live order|real[- ]money order)\b/i, "no real-money affordances");
+
+// Every operator command of the previous terminal is still reachable.
+for (const endpoint of [
+  "/paper/start", "/paper/stop", "/paper/automation/start", "/paper/automation/stop", "/v1/simulate",
+  "/simulation/reset", "/killswitch/trigger", "/killswitch/reset", "/replay/start", "/replay/pause",
+  "/replay/resume", "/replay/step", "/replay/restart", "/replay/seek", "/replay/speed", "/replay/reset",
+  "/shadow/start", "/shadow/stop",
+]) assert.ok(code.includes(`"${endpoint}"`), `operator command missing: ${endpoint}`);
+
+// Every read surface is wired to its canonical endpoint.
+for (const endpoint of [
+  "/health", "/system/status", "/live/status", "/live/market-data", "/live/history/", "/live/analytics/",
+  "/market-lifecycle", "/models/calibration", "/v1/portfolio", "/pnl/attribution", "/hawkes/", "/analytics/greeks/",
+  "/paper/status", "/paper/automation/status", "/replay/status", "/universe", "/orchestration/status",
+  "/orchestration/decision-memory/status", "/shadow/status", "/creation/status", "/deployment/info", "/ws/market-data",
+]) assert.ok(code.includes(endpoint), `read surface missing: ${endpoint}`);
+
+// Transport hygiene.
+assert.match(code, /AbortController/, "network reads must be bounded");
+assert.match(code, /cache: "no-store"/, "operational reads must bypass browser cache");
+assert.match(code, /X-Proto-Operator-Token/, "operator commands must carry the operator token header");
+assert.match(code, /sessionStorage/, "operator token is session-scoped");
+assert.match(code, /onclose/, "WebSocket loss must be handled with reconnect");
+
+// Motion is optional.
+assert.ok(files.some(([p, s]) => p.endsWith(".css") && s.includes("prefers-reduced-motion: reduce")), "reduced motion must be respected");
+
+console.log(`frontend contracts: ok (${files.length} source files)`);
