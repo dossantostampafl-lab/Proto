@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useContext } from "react";
+import { createContext, type ReactNode, useContext, useId } from "react";
 
 // ---------- formatting ----------
 const fmt = (v: number, d: number) => {
@@ -62,6 +62,7 @@ export function Button({ label, path, body, kind = "", disabled, children }: { l
 }
 
 export function Spark({ values, height = 48, className = "", grid = false }: { values: number[]; height?: number; className?: string; grid?: boolean }) {
+  const gradient = useId();
   if (values.length < 2) return <div className="spark empty-spark" style={{ height }}>acquiring signal</div>;
   const lo = Math.min(...values), hi = Math.max(...values), span = Math.max(hi - lo, 1e-9);
   const y = (v: number) => height - 3 - ((v - lo) / span) * (height - 6);
@@ -72,13 +73,13 @@ export function Spark({ values, height = 48, className = "", grid = false }: { v
     <div className={`spark ${trend} ${className}`} style={{ height }} aria-hidden="true">
       <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none">
         <defs>
-          <linearGradient id={`fill-${trend}`} x1="0" x2="0" y1="0" y2="1">
+          <linearGradient id={gradient} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0" className="fill-top" />
             <stop offset="1" className="fill-bottom" />
           </linearGradient>
         </defs>
         {grid && [0.2, 0.4, 0.6, 0.8].map(g => <line key={g} x1="0" x2="100" y1={g * height} y2={g * height} className="gridline" vectorEffect="non-scaling-stroke" />)}
-        <polygon points={`0,${height} ${pts.join(" ")} 100,${height}`} fill={`url(#fill-${trend})`} />
+        <polygon points={`0,${height} ${pts.join(" ")} 100,${height}`} fill={`url(#${gradient})`} />
         <polyline points={pts.join(" ")} vectorEffect="non-scaling-stroke" />
       </svg>
       <i className="spark-head" style={{ top: `${lastY}%` }} />
