@@ -10,7 +10,14 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from services.execution import OrderStatus, OrderType, ReleaseStage, TradeIntent, VenueId
+from services.execution import (
+    OrderStatus,
+    OrderType,
+    ReleaseStage,
+    TradableInstrument,
+    TradeIntent,
+    VenueId,
+)
 from services.execution.oms import (
     CanonicalPaperOMS,
     OrderRejected,
@@ -21,7 +28,6 @@ from services.execution.oms import (
 )
 from services.execution.venue import PaperVenueAdapter, Quote
 from services.market_data.instruments import AssetClass, SessionType
-from services.execution import TradableInstrument
 from services.risk.durable_permits import consumed_permits, permit_metadata
 from services.risk.permits import PermitSigner
 
@@ -100,8 +106,8 @@ async def test_paper_fill_is_one_durable_order_with_balanced_trade_and_fee_entri
     assert rows[0]["status"] == OrderStatus.FILLED.value
     amounts = [(e["asset"], e["kind"], Decimal(e["amount"])) for e in entries]
     assert ("BTC", "TRADE", Decimal("0.01")) in amounts
-    assert ("BRL", "TRADE", Decimal("-3501")) in amounts
-    assert ("BRL", "FEE", Decimal("-3.501")) in amounts
+    assert ("BRL", "TRADE", Decimal("-3500.10")) in amounts
+    assert ("BRL", "FEE", Decimal("-3.50010")) in amounts
     assert len(reserved) == 1 and Decimal(reserved[0]["remaining"]) == 0
     assert (await manager.reconcile())["ok"] is True
 
