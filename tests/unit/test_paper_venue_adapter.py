@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from services.execution import OrderStatus, OrderType, TradableInstrument, VenueId
+from services.execution import OrderStatus, OrderType, TimeInForce, TradableInstrument, VenueId
 from services.execution.venue import (
     PaperVenueAdapter,
     Quote,
@@ -175,3 +175,17 @@ def test_paper_adapter_only_trades_paper_instruments() -> None:
             fee_bps=Decimal("10"),
             slippage_bps=Decimal("5"),
         )
+
+
+async def test_ioc_limit_that_is_not_marketable_is_immediately_canceled() -> None:
+    paper = adapter()
+    report = await paper.submit(
+        order(
+            order_type=OrderType.LIMIT,
+            limit_price=Decimal("340000"),
+            time_in_force=TimeInForce.IOC,
+        )
+    )
+    assert report.status is OrderStatus.CANCELED
+    assert (await paper.query("PXabc")).status is OrderStatus.CANCELED
+    assert (await paper.balances())["BRL"] == Decimal("10000")
