@@ -642,3 +642,31 @@ class CanonicalPaperOMS:
         if diffs:
             await self._halt("balance_divergence", datetime.now(UTC))
         return {"ok": not diffs, "differences": diffs, "venue": self.adapter.venue.value}
+
+    async def reconciliation_loop(
+        self,
+        stop: asyncio.Event,
+        *,
+        interval_seconds: float = 5.0,
+        tolerance: Decimal = Decimal("0"),
+    ) -> None:
+        """Run recurrent independent balance checks until the host stops it.
+
+        The executor must supervise this worker; unexpected database or venue
+        failures latch a local halt, rather than continuing execution blind.
+        """
+
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+        while not stop.is_set():
+            try:
+                await self.reconcile(tolerance=tolerance)
+            except Exception:
+                self._local_halt = True
+                raise
+            if stop.is_set():
+                break
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+            except TimeoutError:
+                continue
