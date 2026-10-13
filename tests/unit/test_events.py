@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from services.events.bus import InMemoryEventBus
-from services.events.journal import EventJournal
+from services.events.journal import DuplicateEvent, EventJournal
 from services.events.reconciliation import ReconciliationIssue, reconcile
 
 
@@ -27,7 +27,7 @@ def test_journal_hash_chain_and_idempotency_are_enforced() -> None:
 
     first = journal.append(
         event_type="SIMULATED_FILL",
-        source="execution-rust",
+        source="paper-execution",
         payload={"asset": "BTC", "quantity": "0.01"},
         correlation_id=correlation_id,
         event_id=event_id,
@@ -45,9 +45,9 @@ def test_journal_hash_chain_and_idempotency_are_enforced() -> None:
 
     assert first.previous_hash == "GENESIS"
     assert second.previous_hash == first.hash
-    assert journal.verify() is True
+    assert journal.verify_window() is True
 
-    with pytest.raises(ValueError, match="duplicate event_id"):
+    with pytest.raises(DuplicateEvent, match="duplicate event_id"):
         journal.append(
             event_type="DUPLICATE",
             source="test",
@@ -55,13 +55,14 @@ def test_journal_hash_chain_and_idempotency_are_enforced() -> None:
             event_id=event_id,
         )
 
-    with pytest.raises(ValueError, match="duplicate idempotency_key"):
+    with pytest.raises(DuplicateEvent, match="duplicate idempotency_key") as duplicate:
         journal.append(
             event_type="DUPLICATE",
             source="test",
             payload={},
             idempotency_key="fill-1",
         )
+    assert duplicate.value.existing == first
 
 
 def test_reconciliation_detects_cross_state_divergence() -> None:

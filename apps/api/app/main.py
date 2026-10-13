@@ -25,7 +25,7 @@ from .app_state import persistence_engine
 from .core_routes import router as core_router
 from .creation_surface import router as creation_router
 from .equity_market_surface import router as equity_market_router
-from .event_state import record_operational_event
+from .event_state import JournalUnavailable, operational_journal, record_operational_event
 from .event_surface import router as event_router
 from .live_routes import router as live_router
 from .live_websockets import router as live_websocket_router
@@ -49,6 +49,7 @@ logger = logging.getLogger("proto.api")
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if persistence_engine is not None:
         await init_database(persistence_engine)
+    await operational_journal.start()
     yield
     if persistence_engine is not None:
         await persistence_engine.dispose()
@@ -225,18 +226,25 @@ async def operational_audit_policy(request: Request, call_next) -> Response:
     response = await call_next(request)
     event_type = _OPERATIONAL_EVENTS.get(request.url.path) if request.method == "POST" else None
     if event_type is not None:
-        await record_operational_event(
-            event_type=event_type,
-            source="proto-api",
-            payload={
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": response.status_code,
-                "request_id": response.headers.get("X-Request-ID"),
-                "financial_connectivity": False,
-                "real_money_execution": False,
-            },
-        )
+        try:
+            await record_operational_event(
+                event_type=event_type,
+                source="proto-api",
+                payload={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": response.status_code,
+                    "request_id": response.headers.get("X-Request-ID"),
+                    "financial_connectivity": False,
+                    "real_money_execution": False,
+                },
+            )
+        except JournalUnavailable:
+            # The command already ran; flag the missing audit record instead of
+            # turning its result into a misleading 500.
+            metrics.increment("operational_journal_write_failures")
+            logger.exception("operational audit event was not recorded for %s", request.url.path)
+            response.headers["X-Proto-Audit"] = "unrecorded"
     return response
 
 @app.middleware("http")

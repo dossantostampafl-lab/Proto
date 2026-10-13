@@ -17,7 +17,7 @@ from services.signals.tradingview import (
     TradingViewIngestor,
 )
 
-from .event_state import record_operational_event
+from .event_state import JournalUnavailable, record_operational_event
 from .security import SlidingWindowRateLimiter, request_client_key
 from .settings import settings
 
@@ -108,15 +108,23 @@ async def tradingview_webhook(request: Request) -> dict[str, object]:
     outcome = result.outcome
     if outcome is IngestOutcome.ACCEPTED:
         try:
-            await record_operational_event(
+            recorded = await record_operational_event(
                 event_type="TRADINGVIEW_SIGNAL_ACCEPTED",
                 source="tradingview-webhook",
                 payload={"signal": result.signal.model_dump(mode="json"), **_BOUNDARY},
                 idempotency_key=f"tradingview:{result.signal.signal_id}",
             )
+        except JournalUnavailable as exc:
+            # Not durable means not accepted: let a retry of the same alert through.
+            ingestor.forget(result.signal)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "journal_unavailable", "message": "signal was not recorded"},
+            ) from exc
+        if recorded.created:
             _recent.append(result.signal)
-        except ValueError:
-            # Already journaled earlier (the in-memory dedupe window evicted it).
+        else:
+            # Journaled before a restart or after the in-memory dedupe window evicted it.
             outcome = IngestOutcome.DUPLICATE
     return {
         "outcome": outcome.value,

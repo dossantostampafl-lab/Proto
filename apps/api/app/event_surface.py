@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, Query, Response
 
-from .event_state import event_runtime, operational_journal_snapshot
+from .event_state import event_runtime, operational_journal, operational_journal_snapshot
 
 
 @asynccontextmanager
@@ -50,13 +50,9 @@ def event_journal(limit: int = Query(default=100, ge=1, le=1_000)) -> dict[str, 
 
 
 @router.get("/journal/verify")
-def event_journal_verify() -> dict[str, object]:
-    snapshot = operational_journal_snapshot(limit=1)
-    return {
-        "status": "valid" if snapshot["chain_valid"] else "invalid",
-        "chain_valid": snapshot["chain_valid"],
-        "event_count": snapshot["count"],
-        "persistence_enabled": snapshot["persistence_enabled"],
-        "persisted_count": snapshot["persisted_count"],
-        "persistence_failures": snapshot["persistence_failures"],
-    }
+async def event_journal_verify(response: Response) -> dict[str, object]:
+    """Re-verify the whole durable history from GENESIS (or the memory window)."""
+    result = await operational_journal.verify()
+    if not result["chain_valid"]:
+        response.status_code = 409
+    return result

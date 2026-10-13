@@ -3,12 +3,13 @@ from __future__ import annotations
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from apps.api.app import event_state
 from apps.api.app.event_surface import router as event_router
-from apps.api.app.schema_registry import CANONICAL_TABLES, canonical_metadata
+from services.events import SqlJournalStore
+from services.events.journal_store import journal_table
 
 
 def test_event_router_exposes_ready_hash_chain() -> None:
@@ -28,14 +29,13 @@ def test_event_router_exposes_ready_hash_chain() -> None:
 @pytest.mark.asyncio
 async def test_operational_event_is_hash_chained_and_persisted(monkeypatch) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    table = CANONICAL_TABLES["audit_events"]
-    async with engine.begin() as connection:
-        await connection.run_sync(canonical_metadata.create_all)
+    store = SqlJournalStore(engine)
+    await store.create_schema()
+    journal = event_state.OperationalJournal(store)
+    await journal.start()
+    monkeypatch.setattr(event_state, "operational_journal", journal)
 
-    monkeypatch.setattr(event_state, "persistence_engine", engine)
-    before = event_state.operational_journal_snapshot(limit=1)["count"]
-
-    event = await event_state.record_operational_event(
+    recorded = await event_state.record_operational_event(
         event_type="RISK_REJECTED",
         source="test-risk",
         payload={
@@ -47,15 +47,16 @@ async def test_operational_event_is_hash_chained_and_persisted(monkeypatch) -> N
 
     snapshot = event_state.operational_journal_snapshot(limit=1)
     async with engine.connect() as connection:
-        persisted = await connection.scalar(select(func.count()).select_from(table))
-        row = (await connection.execute(select(table.c.payload))).scalar_one()
+        row = (await connection.execute(select(journal_table))).one()
 
-    assert snapshot["count"] == before + 1
+    assert recorded.created is True
+    assert snapshot["count"] == 1
     assert snapshot["chain_valid"] is True
-    assert snapshot["persistence_failures"] == 0
-    assert persisted == 1
-    assert row["event_id"] == event["event_id"]
-    assert row["event_type"] == "RISK_REJECTED"
-    assert row["payload"]["reason"] == "stale market snapshot"
+    assert snapshot["integrity"] == "VALID"
+    assert snapshot["write_failures"] == 0
+    assert row.event_id == recorded.event["event_id"]
+    assert row.event_type == "RISK_REJECTED"
+    assert row.hash == recorded.event["hash"]
+    assert '"reason":"stale market snapshot"' in row.payload_json
 
     await engine.dispose()
