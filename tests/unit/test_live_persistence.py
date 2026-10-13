@@ -49,7 +49,7 @@ async def test_live_sql_journal_is_idempotent_and_restart_queryable() -> None:
         )
 
         restarted_journal = AsyncSqlLiveTickJournal(engine, prune_every_writes=100)
-        rows = await restarted_journal.list_recent(symbol="BTC", limit=10)
+        rows = list((await restarted_journal.list_page(symbol="BTC", limit=10)).items)
 
         assert len(rows) == 1
         assert rows[0].tick.sequence == 42
@@ -100,7 +100,7 @@ async def test_live_sql_journal_prunes_expired_rows_during_write_maintenance() -
             is True
         )
 
-        rows = await journal.list_recent(symbol="BTC", limit=10)
+        rows = list((await journal.list_page(symbol="BTC", limit=10)).items)
         assert [row.tick.sequence for row in rows] == [2]
         assert journal.status()["pruned_rows"] >= 1
         assert journal.status()["maintenance_healthy"] is True
@@ -127,12 +127,12 @@ async def test_live_sql_journal_explicit_prune_is_bounded_and_query_limit_applie
                 is True
             )
 
-        limited = await journal.list_recent(symbol="BTC", limit=2)
+        limited = list((await journal.list_page(symbol="BTC", limit=2)).items)
         assert [row.tick.sequence for row in limited] == [3, 2]
 
         deleted = await journal.prune_before(now + timedelta(milliseconds=2, microseconds=500))
         assert deleted == 2
-        remaining = await journal.list_recent(symbol="BTC", limit=10)
+        remaining = list((await journal.list_page(symbol="BTC", limit=10)).items)
         assert [row.tick.sequence for row in remaining] == [3]
     finally:
         await engine.dispose()

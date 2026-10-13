@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from math import isfinite
 
+from services.quant.core import compute_edge, estimate_probability
+
 from .models import Fill, Side, SimulationRequest, SimulationResult
 
 _BPS = Decimal("10000")
@@ -62,11 +64,46 @@ class SimulationConfig:
             raise ValueError("max_future_skew_seconds must be non-negative")
 
 
+def _research_gate(
+    request: SimulationRequest,
+    estimated_slippage_bps: float,
+    fee_bps: float,
+) -> str | None:
+    """Edge/confidence gate with the simulator's own costs; returns a rejection reason or None."""
+    limits = request.limits
+    snapshot = request.snapshot
+    estimate = estimate_probability(
+        market_probability=snapshot.market_probability,
+        volatility=snapshot.volatility,
+        imbalance=snapshot.imbalance,
+        timestamp=snapshot.observed_at,
+    )
+    if limits.min_confidence is not None and estimate.confidence < limits.min_confidence:
+        return "min confidence not met"
+    if limits.min_net_edge is None:
+        return None
+    # Edge in the order's direction: buying needs model > market, selling the opposite.
+    buying = request.order.side == Side.BUY
+    edge = compute_edge(
+        model_probability=estimate.probability if buying else snapshot.market_probability,
+        market_probability=snapshot.market_probability if buying else estimate.probability,
+        fees=fee_bps / 10_000,
+        slippage=estimated_slippage_bps / 10_000,
+        spread_cost=max(snapshot.ask - snapshot.bid, 0.0) / (snapshot.ask + snapshot.bid),
+        hedge_cost=0.0,  # paper orders are never hedged
+        uncertainty_penalty=estimate.uncertainty * 0.02,
+        latency_penalty=0.0,  # latency is already priced into the slippage estimate
+        minimum_edge=limits.min_net_edge,
+    )
+    return None if edge.net_edge >= limits.min_net_edge else "min net edge not met"
+
+
 class RiskEngine:
     def validate(
         self,
         request: SimulationRequest,
         estimated_slippage_bps: float,
+        fee_bps: float = 0.0,
     ) -> tuple[bool, str]:
         order_notional = request.order.quantity * request.order.limit_price
         signed_order_quantity = (
@@ -123,6 +160,10 @@ class RiskEngine:
             return False, "insufficient top-of-book liquidity"
         if estimated_slippage_bps > request.limits.max_slippage_bps:
             return False, "max slippage exceeded"
+        if not risk_reducing:
+            rejection = _research_gate(request, estimated_slippage_bps, fee_bps)
+            if rejection is not None:
+                return False, rejection
         return True, "accepted"
 
 
@@ -220,7 +261,7 @@ class PaperSimulator:
             + latency_slippage_bps
             + depth_impact_bps
         )
-        accepted, reason = self.risk.validate(request, slippage_bps)
+        accepted, reason = self.risk.validate(request, slippage_bps, self.config.fee_bps)
         if not accepted:
             return SimulationResult(accepted=False, reason=reason)
 

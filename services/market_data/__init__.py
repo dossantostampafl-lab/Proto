@@ -23,14 +23,6 @@ from .instruments import (
     InstrumentRegistry,
     SessionType,
 )
-from .l2_corpus_replay import (
-    PublicL2ReplaySnapshot,
-)
-from .l2_corpus_storage import (
-    PublicL2CorpusError,
-    PublicL2CorpusWriter,
-    verify_public_l2_corpus,
-)
 from .live import (
     CoinbasePublicMarketDataAdapter,
 )
@@ -51,14 +43,12 @@ from .live_storage import (
 )
 from .markout import (
     FillObservation,
+    PublicL2ReplaySnapshot,
     compute_fill_markout,
     summarize_markouts,
 )
 from .pipeline import (
     MarketDataPipeline,
-)
-from .public_l2 import (
-    parse_public_l2_message,
 )
 from .universal import (
     MarketEvent,
@@ -92,8 +82,6 @@ __all__ = [
     "PersistedLiveTick",
     "PersistedLiveTickPage",
     "PublicFeedHealth",
-    "PublicL2CorpusError",
-    "PublicL2CorpusWriter",
     "PublicL2ReplaySnapshot",
     "PublicMarketDataAdapter",
     "SessionType",
@@ -101,7 +89,5 @@ __all__ = [
     "compute_orderbook_metrics",
     "evaluate_live_coverage",
     "live_readiness_failures",
-    "parse_public_l2_message",
     "summarize_markouts",
-    "verify_public_l2_corpus",
 ]

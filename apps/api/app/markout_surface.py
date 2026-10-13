@@ -7,11 +7,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from services.market_data.contracts import OrderBookSnapshot, ResearchAsset
-from services.market_data.l2_corpus_replay import PublicL2ReplaySnapshot
 from services.market_data.markout import (
     DEFAULT_MARKOUT_HORIZONS_MS,
     FillMarkout,
     FillObservation,
+    PublicL2ReplaySnapshot,
     compute_fill_markout,
     summarize_markouts,
 )

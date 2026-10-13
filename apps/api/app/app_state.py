@@ -33,17 +33,35 @@ decision_memory_store = (
     DecisionMemoryStore(orchestration_engine) if orchestration_engine is not None else None
 )
 runtime = RuntimeState()
+
+_last_wall_clock = datetime.min.replace(tzinfo=UTC)
+
+
+def non_decreasing_utc_now() -> datetime:
+    """Wall-clock UTC that never steps backwards within the process.
+
+    NTP corrections or a VM resume can move the system clock back. Fill timestamps and
+    portfolio as-of times are required to be monotonic, so a backward step would otherwise
+    make /v1/simulate and /v1/portfolio fail.
+    """
+    global _last_wall_clock
+    _last_wall_clock = max(datetime.now(UTC), _last_wall_clock)
+    return _last_wall_clock
+
+
 portfolio = PaperPortfolio(
     reference_time_provider=lambda: (
         replay_session.current_timestamp
         if runtime.mode == SystemMode.HISTORICAL_REPLAY
         and replay_session.current_timestamp is not None
-        else datetime.now(UTC)
+        else non_decreasing_utc_now()
     )
 )
 register_portfolio_recovery_target(portfolio)
 replay_session = ReplaySession(on_timeline_reset=portfolio.reset)
-simulator = PaperSimulator(reference_time_provider=lambda: replay_session.current_timestamp)
+simulator = PaperSimulator(
+    reference_time_provider=lambda: replay_session.current_timestamp or non_decreasing_utc_now()
+)
 
 
 def reset_runtime_state() -> RuntimeState:
