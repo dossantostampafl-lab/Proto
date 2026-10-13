@@ -247,6 +247,18 @@ class CanonicalPaperOMS:
                             halted_at=now,
                         )
                     )
+        except IntegrityError:
+            # Concurrent watchdog and order paths may latch the same venue
+            # simultaneously. The persisted first halt wins; duplicates
+            # are idempotent rather than supervisor failures.
+            async with self.engine.connect() as connection:
+                existing = await connection.scalar(
+                    select(venue_halts.c.venue).where(
+                        venue_halts.c.venue == self.adapter.venue.value
+                    )
+                )
+            if existing is None:
+                raise
         except Exception:
             # Never forget the local halt when durable persistence has failed.
             self._local_halt = True
