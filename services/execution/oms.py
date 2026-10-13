@@ -31,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from services.risk.durable_permits import DurablePermitLedger
+from services.risk.engine import AccountState
 from services.risk.permits import PermitSigner
 
 from .contracts import (
@@ -720,7 +721,7 @@ class CanonicalPaperOMS:
             await self._halt("balance_divergence", datetime.now(UTC))
         return {"ok": not diffs, "differences": diffs, "venue": self.adapter.venue.value}
 
-    async def risk_account(self, *, now: datetime, quotes) -> "AccountState":
+    async def risk_account(self, *, now: datetime, quotes) -> AccountState:
         """Materialize the risk governor's account from persisted BRL ledger marks."""
 
         from .accounting import risk_account
