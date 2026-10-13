@@ -23,6 +23,7 @@ from services.execution.oms import (
     CanonicalPaperOMS,
     OrderRejected,
     balance_entries,
+    fill_records,
     oms_metadata,
     order_records,
     reservations,
@@ -103,8 +104,12 @@ async def test_paper_fill_is_one_durable_order_with_balanced_trade_and_fee_entri
     async with database.connect() as conn:
         rows = (await conn.execute(select(order_records))).mappings().all()
         entries = (await conn.execute(select(balance_entries))).mappings().all()
+        fills = (await conn.execute(select(fill_records))).mappings().all()
         reserved = (await conn.execute(select(reservations))).mappings().all()
     assert len(rows) == 1
+    assert len(fills) == 1
+    assert Decimal(fills[0]["delta_quantity"]) == Decimal("0.01")
+    assert Decimal(fills[0]["delta_notional"]) == Decimal("3500.10")
     assert rows[0]["status"] == OrderStatus.FILLED.value
     amounts = [(e["asset"], e["kind"], Decimal(e["amount"])) for e in entries]
     assert ("BTC", "TRADE", Decimal("0.01")) in amounts
