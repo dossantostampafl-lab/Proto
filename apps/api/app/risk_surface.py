@@ -40,6 +40,7 @@ from services.risk import (
     RiskPolicy,
 )
 
+from . import phase4_surface
 from .app_state import runtime
 from .event_state import JournalUnavailable, record_operational_event
 from .market_quotes import live_quote
@@ -122,11 +123,17 @@ async def _journal(event_type: str, payload: dict[str, object], key: str | None 
 async def assess(intent: TradeIntent) -> RiskDecision:
     """Assess one proposal and journal the outcome (without the permit signature)."""
 
+    now = datetime.now(UTC)
+    account = (
+        await phase4_surface.risk_account(now=now)
+        if settings.canonical_paper_oms_enabled
+        else account_state()
+    )
     decision = governor().assess(
         intent,
-        account=account_state(),
+        account=account,
         quote=live_quote(intent.instrument_id, market_source=settings.live_market_source),
-        now=datetime.now(UTC),
+        now=now,
         external_global_kill=_external_global_kill(),
     )
     record = {
@@ -137,9 +144,17 @@ async def assess(intent: TradeIntent) -> RiskDecision:
         **decision.to_dict(),
         **_BOUNDARY,
     }
-    _decisions.append(record)
     key = f"risk-decision:{decision.permit.permit_id}" if decision.permit else None
-    await _journal("RISK_DECISION", record, key)
+    if settings.canonical_paper_oms_enabled:
+        await record_operational_event(
+            event_type="RISK_DECISION",
+            source="risk-engine",
+            payload=record,
+            idempotency_key=key,
+        )
+    else:
+        await _journal("RISK_DECISION", record, key)
+    _decisions.append(record)
     if decision.breach is not None:
         await _journal("RISK_LOCKDOWN_LATCHED", {"reason": decision.breach.value, **_BOUNDARY})
     return decision
@@ -173,7 +188,10 @@ def risk_status() -> dict[str, object]:
             "signing_key": "configured" if settings.risk_permit_signing_key else "ephemeral",
         },
         "controls": {**gov.snapshot(), "runtime_kill_switch": runtime.kill_switch},
-        "account_source": "reference_capital_until_ledger",
+        "account_source": (
+            "durable_execution_ledger" if settings.canonical_paper_oms_enabled
+            else "reference_capital_until_ledger"
+        ),
         "decisions": len(_decisions),
         **_BOUNDARY,
     }
@@ -206,7 +224,11 @@ async def change_kill_switch(request: KillSwitchRequest) -> dict[str, object]:
 async def release_lockdown() -> dict[str, object]:
     gov = governor()
     try:
-        gov.release_lockdown(account_state())
+        account = (
+            await phase4_surface.risk_account(now=datetime.now(UTC))
+            if settings.canonical_paper_oms_enabled else account_state()
+        )
+        gov.release_lockdown(account)
     except GovernorError as exc:
         raise HTTPException(409, str(exc)) from exc
     await _journal("RISK_LOCKDOWN_RELEASED", {"by": "operator"})
