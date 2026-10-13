@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     )
     # Hybrid agent pipeline (Phase 2). Proposals only: no order authority.
     agent_pipeline_enabled: bool = False
+    # Canonical OMS opt-in. Paper-only and fail-closed without durable storage.
+    canonical_paper_oms_enabled: bool = False
     # "deterministic" approves every sized candidate; "claude" adds the AI reviewer,
     # which may only reduce, defer or veto. Switch only after the offline gate passes.
     agent_reviewer: str = "deterministic"
@@ -115,6 +117,21 @@ class Settings(BaseSettings):
         le=1.0,
         allow_inf_nan=False,
     )
+
+    @model_validator(mode="after")
+    def enforce_canonical_paper_oms_boundary(self) -> Settings:
+        if not self.canonical_paper_oms_enabled:
+            return self
+        if not (self.persistence_enabled or self.orchestration_persistence_active):
+            raise ValueError("CANONICAL_PAPER_OMS_ENABLED requires durable persistence")
+        if (
+            self.risk_permit_signing_key is None
+            or len(self.risk_permit_signing_key.encode()) < 32
+        ):
+            raise ValueError("RISK_PERMIT_SIGNING_KEY must be stable and at least 32 bytes")
+        if self.app_env.strip().lower() == "production" and not self.durable_database_configured:
+            raise ValueError("CANONICAL_PAPER_OMS_ENABLED requires PostgreSQL in production")
+        return self
 
     @field_validator("system_mode")
     @classmethod
