@@ -20,7 +20,7 @@ from services.execution.paper_runtime import Phase4PaperRuntime
 from services.risk.engine import AccountState
 from services.risk.permits import PermitSigner
 
-from .event_state import JournalUnavailable, record_operational_event
+from .event_state import JournalUnavailable, operational_journal, record_operational_event
 from .market_quotes import live_quote
 from .settings import settings
 from .simulation import SimulationConfig
@@ -40,6 +40,8 @@ async def start(engine: AsyncEngine, signer: PermitSigner) -> None:
     global _runtime
     if not settings.canonical_paper_oms_enabled:
         return
+    if operational_journal.store is None:
+        raise RuntimeError("canonical paper OMS requires a durable audit journal")
     if _runtime is not None and _runtime.running:
         return
     instruments = tuple(
