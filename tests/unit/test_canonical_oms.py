@@ -360,3 +360,22 @@ async def test_unknown_order_never_resubmitted_while_venue_unavailable(database)
     second = await manager.place(request, permit, now=NOW)
     assert second.status is OrderStatus.UNKNOWN
     assert broker.submit_count == 1
+
+
+async def test_position_can_be_sold_when_initial_snapshot_omits_zero_base_asset(database):
+    signer = PermitSigner(KEY)
+    broker = PaperVenueAdapter(
+        instruments=(BTC,),
+        quotes=lambda _: QUOTE,
+        balances={"BRL": Decimal("10000")},
+        fee_bps=Decimal("10"),
+        slippage_bps=Decimal("0"),
+        clock=lambda: NOW,
+    )
+    manager = oms(database, broker, signer)
+    buy = intent()
+    assert (await manager.place(buy, signer.issue(buy, now=NOW), now=NOW)).status is OrderStatus.FILLED
+    sell = intent(price="349900")
+    sell = sell.model_copy(update={"side": "SELL", "reduce_only": True})
+    assert (await manager.place(sell, signer.issue(sell, now=NOW), now=NOW)).status is OrderStatus.FILLED
+    assert (await manager.reconcile())["ok"] is True
