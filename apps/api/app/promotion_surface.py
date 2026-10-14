@@ -11,6 +11,7 @@ authenticated operator; LIVE cannot be certified yet.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -172,6 +173,93 @@ async def add_evidence(body: EvidenceBody) -> dict[str, object]:
         },
     )
     return {"scope": record.to_dict(), **_BOUNDARY}
+
+
+class ScopeOnlyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: ScopeBody
+
+
+@router.post("/evidence/watchdog")
+async def add_watchdog_evidence(body: ScopeOnlyBody) -> dict[str, object]:
+    """Record WATCHDOG_ACTIVE from the watchdog's own heartbeats, never from a claim.
+
+    It passes only while the watchdog is beating and has covered at least MIN_COVERAGE
+    without a gap; otherwise a failed evidence is recorded with the measured coverage.
+    """
+
+    from .watchdog_surface import MIN_COVERAGE, state
+
+    now = datetime.now(UTC)
+    watch = state()
+    covered = watch.coverage(now)
+    passed = watch.active(now) and covered >= MIN_COVERAGE
+    reference = (
+        f"watchdog:{watch.watchdog_id or 'none'}:covered={covered.total_seconds() / 3600:.1f}h"
+        f":since={watch.covered_since.isoformat() if watch.covered_since else 'never'}"
+    )
+    record = await registry().add_evidence(
+        body.scope.scope(),
+        EvidenceKind.WATCHDOG_ACTIVE,
+        reference=reference,
+        passed=passed,
+        by="watchdog",
+    )
+    await _journal(
+        "PROMOTION_EVIDENCE_RECORDED",
+        {
+            "scope": record.scope.to_dict(),
+            "kind": EvidenceKind.WATCHDOG_ACTIVE.value,
+            "passed": passed,
+            "reference": reference,
+        },
+    )
+    return {"scope": record.to_dict(), "passed": passed, "reference": reference, **_BOUNDARY}
+
+
+class DrillBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: ScopeBody
+    kind: EvidenceKind
+    seed: int = Field(default=0, ge=0, le=2**31 - 1)
+
+
+@router.post("/evidence/drill")
+async def add_drill_evidence(body: DrillBody) -> dict[str, object]:
+    """Run a drill here, offline and away from production state, and record its outcome.
+
+    The evidence reference carries the drill version, seed and digest, so anyone can re-run it
+    with `python -m services.drills run <kind> --seed <seed>` and compare.
+    """
+
+    from services.drills import DRILLS, run_drill
+
+    if body.kind not in DRILLS:
+        raise HTTPException(422, f"{body.kind.value} is not a drill")
+    report = await run_drill(body.kind, body.seed)
+    record = await registry().add_evidence(
+        body.scope.scope(), body.kind, reference=report.reference, passed=report.passed, by="drill"
+    )
+    await _journal(
+        "PROMOTION_EVIDENCE_RECORDED",
+        {
+            "scope": record.scope.to_dict(),
+            "kind": body.kind.value,
+            "passed": report.passed,
+            "reference": report.reference,
+        },
+    )
+    return {
+        "scope": record.to_dict(),
+        "drill": {
+            **{k: v for k, v in report.to_dict().items() if k != "cases"},
+            "cases": len(report.cases),
+            "failures": [c.name for c in report.failures],
+        },
+        **_BOUNDARY,
+    }
 
 
 @router.post("/promote")

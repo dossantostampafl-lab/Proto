@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     executor_url: str | None = None
     executor_api_token: str | None = None
     operator_api_token: str | None = None
+    # Phase 6b: the independent watchdog's token. It can only halt and report a heartbeat.
+    watchdog_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
     public_origin: str | None = None
     http_rate_limit_per_minute: int = Field(default=600, ge=1, le=100_000)
@@ -202,6 +204,7 @@ class Settings(BaseSettings):
         "risk_permit_signing_key",
         "executor_api_token",
         "risk_permit_private_key",
+        "watchdog_api_token",
     )
     @classmethod
     def normalize_optional_secret(cls, value: str | None) -> str | None:
@@ -240,8 +243,22 @@ class Settings(BaseSettings):
             raise ValueError(
                 "RISK_PERMIT_SIGNING_KEY must be at least 32 characters in production"
             )
+        if (
+            self.watchdog_api_token is not None
+            and len(self.watchdog_api_token) < _MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            raise ValueError("WATCHDOG_API_TOKEN must be at least 32 characters in production")
         if not self.tradingview_ip_allowlist_enabled:
             raise ValueError("TRADINGVIEW_IP_ALLOWLIST_ENABLED must stay true in production")
+        return self
+
+    @model_validator(mode="after")
+    def watchdog_token_is_its_own(self) -> Settings:
+        if self.watchdog_api_token is not None and self.watchdog_api_token in {
+            self.operator_api_token,
+            self.executor_api_token,
+        }:
+            raise ValueError("WATCHDOG_API_TOKEN must differ from the operator and executor tokens")
         return self
 
     @model_validator(mode="after")

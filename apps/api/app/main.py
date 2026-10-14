@@ -47,6 +47,8 @@ from .shadow_control import router as shadow_control_router
 from .signal_surface import TRADINGVIEW_WEBHOOK_PATH
 from .signal_surface import router as signal_router
 from .universe_surface import router as universe_router
+from .watchdog_surface import PREFIX as WATCHDOG_PREFIX
+from .watchdog_surface import router as watchdog_router
 
 logger = logging.getLogger("proto.api")
 
@@ -94,6 +96,7 @@ for router in (
     risk_router,
     oms_router,
     promotion_router,
+    watchdog_router,
 ):
     app.include_router(router)
 
@@ -215,6 +218,8 @@ async def operator_authentication_policy(request: Request, call_next) -> Respons
         request.method in _MUTATING_METHODS
         and not request.url.path.startswith(_CREATION_PREFIX)
         and request.url.path != TRADINGVIEW_WEBHOOK_PATH
+        # The watchdog authenticates with its own halt-only token (watchdog_surface).
+        and not request.url.path.startswith(WATCHDOG_PREFIX)
     )
     if authentication_required and mutating_operator_route:
         if expected is None:

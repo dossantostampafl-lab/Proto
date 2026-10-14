@@ -21,6 +21,9 @@ A scope advances **one stage at a time**, and only with the evidence the next st
 | CANARY | An authenticated operator, **7 clean days in PAPER**, and passing `ADVERSARIAL_SUITE`, `RECOVERY_DRILL`, `ROLLBACK_DRILL` and `WATCHDOG_ACTIVE` evidence |
 | LIVE | Not certifiable yet |
 
+- **Where the CANARY evidence comes from (Phase 6b).** The three drills are run by the API itself
+  (`/v1/promotion/evidence/drill`), and `WATCHDOG_ACTIVE` passes only after 24 h of continuous
+  watchdog heartbeats (`/v1/promotion/evidence/watchdog`).
 - **When evidence counts.** It must be recorded *while in the current stage* and be at most
   14 days old. If the latest evidence of a kind failed, the gate is closed. The reference (CI run,
   commit, drill id) is where a reviewer reproduces it.
@@ -72,5 +75,7 @@ them.
 | `POST /v1/promotion/evidence` | Operator. `{scope, kind, reference, passed}` |
 | `POST /v1/promotion/promote` | Operator. `{scope, target}`; 409 with every reason when refused |
 | `POST /v1/promotion/demote` | Operator. `{scope, reason}`; never refused |
+| `POST /v1/promotion/evidence/drill` | Operator. `{scope, kind, seed}`: runs the drill and records its outcome (Phase 6b, `docs/drills/drills.md`) |
+| `POST /v1/promotion/evidence/watchdog` | Operator. `{scope}`: records `WATCHDOG_ACTIVE` from the watchdog's measured coverage (`docs/watchdog/watchdog.md`) |
 
 Scopes persist in `promotion_scopes` (migration `0010_promotion_scopes`).

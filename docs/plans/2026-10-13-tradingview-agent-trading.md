@@ -143,6 +143,20 @@ para todos os mercados.
 
 Qualquer falha rebaixa o caminho automaticamente para um estado mais seguro.
 
+**Estado.**
+
+- **Fase 6a (feita):** gates por escopo, canary de R$500, 1 semana em PAPER e permits Ed25519
+  (`docs/promotion/gates.md`).
+- **Fase 6b (feita):**
+  - **Watchdog independente:** com tokens que só param, ele aciona o kill switch da API e para o
+    executor (`docs/watchdog/watchdog.md`).
+  - **Drills automatizados:** adversarial, recuperação e rollback, com digest reproduzível
+    (`docs/drills/drills.md`).
+  - **Evidência gerada pelo sistema:** os drills registram a sua própria evidência, e o
+    `WATCHDOG_ACTIVE` exige 24 h de cobertura medida.
+- **Próximo:** executor live do canary restrito a um escopo certificado, só com autorização
+  explícita do dono.
+
 ### Fase 7 — Painel, observabilidade e operação
 
 - A UI e a API identificam cada dado como live, delayed, replay, paper, simulated, stale, unavailable ou unknown.
