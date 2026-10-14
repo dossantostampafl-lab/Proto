@@ -17,9 +17,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from services.execution import OrderType, ReleaseStage, TradeIntent, VenueId
 from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import (
+    CANARY_CAPITAL,
     MAX_GROSS_LEVERAGE,
     MAX_RISK_PER_POSITION,
     REFERENCE_CAPITAL,
+    canary_capital_in,
 )
 from services.execution.venue import Quote
 from services.risk import (
@@ -97,6 +99,7 @@ def _fixed_attacks(report: DrillReport, engine: RiskEngine) -> None:
             quote=kw.get("quote", quote),
             now=NOW,
             scope_stage=kw.get("scope_stage"),
+            canary_capital=kw.get("canary_capital"),
         )
         refused = not decision.approved and decision.permit is None
         hit = expected_reason in decision.rejections
@@ -173,6 +176,22 @@ def _fixed_attacks(report: DrillReport, engine: RiskEngine) -> None:
         "risk_per_position",
         _intent(18, quantity=Decimal("0.002"), stage=ReleaseStage.CANARY),
         scope_stage=ReleaseStage.CANARY,
+        canary_capital=CANARY_CAPITAL,
+    )
+    judge(
+        "canary_without_brl_rate",
+        "canary_capital_known",
+        _intent(19, quantity=Decimal("0.0001"), stage=ReleaseStage.CANARY),
+        scope_stage=ReleaseStage.CANARY,
+    )
+    # R$500 at 5.50 BRL/USDT is about 90.9 USDT, a 0.227 risk budget. A 12.4 USDT order risks
+    # 0.248: refused, where reading R$500 as 500 USDT (budget 1.25) would have approved it.
+    judge(
+        "canary_capped_in_brl_not_usdt",
+        "risk_per_position",
+        _intent(20, quantity=Decimal("0.0002"), stage=ReleaseStage.CANARY),
+        scope_stage=ReleaseStage.CANARY,
+        canary_capital=canary_capital_in(Decimal("5.50")),
     )
 
 

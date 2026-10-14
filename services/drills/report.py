@@ -11,7 +11,7 @@ import json
 from dataclasses import asdict, dataclass, field
 
 # Bump when a drill's cases change; a digest is only comparable within one version.
-DRILL_VERSION = "6b.1"
+DRILL_VERSION = "6c.1"
 
 
 @dataclass(frozen=True)

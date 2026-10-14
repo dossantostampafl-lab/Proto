@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from services.execution import OrderType, ReleaseStage, TradeIntent, VenueId
 from services.execution.catalog import PAPER_INSTRUMENTS
+from services.execution.constitution import CANARY_CAPITAL
 from services.execution.venue import Quote
 from services.promotion import EvidenceKind, PromotionRefused, PromotionRegistry, Scope
 from services.risk import (
@@ -114,6 +115,7 @@ async def _promotion_rollback(report: DrillReport, directory: Path) -> None:
             quote=quote,
             now=now,
             scope_stage=await registry.stage(SCOPE),
+            canary_capital=CANARY_CAPITAL,
         )
         report.expect(
             "canary_intent_allowed_while_certified",
@@ -137,6 +139,7 @@ async def _promotion_rollback(report: DrillReport, directory: Path) -> None:
             quote=quote,
             now=now,
             scope_stage=await registry.stage(SCOPE),
+            canary_capital=CANARY_CAPITAL,
         )
         report.expect(
             "canary_intent_refused_after_demotion", "stage_certified", ",".join(after.rejections)

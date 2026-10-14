@@ -18,7 +18,6 @@ from zoneinfo import ZoneInfo
 
 from services.execution import ReleaseStage, RiskPermit, TradableInstrument, TradeIntent
 from services.execution.constitution import (
-    CANARY_CAPITAL,
     MAX_DAILY_LOSS,
     MAX_DRAWDOWN,
     MAX_GROSS_LEVERAGE,
@@ -151,11 +150,14 @@ class RiskEngine:
         quote: Quote | None,
         now: datetime,
         scope_stage: ReleaseStage | None = None,
+        canary_capital: Decimal | None = None,
     ) -> RiskDecision:
         """`scope_stage` is the promotion registry's stage for the intent's scope.
 
         PAPER and SHADOW need no certification. CANARY needs the scope certified
-        at CANARY and sizes on at most CANARY_CAPITAL. LIVE is never certified yet.
+        at CANARY and sizes on at most `canary_capital`: CANARY_CAPITAL (BRL) in the
+        intent's quote currency, see `canary_capital_in`. Without it a CANARY intent
+        is refused. LIVE is never certified yet.
         """
 
         checks: dict[str, str] = {}
@@ -223,7 +225,9 @@ class RiskEngine:
             check("no_lockdown", lockdown is None, lockdown.value if lockdown else "")
             equity = conservative_equity(account.equity)
             if canary:
-                equity = min(equity, CANARY_CAPITAL)
+                known = canary_capital is not None and canary_capital > 0
+                check("canary_capital_known", known, "no BRL rate for the quote currency")
+                equity = min(equity, canary_capital if known else Decimal("0"))
             notional = intent.quantity * (price or Decimal("0"))
             budget = equity * MAX_RISK_PER_POSITION
             check(

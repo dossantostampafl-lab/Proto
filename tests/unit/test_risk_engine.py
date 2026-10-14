@@ -8,6 +8,7 @@ import pytest
 
 from services.execution import OrderType, ReleaseStage, TradableInstrument, TradeIntent, VenueId
 from services.execution.catalog import PAPER_INSTRUMENTS
+from services.execution.constitution import CANARY_CAPITAL, canary_capital_in
 from services.execution.venue import Quote
 from services.market_data.instruments import AssetClass, SessionType
 from services.risk import (
@@ -279,6 +280,7 @@ def test_canary_needs_a_certified_scope_and_sizes_on_the_canary_capital() -> Non
         quote=QUOTE,
         now=NOW,
         scope_stage=ReleaseStage.CANARY,
+        canary_capital=CANARY_CAPITAL,
     )
     assert certified.approved, certified.checks
 
@@ -291,8 +293,34 @@ def test_canary_needs_a_certified_scope_and_sizes_on_the_canary_capital() -> Non
         quote=QUOTE,
         now=NOW,
         scope_stage=ReleaseStage.CANARY,
+        canary_capital=CANARY_CAPITAL,
     )
     assert "risk_per_position" in capped.rejections
+
+    # Without a BRL rate for the quote currency a CANARY intent is refused.
+    unknown = engine().evaluate(
+        small,
+        account=account(),
+        controls=Controls(),
+        quote=QUOTE,
+        now=NOW,
+        scope_stage=ReleaseStage.CANARY,
+    )
+    assert "canary_capital_known" in unknown.rejections
+    # R$500 is about 90.9 USDT at 5.50 BRL/USDT: the 62 USDT order is now far too large.
+    in_usdt = engine().evaluate(
+        small,
+        account=account(),
+        controls=Controls(),
+        quote=QUOTE,
+        now=NOW,
+        scope_stage=ReleaseStage.CANARY,
+        canary_capital=canary_capital_in(Decimal("5.50")),
+    )
+    assert "risk_per_position" in in_usdt.rejections
+    assert canary_capital_in(Decimal("1")) == CANARY_CAPITAL
+    with pytest.raises(ValueError):
+        canary_capital_in(Decimal("0"))
 
     live = engine().evaluate(
         intent(stage=ReleaseStage.LIVE, quantity=Decimal("0.001")),

@@ -17,7 +17,7 @@ issued.
 
 | Check | Rule |
 |---|---|
-| `stage_certified` | `PAPER` and `SHADOW` always. `CANARY` only for a scope certified at CANARY (`docs/promotion/gates.md`), sized on at most R$500. `LIVE` never yet |
+| `stage_certified` | `PAPER` and `SHADOW` always. `CANARY` only for a scope certified at CANARY (`docs/promotion/gates.md`), sized on at most R$500 in the account's currency (`canary_capital_known` refuses it without a fresh BRL rate). `LIVE` never yet |
 | `global_kill_switch` / `venue_kill_switch` / `strategy_kill_switch` | Halt everything in scope, including exits |
 | `instrument_known`, `venue_grid` | Instrument is in the catalog; quantity and price fit the lot, tick and minimum notional |
 | `spot_no_short`, `sell_is_reduce_only` | A sell never exceeds the position and must be reduce-only |
