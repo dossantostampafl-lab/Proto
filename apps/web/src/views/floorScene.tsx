@@ -60,7 +60,7 @@ const fit = (tl: P, tr: P, bl: P, br: P, w: number, h: number) => {
 };
 const rand = (n: number) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 
-export const TONE_COLOR: Record<Tone | "idle", string> = { ok: "#58c39a", warn: "#d8a55b", alert: "#ea666b", working: "#8fc3e6", idle: "#8a939c" };
+export const TONE_COLOR: Record<Tone | "idle", string> = { ok: "#58c39a", warn: "#d8a55b", alert: "#ea666b", working: "#b9c2cb", idle: "#80888f" };
 
 export type StationDef = {
   id: StationId; label: string; role: string;
@@ -92,15 +92,15 @@ function Defs() {
         <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
       </filter>
       <filter id="fl-led" x="-10%" y="-200%" width="120%" height="500%">
-        <feGaussianBlur stdDeviation="3" result="b" />
-        <feMerge><feMergeNode in="b" /><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        <feGaussianBlur stdDeviation="2" result="b" />
+        <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
       </filter>
       <filter id="fl-glow" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="16" /></filter>
       <filter id="fl-soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="7" /></filter>
       <filter id="fl-dof" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="18" /></filter>
       <filter id="fl-haze" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="1.1" /></filter>
       <linearGradient id="fl-sky" x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0" stopColor="#05070b" /><stop offset="0.6" stopColor="#111823" /><stop offset="1" stopColor="#2b2a2c" />
+        <stop offset="0" stopColor="#060708" /><stop offset="0.6" stopColor="#141619" /><stop offset="1" stopColor="#2a2b2d" />
       </linearGradient>
       <linearGradient id="fl-ceiling" x1="0" x2="0" y1="0" y2="1">
         <stop offset="0" stopColor="#030405" /><stop offset="1" stopColor="#15181c" />
@@ -109,10 +109,10 @@ function Defs() {
         <stop offset="0" stopColor="#1b1e22" /><stop offset="0.45" stopColor="#101215" /><stop offset="1" stopColor="#060708" />
       </linearGradient>
       <linearGradient id="fl-glass" x1="0" x2="1" y1="0" y2="1">
-        <stop offset="0" stopColor="#9fb3c4" stopOpacity="0.10" /><stop offset="0.5" stopColor="#dfe6ec" stopOpacity="0.02" /><stop offset="1" stopColor="#8fa3b4" stopOpacity="0.12" />
+        <stop offset="0" stopColor="#b4b9be" stopOpacity="0.09" /><stop offset="0.5" stopColor="#e2e4e6" stopOpacity="0.02" /><stop offset="1" stopColor="#a4a9ae" stopOpacity="0.11" />
       </linearGradient>
       <linearGradient id="fl-screen" x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0" stopColor="#141c25" /><stop offset="0.5" stopColor="#0b1118" /><stop offset="1" stopColor="#070b10" />
+        <stop offset="0" stopColor="#17191c" /><stop offset="0.5" stopColor="#0e1012" /><stop offset="1" stopColor="#08090a" />
       </linearGradient>
       <linearGradient id="fl-desk" x1="0" x2="0" y1="0" y2="1">
         <stop offset="0" stopColor="#24292f" /><stop offset="1" stopColor="#3a4048" />
@@ -124,7 +124,7 @@ function Defs() {
         <stop offset="0" stopColor="#f1e3c8" stopOpacity="0.09" /><stop offset="1" stopColor="#f1e3c8" stopOpacity="0" />
       </linearGradient>
       <linearGradient id="fl-reflect" x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0" stopColor="#a9c4d8" stopOpacity="0.15" /><stop offset="1" stopColor="#a9c4d8" stopOpacity="0" />
+        <stop offset="0" stopColor="#bfc4c9" stopOpacity="0.13" /><stop offset="1" stopColor="#bfc4c9" stopOpacity="0" />
       </linearGradient>
       <linearGradient id="fl-chair" x1="0" x2="0" y1="0" y2="1">
         <stop offset="0" stopColor="#1e2227" /><stop offset="1" stopColor="#0c0e10" />
@@ -133,7 +133,7 @@ function Defs() {
         <stop offset="0" stopColor="#f0dfc0" stopOpacity="0.20" /><stop offset="1" stopColor="#f0dfc0" stopOpacity="0" />
       </radialGradient>
       <radialGradient id="fl-cool" cx="0.5" cy="0.5" r="0.5">
-        <stop offset="0" stopColor="#9cc6e0" stopOpacity="0.22" /><stop offset="1" stopColor="#9cc6e0" stopOpacity="0" />
+        <stop offset="0" stopColor="#cdd2d6" stopOpacity="0.16" /><stop offset="1" stopColor="#cdd2d6" stopOpacity="0" />
       </radialGradient>
       <radialGradient id="fl-vignette" cx="0.5" cy="0.45" r="0.78">
         <stop offset="0.55" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity="0.75" />
@@ -159,10 +159,10 @@ function City() {
         <g key={`${seed}-${i}`}>
           <rect x={x} y={base - h} width={w} height={h} fill={color} />
           {rand(seed + i * 5) > 0.8 && <rect x={x + w / 2 - 1.5} y={base - h - 20} width={3} height={20} fill={color} />}
-          {rand(seed + i * 5) > 0.8 && <rect x={x + w / 2 - 2} y={base - h - 22} width={4} height={3} fill="#ff4d6d" className="fl-blink" />}
+          {rand(seed + i * 5) > 0.8 && <rect x={x + w / 2 - 2} y={base - h - 22} width={4} height={3} fill="#7d8287" />}
           {lit.map((on, k) => on && (
             <rect key={k} x={x + 3 + (k % 4) * (w / 4.4)} y={base - h + 5 + Math.floor(k / 4) * 9} width={3.2} height={4}
-              fill={rand(i + k + seed) > 0.55 ? "#e6c38e" : "#c9d2d8"} opacity={0.8} />
+              fill={rand(i + k + seed) > 0.55 ? "#d6cfc1" : "#c3c8cc"} opacity={0.62} />
           ))}
         </g>
       );
@@ -174,7 +174,7 @@ function City() {
       <g opacity={0.85}>{layer(2, 30, 80, 230, "#171e27", 0.34)}</g>
       <g>{layer(3, 22, 50, 160, "#0e141b", 0.4)}</g>
       <rect y={base} width={VW} height={VH - base} fill="#0c0f13" />
-      {Array.from({ length: 60 }, (_, i) => <circle key={i} cx={rand(i * 9) * VW} cy={base + 4 + rand(i * 4) * 40} r={1.2} fill="#e6c38e" opacity={0.5} />)}
+      {Array.from({ length: 60 }, (_, i) => <circle key={i} cx={rand(i * 9) * VW} cy={base + 4 + rand(i * 4) * 40} r={1.2} fill="#d6cfc1" opacity={0.35} />)}
     </g>
   );
 }
@@ -284,7 +284,7 @@ function WallScreens({ market, state, actions }: { market: Shared["market"]; sta
   const [gx0, gy0] = proj(-5.8, 5.6, screenZ(-5.8)), [gx1, gy1] = proj(5.8, 2.1, screenZ(0));
   return (
     <g>
-      <rect x={gx0} y={gy0} width={gx1 - gx0} height={gy1 - gy0} fill="#9cc6e0" opacity={0.07} filter="url(#fl-glow)" />
+      <rect x={gx0} y={gy0} width={gx1 - gx0} height={gy1 - gy0} fill="#c4c9ce" opacity={0.06} filter="url(#fl-glow)" />
       <WallPanel x0={-1.5} x1={1.5} top={5.72} bottom={5.4}>
         {w => (
           <text x={w / 2} y={22} textAnchor="middle" className="fl-wp-tape" fill="#d7dce1">
@@ -302,7 +302,7 @@ function WallScreens({ market, state, actions }: { market: Shared["market"]; sta
             {btc.length > 1 ? (
               <g>
                 <path d={`${sparkPath(btc, 24, 160, w - 120, h - 190)} L${w - 96},${h - 30} L24,${h - 30} Z`} fill="#e6edf2" opacity={0.06} />
-                <path d={sparkPath(btc, 24, 160, w - 120, h - 190)} fill="none" stroke="#eef3f6" strokeWidth={2.6} filter="url(#fl-bloom)" />
+                <path d={sparkPath(btc, 24, 160, w - 120, h - 190)} fill="none" stroke="#dfe3e6" strokeWidth={2.4} />
                 <text x={w - 82} y={170} className="fl-wp-axis">{hi != null ? usd(hi) : ""}</text>
                 <text x={w - 82} y={h - 30} className="fl-wp-axis">{lo != null ? usd(lo) : ""}</text>
               </g>
@@ -321,10 +321,10 @@ function WallScreens({ market, state, actions }: { market: Shared["market"]; sta
             <text x={22} y={156} className={`fl-wp-num ${daily == null ? "" : daily < 0 ? "fl-down" : "fl-up"}`}>{pct(daily)}</text>
             <text x={22} y={188} className="fl-wp-label">DD / -5%</text>
             <text x={22} y={216} className={`fl-wp-num ${drawdown != null && drawdown < 0 ? "fl-down" : ""}`}>{pct(drawdown)}</text>
-            <text x={150} y={128} className="fl-wp-label">LOCKDOWN</text>
-            <text x={150} y={156} className={`fl-wp-num ${state?.controls.lockdown ? "fl-down" : ""}`}>{state == null ? "—" : state.controls.lockdown ?? "none"}</text>
-            <text x={150} y={188} className="fl-wp-label">STATUS</text>
-            <text x={150} y={216} className={`fl-wp-num ${state == null ? "" : halted ? "fl-down" : "fl-up"}`}>{state == null ? "UNAVAILABLE" : halted ? "HALTED" : "ARMED"}</text>
+            <text x={128} y={128} className="fl-wp-label">LOCKDOWN</text>
+            <text x={128} y={156} className={`fl-wp-num ${state?.controls.lockdown ? "fl-down" : ""}`}>{state == null ? "—" : state.controls.lockdown ?? "none"}</text>
+            <text x={128} y={188} className="fl-wp-label">STATUS</text>
+            <text x={128} y={216} className={`fl-wp-num ${state == null ? "" : halted ? "fl-down" : "fl-up"}`}>{state == null ? "UNAVAILABLE" : halted ? "HALTED" : "ARMED"}</text>
           </g>
         )}
       </WallPanel>
@@ -358,7 +358,7 @@ function Reflection() {
 
 /** Operator seen from behind in a high-back chair, in centimetres. Only verified activity moves the hands. */
 function AgentOperator({ x, z, hair, suit, busy, color }: { x: number; z: number; hair: string; suit: string; busy: boolean; color: string }) {
-  const rim = busy ? color : "#b7cad8";
+  const rim = busy ? color : "#c2c8ce";
   return (
     <g transform={at(x, 0, z)} data-activity={busy ? "working" : "idle"} className={busy ? "fl-person busy" : "fl-person"}>
       <ellipse cx={0} cy={0} rx={50} ry={10} fill="#000" opacity={0.55} />
@@ -449,11 +449,11 @@ function Station({ def, action, busy, recent, market, index }: {
   const plate = local(def, 0, 1.56, D - 0.1);
   return (
     <g className={busy ? "fl-station busy" : "fl-station"} data-station={def.id}>
-      <polygon points={pts(...base)} fill="none" stroke={busy ? color : "#f2e8d8"} strokeWidth={1.4} opacity={busy ? 0.9 : 0.55} filter="url(#fl-led)" />
+      <polygon points={pts(...base)} fill="none" stroke={busy ? color : "#c9ced3"} strokeWidth={1.2} opacity={busy ? 0.75 : 0.28} filter="url(#fl-led)" />
       <polygon points={pedestal(-1)} fill="url(#fl-panel)" stroke="#2f353c" strokeWidth={0.8} />
       <polygon points={pedestal(1)} fill="url(#fl-panel)" stroke="#2f353c" strokeWidth={0.8} />
       <polygon points={pts(...top)} fill="url(#fl-desk)" stroke="#59616a" strokeWidth={0.8} />
-      <polyline points={pts(top[0], top[1])} stroke={busy ? color : "#f2e8d8"} strokeWidth={1.2} opacity={0.6} filter="url(#fl-bloom)" />
+      <polyline points={pts(top[0], top[1])} stroke={busy ? color : "#c9ced3"} strokeWidth={1} opacity={0.35} />
       <ellipse cx={px} cy={py} rx={W * s * 0.85} ry={s * 0.2} fill="url(#fl-cool)" className="fl-pool" />
       <Monitor d={def} lx={-spread} lz={D - 0.2} turn={-0.35}><MonitorSymbol s={symbols[0]} market={market} color={busy ? color : "#cfd8df"} /></Monitor>
       <Monitor d={def} lx={0} lz={D - 0.12} turn={0}><MonitorLog recent={recent} /></Monitor>
@@ -480,7 +480,7 @@ function Plant({ x, z, size = 1 }: { x: number; z: number; size?: number }) {
   const leaves = Array.from({ length: 14 }, (_, i) => {
     const a = -Math.PI / 2 + (rand(i * 3 + x) - 0.5) * 2.4, len = (45 + rand(i + z) * 45) * size;
     const ex = Math.cos(a) * len, ey = -60 * size + Math.sin(a) * len;
-    return <path key={i} d={`M0 ${-50 * size} Q${ex * 0.4 - 8} ${ey * 0.6} ${ex} ${ey} Q${ex * 0.5 + 8} ${ey * 0.5} 0 ${-50 * size}`} fill={i % 3 ? "#1f3a26" : "#2d5234"} opacity={0.95} />;
+    return <path key={i} d={`M0 ${-50 * size} Q${ex * 0.4 - 8} ${ey * 0.6} ${ex} ${ey} Q${ex * 0.5 + 8} ${ey * 0.5} 0 ${-50 * size}`} fill={i % 3 ? "#1d2621" : "#2a352d"} opacity={0.95} />;
   });
   return (
     <g transform={at(x, 0, z)}>
@@ -502,7 +502,7 @@ function Pipeline({ latest, active }: { latest: Partial<Record<StationId, FloorA
         const mid: P = [(x1 + x2) / 2, Math.max(y1, y2) + 22];
         return (
           <path key={to.id} d={`M${x1.toFixed(1)},${y1.toFixed(1)} Q${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}`}
-            className={busy ? "fl-beam busy" : "fl-beam"} stroke={busy ? TONE_COLOR[latest[to.id]?.tone ?? "working"] : "#efe6d6"} filter="url(#fl-led)" />
+            className={busy ? "fl-beam busy" : "fl-beam"} stroke={busy ? TONE_COLOR[latest[to.id]?.tone ?? "working"] : "#c9ced3"} filter="url(#fl-led)" />
         );
       })}
     </g>
@@ -536,7 +536,7 @@ export function Scene({ market, state, actions, latest, active }: {
       {items.map(i => i.node)}
       <g filter="url(#fl-dof)" pointerEvents="none">
         <circle cx={120} cy={70} r={40} fill="#f0e3c8" opacity={0.05} />
-        <circle cx={1170} cy={90} r={50} fill="#9cc6e0" opacity={0.05} />
+        <circle cx={1170} cy={90} r={50} fill="#c4c9ce" opacity={0.04} />
       </g>
       <rect width={VW} height={VH} fill="url(#fl-vignette)" pointerEvents="none" />
     </svg>
