@@ -378,6 +378,23 @@ async def reconcile_now() -> dict[str, object]:
     return await reconcile()
 
 
+@router.post("/executor/halt/release")
+async def release_executor_halt() -> dict[str, object]:
+    """Operator action: release the executor's halt (divergence or watchdog).
+
+    The executor refuses while its ledger and the venue still disagree. The watchdog halts it
+    again on its next cycle if the condition that tripped it still holds.
+    """
+
+    if not executor_mode():
+        raise HTTPException(409, "no executor backend is configured")
+    body = await _from_executor(executor_client().release_halt())
+    await _record(
+        "EXECUTOR_HALT_RELEASED", {"by": "operator", "consistent": body.get("consistent")}
+    )
+    return {**body, **_BOUNDARY}
+
+
 @router.post("/orders/{client_order_id}/resolve")
 async def resolve_order(client_order_id: str) -> dict[str, object]:
     if executor_mode():

@@ -75,6 +75,11 @@ class ExecutorClient:
     async def reconcile(self) -> dict[str, Any]:
         return await self._call("POST", "/v1/reconcile")
 
+    async def release_halt(self) -> dict[str, Any]:
+        """Operator action, relayed. The executor refuses it while still diverged."""
+
+        return await self._call("POST", "/v1/halt/release")
+
     async def order_action(self, client_order_id: str, action: str) -> dict[str, Any]:
         if action not in {"resolve", "cancel"}:
             raise ValueError("action must be resolve or cancel")

@@ -1,0 +1,36 @@
+# systemd unit for the independent watchdog on its own Oracle Cloud instance.
+# Install: docs/watchdog/watchdog.md ("Running it on Oracle Cloud").
+[Unit]
+Description=PROTO independent watchdog (halts trading, never releases)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=proto-watchdog
+Group=proto-watchdog
+WorkingDirectory=/opt/proto
+# WATCHDOG_API_URL, WATCHDOG_API_TOKEN, WATCHDOG_EXECUTOR_URL, WATCHDOG_EXECUTOR_TOKEN.
+# The file is root:proto-watchdog 0640, written from OCI Vault at boot; never from the repository.
+EnvironmentFile=/etc/proto/watchdog.env
+ExecStart=/opt/proto/.venv/bin/python -m apps.watchdog
+Restart=always
+RestartSec=5
+# Hardening: the watchdog needs the network and nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

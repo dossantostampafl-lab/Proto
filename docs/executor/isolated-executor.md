@@ -52,7 +52,7 @@ TradingView ─> public API ─> agents ─> Risk Engine ─(intent + permit)─
 | `GET /v1/orders` | Latest orders |
 | `POST /v1/orders/{id}/resolve` · `/cancel` | Resolve an `UNKNOWN` order by query; cancel a resting order |
 | `GET /v1/ledger` | Balances per asset |
-| `POST /v1/reconcile` · `POST /v1/halt/release` | Reconcile now; release a halt once consistent |
+| `POST /v1/reconcile` · `POST /v1/halt/release` | Reconcile now; release a halt once consistent. Operators can relay the release through the API: `POST /v1/oms/executor/halt/release` |
 | `GET /v1/events` | Recent order, reconciliation and halt events |
 | `GET /v1/watchdog/status` · `POST /v1/watchdog/halt` | Watchdog token only (`EXECUTOR_WATCHDOG_TOKEN`): readiness, halt, last reconciliation; halt. It cannot trade or release (`docs/watchdog/watchdog.md`) |
 
