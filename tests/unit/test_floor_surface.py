@@ -88,6 +88,8 @@ def test_each_event_type_maps_to_its_station() -> None:
         event("RECONCILIATION_DIVERGENCE", {"divergences": [{"asset": "USDT"}, {"asset": "BTC"}]})
     )
     assert divergence[0]["headline"] == "divergence: BTC, USDT"
+    assert rejected[0]["why"] == ["fresh_quote", "price_collar"]
+    assert decision[1]["why"][0] == "wide spread"
     assert floor_actions(event("SOMETHING_ELSE", {})) == []
     assert floor_actions(event("ORDER_FILLED", {"reason": "x" * 500}))[0]["headline"].endswith("…")
 
@@ -161,6 +163,18 @@ def test_floor_streams_the_whole_chain_live(configured) -> None:
 
         state = client.get("/v1/floor/state").json()
     assert state["data_mode"] == "PAPER"
+    fusion = state["stations"]["fusion"]["why"]
+    assert any(w.startswith("outcome ") for w in fusion)
+    assert any(w.startswith("risk budget ") for w in fusion)
+    assert any(w.startswith("candidate BUY ") for w in fusion)
+    assert state["watchdog"] == {
+        "active": False,
+        "last_beat": None,
+        "coverage_hours": 0.0,
+        "required_hours": 24.0,
+        "trips": 0,
+        "last_trip": None,
+    }
     assert set(state["stations"]) == set(STATIONS)
     assert state["stations"]["oms"]["headline"].startswith("BUY")
     assert state["stations"]["risk"]["headline"] == "permit issued"
@@ -191,3 +205,29 @@ async def test_floor_state_shows_each_scope_and_what_blocks_it(configured) -> No
     assert entry["stage"] == "REPLAY" and entry["next_stage"] == "SHADOW"
     assert entry["blockers"] == ["missing REPLAY_REPRODUCIBLE evidence recorded in REPLAY"]
     assert ready["promotion"][0]["blockers"] == []
+
+
+def test_the_justification_is_the_journaled_one_and_never_invented() -> None:
+    fusion, reviewer = floor_actions(
+        event(
+            "AGENT_DECISION",
+            {
+                "outcome": "ABSTAINED",
+                "fusion": {"direction": "LONG", "score": 0.4, "reason": "2 signals agree"},
+                "abstain_reason": "gross leverage limit reached",
+                "sizing": {"exposure": "10000"},
+            },
+        )
+    )
+    assert fusion["why"] == [
+        "2 signals agree",
+        "outcome ABSTAINED",
+        "abstained: gross leverage limit reached",
+    ]
+    assert reviewer["why"] == []  # nothing was reviewed, so nothing is claimed
+    bare = floor_actions(event("AGENT_DECISION", {"fusion": {}}))
+    assert bare[0]["why"] == []
+    halt = floor_actions(event("WATCHDOG_TRIPPED", {"reasons": ["daily_loss:USDT"]}))
+    assert halt[0]["why"] == ["daily_loss:USDT"]
+    long = floor_actions(event("RISK_DECISION", {"rejections": ["x" * 900] * 9}))
+    assert len(long[0]["why"]) == 8 and all(len(w) <= 400 for w in long[0]["why"])

@@ -60,6 +60,31 @@ The **Promotion path** panel lists every scope from `/v1/promotion` (see
 
 The **Últimas ações** strip ends with the most advanced scope's stage and its next stage.
 
+## Watchdog
+
+The **Watchdog** panel shows what the API last saw of the independent watchdog
+(`docs/watchdog/watchdog.md`):
+
+- whether its heartbeat is active, stale or never seen;
+- the time of the last beat;
+- the unbroken coverage against the 24 h the CANARY gate requires;
+- how many halts it triggered, and the reasons for the last one.
+
+The watchdog can only halt. Nothing on this panel releases a halt.
+
+## Why each decision was taken
+
+Each entry in the **Agent feed** can open a **why** list with the decision's own justification, copied
+from the journaled event and never inferred:
+
+- **Fusion:** the fusion reason, the outcome, any abstention, the candidate (side, quantity, limit
+  price) and the sizing inputs (conviction, risk budget, sizing equity, leverage headroom).
+- **Reviewer:** its rationale and size factor. The reviewer can only shrink or block.
+- **Risk Engine:** every rejection, not only the first three in the headline.
+- **Watchdog halts:** every reason it reported.
+
+An event that carries no reason shows no **why** list.
+
 ## Phones
 
 On narrow screens the scene pans sideways and opens centred on the desks. Below it, a card per

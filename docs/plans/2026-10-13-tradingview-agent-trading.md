@@ -173,6 +173,7 @@ Qualquer falha rebaixa o caminho automaticamente para um estado mais seguro.
 **Estado (Fase 7b, feita):**
 - **Promoção no Prometheus:** estágio, dias limpos, bloqueios do gate e violações por escopo. O alerta `ProtoScopeDemoted` dispara quando um escopo cai de estágio.
 - **Painel Grafana de segurança:** *Proto Safety*, só leitura, provisionado apenas na stack de trading. A stack live só-leitura não muda.
+- **Pregão:** painel do watchdog (batimento, cobertura até as 24 h do gate de CANARY, paradas e o motivo da última) e o "why" de cada decisão dos agentes, copiado do evento do journal.
 - **Dinheiro real:** continua desligado. O painel mostra `proto_real_money_execution = 0`.
 
 ## Como vamos executar (skills)

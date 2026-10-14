@@ -11,7 +11,7 @@ import { changeOf, type FloorAction, type FloorState, isHalted, priceOf, sparkPa
 import { VectorScene } from "./floorSceneVector";
 
 export { isHalted, STAGES, STATIONS, TONE_COLOR };
-export type { Account, FloorAction, FloorState, PromotionScope, StationId, Tone } from "./floorModel";
+export type { Account, FloorAction, FloorState, PromotionScope, StationId, Tone, WatchdogSummary } from "./floorModel";
 
 // The photo is 1179 x 664; every coordinate below is a pixel of it.
 const VW = 1179, VH = 664;

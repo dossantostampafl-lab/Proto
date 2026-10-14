@@ -7,8 +7,9 @@ one per station of the authority chain:
 
 Actions are pushed on `/ws/floor` as they are journaled, and `/v1/floor/state`
 returns the recent ones with the controls and accounts to bootstrap the view.
-Actions carry headlines and ids only: never permit signatures, prompts or
-credentials, and the data mode (PAPER or TESTNET) is always stated.
+Actions carry headlines, ids and the decision's own justification (`why`, copied from the
+journaled payload, never inferred): never permit signatures, prompts or credentials, and the
+data mode (PAPER or TESTNET) is always stated.
 """
 
 from __future__ import annotations
@@ -55,8 +56,45 @@ def _symbol(instrument_id: object) -> str | None:
     return instrument_id.partition(":")[2] or instrument_id
 
 
+_WHY_ITEMS = 8
+_SIZING_LABELS = (
+    ("conviction", "conviction"),
+    ("risk_budget", "risk budget"),
+    ("equity", "sizing equity"),
+    ("leverage_headroom", "leverage headroom"),
+    ("position_quantity", "position"),
+)
+
+
+def _why(*items: object) -> list[str]:
+    """The decision's reasons, as journaled: empty values dropped, each clipped."""
+
+    return [_clip(item, 400) for item in items if item not in (None, "", [])][:_WHY_ITEMS]
+
+
+def _fusion_why(payload: dict[str, Any]) -> list[str]:
+    fusion = payload.get("fusion") or {}
+    sizing = payload.get("sizing") or {}
+    candidate = payload.get("candidate") or {}
+    return _why(
+        fusion.get("reason"),
+        f"outcome {payload['outcome']}" if payload.get("outcome") else None,
+        f"abstained: {payload['abstain_reason']}" if payload.get("abstain_reason") else None,
+        f"candidate {candidate.get('side', '?')} {candidate.get('quantity', '?')} "
+        f"@ {candidate.get('limit_price', '?')}"
+        if candidate
+        else None,
+        *(f"{label} {sizing[key]}" for key, label in _SIZING_LABELS if key in sizing),
+    )
+
+
 def _action(
-    event: dict[str, Any], station: str, tone: str, headline: str, instrument: object = None
+    event: dict[str, Any],
+    station: str,
+    tone: str,
+    headline: str,
+    instrument: object = None,
+    why: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "seq": event["sequence"],
@@ -66,6 +104,7 @@ def _action(
         "tone": tone,
         "headline": _clip(headline),
         "symbol": _symbol(instrument),
+        "why": why or [],
     }
 
 
@@ -92,6 +131,7 @@ def floor_actions(event: dict[str, Any]) -> list[dict[str, Any]]:
                 f"{fusion.get('direction', '?')} · score {fusion.get('score', '?')}"
                 + (f" · {payload['abstain_reason']}" if payload.get("abstain_reason") else ""),
                 instrument,
+                _fusion_why(payload),
             )
         ]
         review = payload.get("review")
@@ -104,6 +144,13 @@ def floor_actions(event: dict[str, Any]) -> list[dict[str, Any]]:
                     _VERDICT_TONE.get(verdict, "warn"),
                     f"{verdict} ({review.get('reviewer', '?')}): {review.get('rationale', '')}",
                     instrument,
+                    _why(
+                        review.get("rationale"),
+                        f"size factor {review['size_factor']}"
+                        if review.get("size_factor") is not None
+                        else None,
+                        "the reviewer can only shrink or block, never enlarge",
+                    ),
                 )
             )
         elif outcome == "ABSTAINED":
@@ -114,8 +161,11 @@ def floor_actions(event: dict[str, Any]) -> list[dict[str, Any]]:
         instrument = payload.get("instrument_id")
         if payload.get("approved"):
             return [_action(event, "risk", "ok", "permit issued", instrument)]
-        reasons = ", ".join(str(r) for r in (payload.get("rejections") or [])[:3]) or "rejected"
-        return [_action(event, "risk", "alert", f"rejected: {reasons}", instrument)]
+        rejections = [str(r) for r in payload.get("rejections") or []]
+        reasons = ", ".join(rejections[:3]) or "rejected"
+        return [
+            _action(event, "risk", "alert", f"rejected: {reasons}", instrument, _why(*rejections))
+        ]
     if kind == "RISK_LOCKDOWN_LATCHED":
         return [_action(event, "risk", "alert", f"lockdown: {payload.get('reason', '?')}")]
     if kind == "RISK_LOCKDOWN_RELEASED":
@@ -126,8 +176,9 @@ def floor_actions(event: dict[str, Any]) -> list[dict[str, Any]]:
         return [_action(event, "risk", "alert" if action == "TRIGGER" else "ok", headline)]
 
     if kind == "WATCHDOG_TRIPPED":
-        reasons = ", ".join(str(r) for r in (payload.get("reasons") or [])[:3]) or "tripped"
-        return [_action(event, "risk", "alert", f"watchdog halt: {reasons}")]
+        tripped = [str(r) for r in payload.get("reasons") or []]
+        reasons = ", ".join(tripped[:3]) or "tripped"
+        return [_action(event, "risk", "alert", f"watchdog halt: {reasons}", why=_why(*tripped))]
 
     if kind.startswith("ORDER_"):
         status = kind.removeprefix("ORDER_")
@@ -170,6 +221,8 @@ async def floor_state(limit: int = 80) -> dict[str, object]:
     from .event_state import operational_journal
     from .oms_surface import _QUOTE_ASSETS, account_state
     from .risk_surface import governor, runtime
+    from .watchdog_surface import _utc_now
+    from .watchdog_surface import state as watchdog_state
 
     recent = operational_journal.journal.recent(500)
     actions = _from_journal(event.to_dict() for event in recent)[-max(1, min(limit, 300)) :]
@@ -195,6 +248,7 @@ async def floor_state(limit: int = 80) -> dict[str, object]:
 
     return {
         "promotion": await _promotion_summary(),
+        "watchdog": _watchdog_summary(watchdog_state().to_dict(_utc_now())),
         "data_mode": data_mode(),
         "journal": operational_journal.integrity.value,
         "stations": stations,
@@ -208,6 +262,20 @@ async def floor_state(limit: int = 80) -> dict[str, object]:
             "paper_execution_enabled": settings.oms_paper_execution_enabled,
         },
         **_BOUNDARY,
+    }
+
+
+def _watchdog_summary(status: dict[str, Any]) -> dict[str, Any]:
+    """What the floor shows of the watchdog: liveness, coverage and the last halt."""
+
+    trips = status.get("recent_trips") or []
+    return {
+        "active": status["active"],
+        "last_beat": status["last_beat"],
+        "coverage_hours": status["coverage_hours"],
+        "required_hours": status["required_hours"],
+        "trips": len(trips),
+        "last_trip": trips[-1] if trips else None,
     }
 
 
