@@ -161,7 +161,7 @@ export function Floor({ market }: Shared) {
           <ul className="floor-controls">
             <li><span>Agents</span><b>{state ? (state.pipeline.agents_enabled ? `on · ${state.pipeline.reviewer}` : "off") : "—"}</b></li>
             <li><span>Execution</span><b>{state ? (state.pipeline.execution_backend === "executor" ? "executor · testnet" : state.pipeline.paper_execution_enabled ? "paper venue" : "proposals only") : "—"}</b></li>
-            <li><span>Journal</span><b className={state?.journal === "VALID" ? "up" : "down"}>{state?.journal ?? "—"}</b></li>
+            <li><span>Journal</span><b className={state == null ? "muted" : state.journal === "VALID" ? "up" : "down"}>{state?.journal ?? "—"}</b></li>
             <li><span>Kill switch</span><b className={state == null ? "muted" : killed ? "down" : "up"}>{state == null ? "—" : killed ? "ON" : "armed"}</b></li>
             <li><span>Lockdown</span><b className={state?.controls.lockdown ? "down" : ""}>{state == null ? "—" : state.controls.lockdown ?? "none"}</b></li>
             <li><span>Halted venues</span><b className={state?.controls.killed_venues?.length ? "down" : ""}>{state == null ? "—" : state.controls.killed_venues?.join(", ") || "none"}</b></li>

@@ -195,7 +195,7 @@ function WallScreen({ market, state, actions }: { market: Shared["market"]; stat
         <text x={width / 2 + 40} y={top + 13} textAnchor="middle" className="fl-ws-title">
           {state == null ? "" : lead ? `${lead.stage} ${lead.clean_days.toFixed(1)}d${lead.next_stage ? ` → ${lead.next_stage}` : ""}` : "NO SCOPE"}
         </text>
-        <text x={width - 12} y={top + 13} textAnchor="end" className={`fl-ws-title ${halted ? "fl-down" : "fl-up"}`}>{state == null ? "STATUS UNAVAILABLE" : halted ? "■ HALTED" : "● ARMED"}</text>
+        <text x={width - 12} y={top + 13} textAnchor="end" className={`fl-ws-title ${state == null ? "" : halted ? "fl-down" : "fl-up"}`}>{state == null ? "STATUS UNAVAILABLE" : halted ? "■ HALTED" : "● ARMED"}</text>
         {SYMBOLS.map((s: Sym, i) => {
           const series = market.series[s];
           const mid = market.frames[s]?.mid ?? series[series.length - 1];
