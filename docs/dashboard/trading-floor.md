@@ -32,6 +32,22 @@ The wall screen shows:
 
 A missing value is shown as `—` and is never estimated.
 
+## Promotion path
+
+The **Promotion path** panel lists every scope from `/v1/promotion` (see
+`docs/promotion/gates.md`). For each one it shows:
+
+- the stage ladder;
+- the clean days and the violations;
+- every reason the next stage is still refused, as the gates report it.
+
+The wall screen header shows the most advanced scope's stage and its next stage.
+
+## Phones
+
+On narrow screens the scene pans sideways and opens centred on the desks. Below it, a card per
+desk shows the same live headline in readable type.
+
 ## Controls
 
 **Halt all trading** triggers the global kill switch (`POST /v1/risk/killswitch`) and requires the

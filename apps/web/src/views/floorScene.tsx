@@ -9,7 +9,16 @@ export type Tone = "ok" | "warn" | "alert" | "working";
 export type StationId = "tradingview" | "fusion" | "reviewer" | "risk" | "oms" | "reconciliation";
 export type FloorAction = { seq: number; at: string; event_type: string; station: StationId; tone: Tone; headline: string; symbol: string | null };
 export type Account = { equity: string; start_of_day_equity: string; peak_equity: string; gross_exposure: string; positions: Record<string, string> } | null;
+export type PromotionScope = {
+  scope: { account: string; venue: string; strategy_id: string; model_version: string; credential_id: string; key: string };
+  stage: string;
+  clean_days: number;
+  next_stage: string | null;
+  blockers: string[];
+  violations: number;
+};
 export type FloorState = {
+  promotion?: PromotionScope[];
   data_mode: "PAPER" | "TESTNET";
   journal: string;
   stations: Record<StationId, FloorAction | null>;
@@ -146,6 +155,8 @@ function WallScreen({ market, state, actions }: { market: Shared["market"]; stat
   const drawdown = equity != null && usdt ? equity / Number(usdt.peak_equity) - 1 : null;
   const halted = isHalted(state);
   const btc = market.series.BTC.slice(-90);
+  const stageRank = ["RESEARCH", "REPLAY", "SHADOW", "PAPER", "CANARY", "LIVE"];
+  const lead = [...(state?.promotion ?? [])].sort((a, b) => stageRank.indexOf(b.stage) - stageRank.indexOf(a.stage))[0];
   const chartX = 150, chartW = 196, chartY = top + 36, chartH = 104;
   // Curved glass: the top and bottom edges bow away from the viewer.
   const outline = `M0,${top} Q${width / 2},${top - bow} ${width},${top} L${width},${top + height} Q${width / 2},${top + height + bow} 0,${top + height} Z`;
@@ -157,6 +168,9 @@ function WallScreen({ market, state, actions }: { market: Shared["market"]; stat
       <g clipPath="url(#fl-screen-clip)">
         <rect x={0} y={top - 10} width={width} height={30} fill="#0d2a5c" />
         <text x={12} y={top + 13} className="fl-ws-title">PROTO · {state?.data_mode === "TESTNET" ? "TESTNET · NO REAL MONEY" : "PAPER / SIM"}</text>
+        <text x={width / 2 + 40} y={top + 13} textAnchor="middle" className="fl-ws-title">
+          {lead ? `${lead.stage} ${lead.clean_days.toFixed(1)}d${lead.next_stage ? ` → ${lead.next_stage}` : ""}` : "NO SCOPE"}
+        </text>
         <text x={width - 12} y={top + 13} textAnchor="end" className={`fl-ws-title ${halted ? "fl-down" : "fl-up"}`}>{halted ? "■ HALTED" : "● ARMED"}</text>
         {SYMBOLS.map((s: Sym, i) => {
           const series = market.series[s];
@@ -188,10 +202,11 @@ function WallScreen({ market, state, actions }: { market: Shared["market"]; stat
           <text y={127} className={`fl-ws-num ${state?.controls.lockdown ? "fl-down" : ""}`}>{state?.controls.lockdown ?? "none"}</text>
         </g>
         <line x1={8} x2={width - 8} y1={top + 160} y2={top + 160} stroke="#1e4f99" />
+
         <text x={12} y={top + 176} className="fl-ws-label">AGENT TAPE</text>
         {actions.slice(-5).reverse().map((a, i) => (
           <text key={`${a.seq}:${a.station}`} x={12} y={top + 194 + i * 15} className="fl-ws-tape" fill={TONE_COLOR[a.tone]}>
-            {`${a.at.slice(11, 19)}  ${a.station.toUpperCase().slice(0, 8).padEnd(8)}  ${a.headline.slice(0, 26)}`}
+            {`${a.at.slice(11, 19)}  ${a.station.toUpperCase().slice(0, 8).padEnd(8)}  ${a.headline.slice(0, 22)}`}
           </text>
         ))}
         {!actions.length && <text x={12} y={top + 194} className="fl-ws-tape" fill="#5d7fa8">no agent activity yet</text>}

@@ -168,3 +168,26 @@ def test_floor_streams_the_whole_chain_live(configured) -> None:
     assert state["real_money_execution"] is False
     text = json.dumps(state).lower()
     assert "signature" not in text and SECRET not in text
+
+
+async def test_floor_state_shows_each_scope_and_what_blocks_it(configured) -> None:
+    from apps.api.app import promotion_surface
+    from apps.api.app.floor_surface import floor_state
+    from services.execution import ReleaseStage
+    from services.promotion import EvidenceKind, Scope
+
+    promotion_surface.reset_promotion_state()
+    scope = Scope("paper-binance-spot", "BINANCE_SPOT", "hybrid-fusion-v1", "fusion-v1", "paper")
+    registry = promotion_surface.registry()
+    await registry.promote(scope, ReleaseStage.REPLAY, operator=False, by="t")
+    state = await floor_state()
+    await registry.add_evidence(
+        scope, EvidenceKind.REPLAY_REPRODUCIBLE, reference="ci#1", passed=True, by="t"
+    )
+    ready = await floor_state()
+    promotion_surface.reset_promotion_state()
+
+    [entry] = state["promotion"]
+    assert entry["stage"] == "REPLAY" and entry["next_stage"] == "SHADOW"
+    assert entry["blockers"] == ["missing REPLAY_REPRODUCIBLE evidence recorded in REPLAY"]
+    assert ready["promotion"][0]["blockers"] == []
