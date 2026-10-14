@@ -223,11 +223,16 @@ function WallScreen({ market, state, actions }: { market: Shared["market"]; stat
   );
 }
 
+
 function Floor() {
   const tiles: ReactNode[] = [];
   for (let x = 0; x < ROOM; x++) for (let y = 0; y < ROOM; y++) {
-    const shade = 18 + Math.round((1 - (x + y) / (2 * ROOM)) * 10);
-    tiles.push(<polygon key={`${x}-${y}`} points={pts(iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1))} fill={`rgb(${shade - 6},${shade + 4},${shade + 30})`} stroke="#1b2f5c" strokeWidth={0.8} />);
+    const shade = 30 + Math.round((1 - (x + y) / (2 * ROOM)) * 13);
+    tiles.push(
+      <polygon key={x + "-" + y} points={pts(iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1))}
+        fill={"rgb(" + shade + "," + (shade + 3) + "," + (shade + 8) + ")"}
+        stroke="#474b51" strokeOpacity={0.28} strokeWidth={0.8} />
+    );
   }
   const [sx, sy] = iso(4.6, 0.9);
   return (
@@ -239,83 +244,129 @@ function Floor() {
         const c = iso(4.6, ROOM * (1 - f) - 0.6 + 1.8), d = iso(4.6, ROOM * (1 - f) + 1.8);
         return <polygon key={f} points={pts(a, b, c, d)} fill="url(#fl-shaft)" />;
       })}
-      <polyline points={pts(iso(0, ROOM), iso(0, 0), iso(ROOM, 0))} fill="none" stroke="#74818d" strokeWidth={2} opacity={0.6} />
+      <polyline points={pts(iso(0, ROOM), iso(0, 0), iso(ROOM, 0))}
+        fill="none" stroke="#77818b" strokeWidth={1.4} opacity={0.45} />
     </g>
   );
 }
 
 // ---------- people and desks ----------
-function Trader({ x, y, hair, shirt, busy }: { x: number; y: number; hair: string; shirt: string; busy: boolean }) {
+
+/** Operator is visual context for a real station. Only verified activity moves its hands. */
+function AgentOperator({ x, y, hair, shirt, busy }: { x: number; y: number; hair: string; shirt: string; busy: boolean }) {
   const [px, py] = iso(x, y, 0);
   return (
-    <g transform={`translate(${px.toFixed(1)} ${py.toFixed(1)})`} className={busy ? "fl-person busy" : "fl-person"}>
-      <ellipse cx={0} cy={2} rx={20} ry={8} fill="#000" opacity={0.35} />
-      <rect x={-2} y={-12} width={4} height={12} fill="#1b2236" />
-      <rect x={-12} y={-20} width={24} height={9} fill="#26304d" />
-      <rect x={-12} y={-46} width={24} height={26} fill="#1e2740" />
-      <rect x={-10} y={-48} width={20} height={22} fill={shirt} />
-      <rect x={-10} y={-48} width={20} height={4} fill="#ffffff" opacity={0.12} />
-      <rect className="fl-arm" x={-14} y={-46} width={5} height={16} fill={shirt} />
-      <rect className="fl-arm right" x={9} y={-46} width={5} height={16} fill={shirt} />
-      <rect x={-7} y={-63} width={14} height={15} fill={hair} />
-      <rect x={-7} y={-52} width={14} height={4} fill="#d9a07c" />
+    <g transform={"translate(" + px.toFixed(1) + " " + py.toFixed(1) + ")"}
+      data-activity={busy ? "working" : "idle"} className={busy ? "fl-person busy" : "fl-person"}>
+      <ellipse cx={0} cy={3} rx={27} ry={11} fill="#000" opacity={0.4} />
+      <path d="M-17 -8 L-18 -34 Q-16 -43 -10 -42 L10 -42 Q16 -43 18 -34 L17 -8"
+        fill="#22272e" stroke="#69727b" strokeWidth={1.2} />
+      <path d="M-13 -4 L-18 0 M13 -4 L18 0" fill="none" stroke="#69727b" strokeWidth={3} />
+      <path d="M-10 -19 L-13 0 M10 -19 L13 0" fill="none" stroke="#20262d" strokeWidth={7} strokeLinecap="round" />
+      <path className="fl-operator-breathe"
+        d="M-13 -60 Q-18 -56 -19 -42 L-15 -24 Q0 -17 15 -24 L19 -42 Q18 -56 13 -60 Q0 -65 -13 -60Z"
+        fill={shirt} stroke="#737c84" strokeWidth={1.3} />
+      <path d="M-12 -52 Q0 -45 12 -52" fill="none" stroke="#a4aeb7" strokeOpacity={0.2} strokeWidth={2} />
+      <path className="fl-arm" d="M-14 -54 Q-22 -46 -17 -35 L-7 -30"
+        fill="none" stroke="#49515a" strokeWidth={7} strokeLinecap="round" />
+      <path className="fl-arm right" d="M14 -54 Q22 -46 17 -35 L7 -30"
+        fill="none" stroke="#49515a" strokeWidth={7} strokeLinecap="round" />
+      <ellipse cx={0} cy={-69} rx={10.5} ry={12.5} fill="#c1967c" stroke="#e0b69a" strokeOpacity={0.4} />
+      <path d="M-11 -72 Q-12 -86 0 -86 Q12 -85 11 -70 L7 -78 Q0 -75 -10 -72Z" fill={hair} />
+      <path d="M-12 -73 Q-13 -78 -10 -82 M12 -73 Q13 -78 10 -82" fill="none"
+        stroke="#a8afb8" strokeOpacity={0.28} strokeWidth={1.5} />
+      <path d="M-12 -42 L-18 -16 L-24 -15 M12 -42 L18 -16 L24 -15" fill="none"
+        stroke="#151a20" strokeWidth={2} opacity={0.65} />
     </g>
   );
 }
 
-function Station({ def, action, busy, recent }: { def: StationDef; action: FloorAction | undefined; busy: boolean; recent: FloorAction[] }) {
+
+function Station({ def, action, busy, recent, market }: {
+  def: StationDef;
+  action: FloorAction | undefined;
+  busy: boolean;
+  recent: FloorAction[];
+  market: Shared["market"];
+}) {
   const tone: Tone | "idle" = action ? action.tone : "idle";
   const color = TONE_COLOR[tone];
   const { x, y } = def;
   const [lx, ly] = iso(x + 0.85, y + 0.5);
   const monitors = [0.08, 0.6, 1.12].map(o => iso(x + o, y + 0.12, 22));
   const [hx, hy] = iso(x + 0.85, y + 0.3, 150);
-  const text = action?.headline ?? "waiting for work";
+  const headline = action?.headline ?? "waiting for work";
   return (
-    <g className={`fl-station ${busy ? "busy" : ""}`}>
-      <ellipse cx={lx} cy={ly} rx={UNIT * 1.3} ry={UNIT * 0.62} fill="url(#fl-amber)" className="fl-pool" />
-      <Box x={x + 0.05} y={y + 0.05} w={0.1} d={0.6} h={18} top="#151d33" left="#0b1122" right="#10172a" />
-      <Box x={x + 1.55} y={y + 0.05} w={0.1} d={0.6} h={18} top="#151d33" left="#0b1122" right="#10172a" />
-      <Box x={x} y={y} w={1.7} d={0.7} h={4} z={18} top="#2c3a5c" left="#141c31" right="#1b2540" edge="#3f5a8f" />
-      {monitors.map(([mx, my], i) => (
-        <g key={i} transform={`matrix(${ALONG_X} ${mx} ${my})`}>
-          <rect x={22} y={-8} width={4} height={8} fill="#0d1324" />
-          <rect x={0} y={-40} width={48} height={33} fill="#0b0f1c" />
-          <rect x={2} y={-38} width={44} height={29} fill="#e8952e" className="fl-monitor" style={{ animationDelay: `${(i + x) * 0.37}s` }} />
-          <rect x={2} y={-38} width={44} height={6} fill="#ffd28a" opacity={0.55} />
-          {Array.from({ length: 4 }, (_, k) => <rect key={k} x={5} y={-29 + k * 5} width={8 + rand(x * 13 + i * 7 + k) * 30} height={2} fill="#4a2a00" opacity={0.6} />)}
+    <g className={busy ? "fl-station busy" : "fl-station"} data-station={def.id}>
+      <ellipse cx={lx} cy={ly} rx={UNIT * 1.5} ry={UNIT * 0.66}
+        fill="url(#fl-amber)" className="fl-pool" opacity={busy ? 0.95 : 0.4} />
+      <ellipse cx={lx} cy={ly + 19} rx={UNIT * 1.12} ry={18} fill="#000" opacity={0.27} />
+      <Box x={x + 0.08} y={y + 0.08} w={0.12} d={0.65} h={18}
+        top="#485059" left="#171c23" right="#252b32" />
+      <Box x={x + 1.52} y={y + 0.08} w={0.12} d={0.65} h={18}
+        top="#485059" left="#171c23" right="#252b32" />
+      <Box x={x} y={y} w={1.72} d={0.82} h={4} z={18}
+        top="#50565f" left="#171c22" right="#2c3139" edge="#868e95" />
+      <Box x={x + 0.04} y={y + 0.07} w={1.64} d={0.68} h={1} z={22}
+        top="#292f35" left="#1b222a" right="#272f36" edge="#626c76" />
+      {monitors.map(([mx, my], i) => {
+        const symbol = SYMBOLS[i];
+        const series = market.series[symbol];
+        const mid = market.frames[symbol]?.mid ?? series[series.length - 1];
+        return (
+          <g key={symbol} transform={"matrix(" + ALONG_X + " " + mx + " " + my + ")"}>
+            <path d="M23 -8 L23 1 M10 1 L36 1" fill="none" stroke="#737e89" strokeWidth={3} />
+            <rect x={-1} y={-42} width={50} height={36} rx={3} fill="#080d12" stroke="#78838c" strokeWidth={1.6} />
+            <rect x={2} y={-39} width={44} height={29} rx={1} fill="url(#fl-screen)" className="fl-monitor-screen" />
+            <path d="M2 -39 L46 -39 L46 -10" fill="none" stroke="#c4ccd2" strokeOpacity={0.20} />
+            <text x={5} y={-30} className="fl-monitor-symbol">{symbol}/USD</text>
+            <text x={5} y={-18} className="fl-monitor-number">
+              {mid != null && Number.isFinite(mid) && mid > 0 ? usd(mid) : "no feed"}
+            </text>
+            <rect x={5} y={-14} width={38} height={1} fill={busy ? color : "#89939c"} opacity={busy ? 1 : 0.35} />
+          </g>
+        );
+      })}
+      <Box x={x + 0.40} y={y + 0.53} w={0.90} d={0.15} h={1} z={22}
+        top="#5c6168" left="#262d34" right="#30373e" />
+      <AgentOperator x={x + 0.85} y={y + 1.01} hair={def.hair} shirt={def.shirt} busy={busy} />
+      <polygon points={pts([hx - 50, hy + 54], [hx + 50, hy + 54], [lx + 30, ly - 40], [lx - 30, ly - 40])}
+        fill={color} opacity={busy ? 0.065 : 0.018} />
+      <g transform={"translate(" + (hx - 72).toFixed(1) + " " + (hy - 2).toFixed(1) + ")"}>
+        <g className="fl-holo">
+          <rect x={0} y={0} width={144} height={64} rx={5}
+            fill="#10161c" fillOpacity={0.96} stroke={busy ? color : "#555e67"}
+            strokeWidth={busy ? 1.6 : 0.9} />
+          <rect x={1} y={1} width={142} height={17} rx={4} fill="#252d34" />
+          <circle cx={134} cy={9} r={3} fill={busy ? color : "#4d555d"} />
+          <text x={8} y={15} className="fl-holo-title" fill="#dce0e4">{def.label}</text>
+          <text x={8} y={29} className="fl-holo-role">{def.role.toUpperCase()}{action?.symbol ? " · " + action.symbol : ""}</text>
+          <text x={8} y={43} className="fl-holo-text">{headline.length > 25 ? headline.slice(0, 24) + "…" : headline}</text>
+          {recent.slice(-14).map((a, i) => {
+            const h = a.tone === "ok" ? 12 : a.tone === "working" ? 9 : a.tone === "warn" ? 7 : 14;
+            return <rect key={a.seq + ":" + i} x={8 + i * 9.4} y={59 - h} width={6} height={h}
+              fill={TONE_COLOR[a.tone]} opacity={0.85} />;
+          })}
+          {!recent.length && <line x1={8} x2={136} y1={57} y2={57} stroke="#626d77" strokeWidth={1} />}
         </g>
-      ))}
-      <Box x={x + 0.45} y={y + 0.48} w={0.8} d={0.16} h={1} z={22} top="#3d4a6a" left="#1c2438" right="#232d47" />
-      <Trader x={x + 0.85} y={y + 0.98} hair={def.hair} shirt={def.shirt} busy={busy} />
-      <polygon points={pts([hx - 50, hy + 54], [hx + 50, hy + 54], [lx + 30, ly - 40], [lx - 30, ly - 40])} fill={color} opacity={busy ? 0.1 : 0.035} />
-      <g transform={`translate(${(hx - 72).toFixed(1)} ${(hy - 2).toFixed(1)})`}><g className="fl-holo">
-        <rect x={0} y={0} width={144} height={64} fill="#04101f" fillOpacity={0.82} />
-        <g filter="url(#fl-bloom)"><rect x={0} y={0} width={144} height={64} fill="none" stroke={color} strokeWidth={busy ? 2 : 1} strokeOpacity={busy ? 1 : 0.6} /></g>
-        <rect x={0} y={0} width={144} height={64} fill={color} fillOpacity={busy ? 0.14 : 0.04} />
-        <text x={8} y={15} className="fl-holo-title" fill={color}>{def.label}</text>
-        <text x={8} y={27} className="fl-holo-role">{def.role.toUpperCase()}{action?.symbol ? ` · ${action.symbol}` : ""}</text>
-        <text x={8} y={41} className="fl-holo-text">{text.length > 25 ? `${text.slice(0, 24)}…` : text}</text>
-        {recent.slice(-14).map((a, i) => (
-          <rect key={`${a.seq}:${i}`} x={8 + i * 9.4} y={58 - (a.tone === "ok" ? 12 : a.tone === "working" ? 9 : a.tone === "warn" ? 7 : 14)} width={6} height={a.tone === "ok" ? 12 : a.tone === "working" ? 9 : a.tone === "warn" ? 7 : 14} fill={TONE_COLOR[a.tone]} opacity={0.85} />
-        ))}
-        {!recent.length && <rect x={8} y={55} width={128} height={2} fill={color} opacity={0.4} />}
-      </g></g>
-      <title>{`${def.label}: ${text}`}</title>
+      </g>
+      <title>{def.label + ": " + headline}</title>
     </g>
   );
 }
 
+
 function Analyst() {
   const [px, py] = iso(7.9, 0.95);
   return (
-    <g transform={`translate(${px} ${py})`}>
-      <ellipse cx={0} cy={2} rx={16} ry={6} fill="#000" opacity={0.4} />
-      <rect x={-7} y={-28} width={6} height={28} fill="#0d1426" />
-      <rect x={1} y={-28} width={6} height={28} fill="#0d1426" />
-      <rect x={-10} y={-58} width={20} height={32} fill="#1a2440" />
-      <rect x={-7} y={-74} width={14} height={16} fill="#111" />
-      <g filter="url(#fl-bloom)"><rect x={8} y={-52} width={12} height={15} fill="#7ff8ff" opacity={0.9} /></g>
+    <g transform={"translate(" + px + " " + py + ")"} opacity={0.85}>
+      <ellipse cx={0} cy={2} rx={19} ry={7} fill="#000" opacity={0.38} />
+      <path d="M-7 -28 L-10 0 M7 -28 L10 0" fill="none" stroke="#262b30" strokeWidth={7} />
+      <path d="M-14 -50 Q0 -58 14 -50 L12 -28 L-12 -28Z" fill="url(#fl-metal)" stroke="#81878d" />
+      <ellipse cx={0} cy={-60} rx={10} ry={12} fill="#b58c70" />
+      <path d="M-10 -63 Q-12 -78 0 -78 Q13 -77 10 -63 L6 -71 L-7 -70Z" fill="#202126" />
+      <rect x={12} y={-57} width={12} height={17} rx={3} fill="#273039" stroke="#9ca5ac" />
+      <rect x={14} y={-54} width={8} height={12} rx={1} fill="#969fa7" opacity={0.6} />
     </g>
   );
 }
@@ -335,12 +386,12 @@ export function Scene({ market, state, actions, latest, active }: {
   const summary = STATIONS.map(s => `${s.label}: ${latest[s.id]?.headline ?? "idle"}`).join("; ");
   const order = [...STATIONS].sort((a, b) => a.x + a.y - (b.x + b.y));
   return (
-    <svg className="fl-scene" viewBox="40 0 930 820" role="img" aria-label={`Trading floor. ${summary}`} shapeRendering="crispEdges">
+    <svg className="fl-scene" viewBox="40 0 930 820" role="img" aria-label={`Trading floor. ${summary}`} >
       <Defs />
       <rect x={20} width={960} height={820} fill="#0b0d10" />
       <City />
       <polygon points={pts(iso(0, 0), iso(ROOM, 0), iso(ROOM, 0, WALL_H), iso(0, 0, WALL_H))} fill="url(#fl-wall)" />
-      {Array.from({ length: 8 }, (_, i) => <polyline key={i} points={pts(iso(i + 1, 0, 0), iso(i + 1, 0, WALL_H))} stroke="#30343b" strokeWidth={2} />)}
+      {Array.from({ length: 8 }, (_, i) => <polyline key={i} points={pts(iso(i + 1, 0, 0), iso(i + 1, 0, WALL_H))} stroke="#454b52" strokeWidth={1.5} />)}
       <WallScreen market={market} state={state} actions={actions} />
       <Floor />
       {STATIONS.slice(1).map((s, i) => (
@@ -348,7 +399,7 @@ export function Scene({ market, state, actions, latest, active }: {
       ))}
       <Analyst />
       {order.map(s => (
-        <Station key={s.id} def={s} action={latest[s.id]} busy={active(s.id)} recent={actions.filter(a => a.station === s.id)} />
+        <Station key={s.id} def={s} action={latest[s.id]} busy={active(s.id)} recent={actions.filter(a => a.station === s.id)} market={market} />
       ))}
       <polygon points={pts(iso(0, 0, WALL_H), iso(ROOM, 0, WALL_H), iso(ROOM, 0, WALL_H - 14), iso(0, 0, WALL_H - 14))} fill="#090c10" />
       <rect x={20} width={960} height={820} fill="url(#fl-vignette)" pointerEvents="none" />
