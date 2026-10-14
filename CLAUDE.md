@@ -74,6 +74,21 @@ uvicorn apps.executor.main:app --port 8100   # executor (needs EXECUTOR_* and PR
   labels and forbids real-money wording in the UI. Keep it passing.
 - **Bundle budget.** At most 450 KB JS and 700 KB of assets in total.
 
+## Skills and plugins
+
+`.claude/settings.json` registers two plugin marketplaces and turns the plugins on for everyone who
+opens this repository in Claude Code, including cloud sessions. They install when a session starts.
+
+- **ECC** (`ecc@ecc`, from `affaan-m/everything-claude-code`, MIT): agents, skills, hooks and
+  workflows for TDD, code review, security review, verification loops, and backend, frontend and
+  Python patterns.
+- **Superpowers** (`superpowers@superpowers-marketplace`, from `obra/superpowers`): brainstorming,
+  writing-plans, subagent-driven-development, test-driven-development and
+  verification-before-completion. The phase plans follow these workflows (see `docs/superpowers/`).
+
+The `AGENTS.md` boundary applies to every skill. No plugin may weaken the financial boundary, add
+credentials or skip CI gates.
+
 ## Conventions
 
 - **Tests.** Prefer deterministic tests with offline fakes: `tests/unit/fake_binance.py` for the
