@@ -42,6 +42,7 @@ from .promotion_surface import router as promotion_router
 from .research import metrics
 from .research import router as research_router
 from .risk_surface import router as risk_router
+from .safety_metrics import router as safety_router
 from .settings import settings
 from .shadow_control import router as shadow_control_router
 from .signal_surface import TRADINGVIEW_WEBHOOK_PATH
@@ -97,6 +98,7 @@ for router in (
     oms_router,
     promotion_router,
     watchdog_router,
+    safety_router,
 ):
     app.include_router(router)
 

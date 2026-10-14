@@ -1,0 +1,63 @@
+# Phase 7 safety alerts. What to do for each one: docs/runbooks/incident.md.
+groups:
+  - name: proto-safety
+    interval: 15s
+    rules:
+      - alert: ProtoSafetyScrapeDown
+        expr: up{job="proto-safety"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Proto safety metrics are unreachable
+          description: Prometheus cannot read /v1/safety/metrics/prometheus; the API may be down.
+
+      - alert: ProtoWatchdogDown
+        expr: proto_watchdog_active == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The independent watchdog stopped beating
+          description: No watchdog heartbeat for over a minute. Nothing halts trading on a breach from outside the API until it is back.
+
+      - alert: ProtoWatchdogTripped
+        expr: increase(proto_watchdog_trips_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: The watchdog halted trading
+          description: The watchdog triggered the global kill switch. Read its reasons in GET /v1/watchdog/status and follow the incident runbook.
+
+      - alert: ProtoGlobalKillSwitchOn
+        expr: proto_global_kill_switch == 1 or proto_runtime_kill_switch == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: Trading is halted by a kill switch
+          description: New risk is refused until an operator releases the kill switch.
+
+      - alert: ProtoLockdownLatched
+        expr: proto_lockdown_active == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: A daily-loss or drawdown lockdown is latched
+          description: A constitutional limit was breached. New risk is refused; only reduce-only exits pass.
+
+      - alert: ProtoJournalInvalid
+        expr: proto_journal_valid == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: The operational journal does not verify
+          description: Audit lineage is broken or unavailable; the watchdog halts trading on it.
+
+      - alert: ProtoRealMoneyExecutionEnabled
+        expr: proto_real_money_execution != 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Real-money execution reported as enabled
+          description: No live scope is certified. This must never fire before the owner authorises a canary.

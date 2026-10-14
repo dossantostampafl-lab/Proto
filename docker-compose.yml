@@ -17,6 +17,8 @@ services:
       PERSISTENCE_ENABLED: "true"
       CREATION_BRIDGE_SHARED_SECRET: ${CREATION_BRIDGE_SHARED_SECRET:-local-creation-proto-bridge-change-me-2026}
       OPERATOR_API_TOKEN: ${OPERATOR_API_TOKEN:-}
+      # Phase 6b: the watchdog's halt-only token (>= 32 chars, not the operator's).
+      WATCHDOG_API_TOKEN: ${WATCHDOG_API_TOKEN:-}
       HTTP_RATE_LIMIT_PER_MINUTE: "600"
     ports:
       - "8000:8000"
@@ -36,6 +38,24 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  # Independent watchdog (docs/watchdog/watchdog.md). Opt in: `docker compose --profile watchdog up`
+  # with WATCHDOG_API_TOKEN set. It only reads the API and halts it; it never releases.
+  watchdog:
+    profiles: ["watchdog"]
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["python", "-m", "apps.watchdog"]
+    environment:
+      WATCHDOG_ID: compose-watchdog
+      WATCHDOG_API_URL: http://api:8000
+      WATCHDOG_API_TOKEN: ${WATCHDOG_API_TOKEN:-}
+      WATCHDOG_INTERVAL_SECONDS: "5"
+    restart: unless-stopped
+    depends_on:
+      api:
         condition: service_healthy
 
   web:
@@ -80,8 +100,9 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
     volumes:
-      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/prometheus-trading.yml:/etc/prometheus/prometheus.yml:ro
       - ./infra/monitoring/live-alerts.yml:/etc/prometheus/live-alerts.yml:ro
+      - ./infra/monitoring/safety-alerts.yml:/etc/prometheus/safety-alerts.yml:ro
       - proto_prometheus:/prometheus
     ports:
       - "9090:9090"

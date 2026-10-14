@@ -52,7 +52,7 @@ OMS ─> paper venue | isolated executor (Binance testnet) ─> ledger ─> reco
 | `services/watchdog/`, `apps/watchdog/` | Independent watchdog: probes API and executor, halt-only tokens, never releases |
 | `services/drills/` | Adversarial, recovery and rollback drills with reproducible digests (`python -m services.drills`) |
 | `migrations/` | Alembic. New tables must be registered in `migrations/env.py` and created in `init_database` |
-| `docs/` | Per-phase docs: `tradingview/`, `agents/`, `risk/`, `oms/`, `venues/`, `executor/`, `dashboard/`, `promotion/`, `watchdog/`, `drills/`, `adr/` |
+| `docs/` | Per-phase docs: `tradingview/`, `agents/`, `risk/`, `oms/`, `venues/`, `executor/`, `dashboard/`, `promotion/`, `watchdog/`, `drills/`, `runbooks/`, `adr/` |
 
 ## Commands
 

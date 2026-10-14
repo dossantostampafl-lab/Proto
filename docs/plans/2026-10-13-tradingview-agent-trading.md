@@ -164,6 +164,12 @@ Qualquer falha rebaixa o caminho automaticamente para um estado mais seguro.
   (Grafana/infra existente).
 - Runbook de incidente e de rollback.
 
+**Estado (Fase 7a, feita):**
+- **Métricas de segurança:** `/v1/safety/metrics/prometheus` expõe watchdog, kill switches, lockdown e journal. Os alertas ficam em `infra/monitoring/safety-alerts.yml`.
+- **Watchdog em operação:** perfil no `docker-compose` e unidade systemd para a Oracle Cloud.
+- **Executor:** a liberação da parada passa pela API, como ação de operador.
+- **Runbooks:** `docs/runbooks/incident.md` e `docs/runbooks/rollback.md`.
+
 ## Como vamos executar (skills)
 
 | Etapa | Skill |

@@ -71,3 +71,31 @@ watchdog still beating. Otherwise it records a failed evidence with the measured
 | `WATCHDOG_EXECUTOR_URL` · `WATCHDOG_EXECUTOR_TOKEN` | | Optional, together. The token is the executor's `EXECUTOR_WATCHDOG_TOKEN` |
 | `WATCHDOG_INTERVAL_SECONDS` | `5` | 1 to 60 |
 | `WATCHDOG_DAILY_LOSS_FRACTION` · `WATCHDOG_DRAWDOWN_FRACTION` | `1` | Tighter-only fractions of the limits |
+
+## Running it
+
+- **Locally:** `docker compose --profile watchdog up` with `WATCHDOG_API_TOKEN` set (the API gets
+  the same value). Without the profile the stack starts as before, with no watchdog.
+- **Oracle Cloud:** its own small instance in the private subnet, outside the API's and the
+  executor's instances and service accounts.
+
+```bash
+sudo useradd --system --home /opt/proto proto-watchdog
+sudo git clone https://github.com/dossantostampafl-lab/Proto /opt/proto   # a tagged release
+cd /opt/proto && sudo python3.13 -m venv .venv && sudo .venv/bin/pip install .
+# /etc/proto/watchdog.env (root:proto-watchdog, 0640), written from OCI Vault at boot:
+#   WATCHDOG_ID=oci-watchdog-1
+#   WATCHDOG_API_URL=https://<api private address>
+#   WATCHDOG_API_TOKEN=...            # = the API's WATCHDOG_API_TOKEN
+#   WATCHDOG_EXECUTOR_URL=http://10.0.2.10:8100
+#   WATCHDOG_EXECUTOR_TOKEN=...       # = the executor's EXECUTOR_WATCHDOG_TOKEN
+sudo cp infra/watchdog/proto-watchdog.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now proto-watchdog
+journalctl -u proto-watchdog -f
+```
+
+- **Network:** the watchdog instance needs egress to the API and to the executor's port 8100;
+  allow it in the executor's security group next to the API's.
+- **Alerts:** Prometheus scrapes `/v1/safety/metrics/prometheus` (`infra/monitoring/prometheus-trading.yml`). `ProtoWatchdogDown` fires after a
+  minute without heartbeats, and `ProtoWatchdogTripped` on every halt
+  (`infra/monitoring/safety-alerts.yml`, `docs/runbooks/incident.md`).
