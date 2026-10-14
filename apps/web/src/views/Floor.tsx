@@ -62,6 +62,7 @@ const ACTIVE_MS = 7000;
 /** Bootstrap from /v1/floor/state, then stream /ws/floor; state is re-read every 5 s for accounts and controls. */
 function useFloor() {
   const [state, setState] = useState<FloorState | null>(null);
+  const [stateFresh, setStateFresh] = useState(false);
   const [actions, setActions] = useState<FloorAction[]>([]);
   const [activeAt, setActiveAt] = useState<Partial<Record<StationId, number>>>({});
   const [connected, setConnected] = useState(false);
@@ -80,7 +81,9 @@ function useFloor() {
     };
     const load = async () => {
       const r = await get<FloorState>("/v1/floor/state");
-      if (!live || !r.ok) return;
+      if (!live) return;
+      setStateFresh(r.ok);
+      if (!r.ok) return;
       setState(r.data);
       merge(r.data.actions, false);
     };
@@ -122,8 +125,8 @@ function useFloor() {
     for (const a of actions) out[a.station] = a;
     return out;
   }, [actions]);
-  const active = (s: StationId) => (activeAt[s] ?? 0) > now - ACTIVE_MS;
-  return { state, actions, latest, active, connected };
+  const active = (s: StationId) => connected && (activeAt[s] ?? 0) > now - ACTIVE_MS;
+  return { state, stateFresh, actions, latest, active, connected };
 }
 
 const TONE_LABEL: Record<Tone, string> = { ok: "ok", warn: "attention", alert: "alert", working: "working" };
@@ -145,8 +148,10 @@ export function Floor({ market }: Shared) {
         title="Trading floor"
         className="floor-stage"
         actions={<span className="floor-badges">
-          <Tag source={state?.data_mode === "TESTNET" ? "testnet" : "paper"} />
-          <span className={floor.connected ? "floor-live" : "floor-stale"}>{floor.connected ? "agents streaming" : "reconnecting"}</span>
+          {state ? <Tag source={state.data_mode === "TESTNET" ? "testnet" : "paper"} /> : <span className="floor-stale">mode unavailable</span>}
+          <span className={floor.connected ? "floor-live" : "floor-stale"}>{floor.connected ? "agent stream connected" : "agent stream reconnecting"}</span>
+          <span className={market.connected ? "floor-live" : "floor-stale"}>{market.connected ? "market stream connected" : "market stream offline · REST polling"}</span>
+          {!floor.stateFresh && <span className="floor-stale">floor state {state == null ? "unavailable" : "last known"}</span>}
         </span>}
       >
         <div className="fl-pan" ref={pan}><Scene market={market} state={state} actions={floor.actions} latest={floor.latest} active={floor.active} /></div>
@@ -154,14 +159,14 @@ export function Floor({ market }: Shared) {
       </Panel>
 
       <div className="floor-side">
-        <Panel title="Controls" source="paper">
+        <Panel title="Controls" source={state == null ? undefined : state.data_mode === "TESTNET" ? "testnet" : "paper"}>
           <ul className="floor-controls">
             <li><span>Agents</span><b>{state ? (state.pipeline.agents_enabled ? `on · ${state.pipeline.reviewer}` : "off") : "—"}</b></li>
             <li><span>Execution</span><b>{state ? (state.pipeline.execution_backend === "executor" ? "executor · testnet" : state.pipeline.paper_execution_enabled ? "paper venue" : "proposals only") : "—"}</b></li>
             <li><span>Journal</span><b className={state?.journal === "VALID" ? "up" : "down"}>{state?.journal ?? "—"}</b></li>
-            <li><span>Kill switch</span><b className={killed ? "down" : "up"}>{killed ? "ON" : "armed"}</b></li>
-            <li><span>Lockdown</span><b className={state?.controls.lockdown ? "down" : ""}>{state?.controls.lockdown ?? "none"}</b></li>
-            <li><span>Halted venues</span><b className={state?.controls.killed_venues?.length ? "down" : ""}>{state?.controls.killed_venues?.join(", ") || "none"}</b></li>
+            <li><span>Kill switch</span><b className={state == null ? "muted" : killed ? "down" : "up"}>{state == null ? "—" : killed ? "ON" : "armed"}</b></li>
+            <li><span>Lockdown</span><b className={state?.controls.lockdown ? "down" : ""}>{state == null ? "—" : state.controls.lockdown ?? "none"}</b></li>
+            <li><span>Halted venues</span><b className={state?.controls.killed_venues?.length ? "down" : ""}>{state == null ? "—" : state.controls.killed_venues?.join(", ") || "none"}</b></li>
           </ul>
           <div className="row">
             <Button label="Halt all trading" path="/v1/risk/killswitch" body={{ scope: "GLOBAL", action: "TRIGGER" }} kind="danger">Halt all trading</Button>
@@ -169,11 +174,11 @@ export function Floor({ market }: Shared) {
           <p className="hint">Operator token required. Releasing a halt stays a deliberate operator action.</p>
         </Panel>
 
-        <Panel title="Promotion path" source="paper">
+        <Panel title="Promotion path" source={state == null ? undefined : state.data_mode === "TESTNET" ? "testnet" : "paper"}>
           <PromotionPath scopes={state?.promotion} />
         </Panel>
 
-        <Panel title="Agent feed" source="paper" className="floor-feed">
+        <Panel title="Agent feed" source={state == null ? undefined : state.data_mode === "TESTNET" ? "testnet" : "paper"} className="floor-feed">
           {recent.length ? (
             <ol aria-live="polite">
               {recent.map(a => (
