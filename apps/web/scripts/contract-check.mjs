@@ -79,5 +79,8 @@ assert.match(floorView, /connected && \(activeAt\[s\]/, "agents must stop perfor
 assert.match(floorScene, /market\.connected \? "LIVE PUBLIC" : "LAST KNOWN \/ REST"/, "screen must disclose a disconnected market stream");
 assert.doesNotMatch(floorScene, /shapeRendering="crispEdges"/, "new floor must not use pixel-art rendering");
 assert.doesNotMatch(floorScene, /<image\b|<img\b/, "trading room may not be a static generated picture");
+assert.match(floorView, /const \[stateFresh, setStateFresh\]/, "floor state polling must expose freshness");
+assert.match(floorView, /source=\{state == null \? undefined : state\.data_mode === "TESTNET"/, "floor sidebars must disclose paper vs testnet mode");
+
 
 console.log(`frontend contracts: ok (${files.length} source files)`);
