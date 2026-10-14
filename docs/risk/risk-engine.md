@@ -38,7 +38,8 @@ so the book can always be de-risked during a lockdown. They never pass a kill sw
   quantity, and its issue and expiry times. Changing any field or the intent invalidates it.
 - The default TTL is 10 s. The contract caps it at 60 s.
 - `PermitLedger.consume` verifies the permit and records its id until expiry; a second use returns
-  `already_used`. The Phase 4 OMS must consume a permit there immediately before submitting.
+  `already_used`. With persistence the OMS spends permits through `SqlPermitLedger`, which keeps
+  every spent id in the database, so single use survives restarts.
 - The signing key comes from `RISK_PERMIT_SIGNING_KEY`. Production requires at least 32
   characters. When unset, each process uses a random key, so permits never survive a restart.
 - Signatures never leave the engine: journal events and API responses carry only the permit id
@@ -67,7 +68,7 @@ Every proposal from the agent pipeline is assessed automatically. The journal re
 
 ## Current limitations (closed by later phases)
 
-- There is no OMS yet, so approved permits expire unused.
-- Until the Phase 4 ledger, the account is the reference capital with no positions or exposure.
-  The loss and drawdown checks are fully implemented and tested, but in the running API they
-  cannot trigger yet.
+- Permits are consumed by the paper OMS (`docs/oms/order-management.md`) when
+  `OMS_PAPER_EXECUTION_ENABLED=true`; otherwise they expire unused.
+- Account state comes from the paper ledger. FX between BRL and USDT is not modelled, so each quote
+  currency is risk-managed as its own account.

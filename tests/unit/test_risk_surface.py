@@ -100,7 +100,10 @@ async def test_lockdown_release_is_refused_while_breached(monkeypatch) -> None:
         gross_exposure=Decimal("0"),
         positions={},
     )
-    monkeypatch.setattr(risk_surface, "account_state", lambda: losing)
+    async def losing_account(_quote_asset):
+        return losing
+
+    monkeypatch.setattr(risk_surface, "account_state", losing_account)
     decision = await risk_surface.assess(intent())
     assert decision.breach is not None
     assert operational_journal.journal.recent(1)[0].event_type == "RISK_LOCKDOWN_LATCHED"
@@ -116,7 +119,10 @@ async def test_lockdown_release_is_refused_while_breached(monkeypatch) -> None:
         gross_exposure=Decimal("0"),
         positions={},
     )
-    monkeypatch.setattr(risk_surface, "account_state", lambda: healthy)
+    async def healthy_account(_quote_asset):
+        return healthy
+
+    monkeypatch.setattr(risk_surface, "account_state", healthy_account)
     assert risk_surface.governor().snapshot()["lockdown"] == "DAILY_LOSS"  # still latched
     released = client.post("/v1/risk/lockdown/release", headers=HEADERS)
     assert risk_surface.governor() is governor_before

@@ -31,6 +31,7 @@ from .event_surface import router as event_router
 from .live_routes import router as live_router
 from .live_websockets import router as live_websocket_router
 from .observability import access_log
+from .oms_surface import router as oms_router
 from .orchestration_surface import router as orchestration_router
 from .paper_autonomy_bootstrap import router as paper_autonomy_router
 from .paper_autopilot import router as paper_autopilot_router
@@ -88,6 +89,7 @@ for router in (
     signal_router,
     agent_router,
     risk_router,
+    oms_router,
 ):
     app.include_router(router)
 

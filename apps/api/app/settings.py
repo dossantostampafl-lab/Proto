@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     risk_stop_distance: float = Field(default=0.02, gt=0.0, lt=0.5, allow_inf_nan=False)
     risk_price_collar_bps: float = Field(default=50.0, gt=0.0, le=500.0, allow_inf_nan=False)
     risk_max_quote_age_seconds: float = Field(default=10.0, gt=0.0, le=60.0, allow_inf_nan=False)
+    # OMS (Phase 4): send approved proposals to the paper venue. Paper only.
+    oms_paper_execution_enabled: bool = False
+    oms_paper_fee_bps: float = Field(default=10.0, ge=0.0, le=100.0, allow_inf_nan=False)
+    oms_paper_slippage_bps: float = Field(default=2.0, ge=0.0, le=100.0, allow_inf_nan=False)
     operator_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
     public_origin: str | None = None

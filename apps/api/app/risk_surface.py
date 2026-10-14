@@ -1,10 +1,10 @@
 """Risk Engine surface (Phase 3).
 
 Every agent proposal is assessed here; approved proposals receive a signed,
-single-use, short-lived permit. There is no OMS yet (Phase 4), so permits are
-recorded and expire unused. Kill switches and lockdown releases are operator
-actions (the operator-token middleware guards these POST routes). Until the
-Phase 4 ledger exists the account is the reference capital with no positions.
+single-use, short-lived permit. The Phase 4 OMS consumes it when paper
+execution is enabled; otherwise it expires unused. Kill switches and lockdown
+releases are operator actions (the operator-token middleware guards these POST
+routes). Account state comes from the paper ledger, marked at live prices.
 """
 
 from __future__ import annotations
@@ -96,14 +96,12 @@ def reset_risk_state() -> None:
     _decisions.clear()
 
 
-def account_state() -> AccountState:
-    return AccountState(
-        equity=REFERENCE_CAPITAL,
-        start_of_day_equity=REFERENCE_CAPITAL,
-        peak_equity=REFERENCE_CAPITAL,
-        gross_exposure=Decimal("0"),
-        positions={},
-    )
+async def account_state(quote_asset: str) -> AccountState:
+    """Account view from the Phase 4 ledger, marked at live prices."""
+
+    from .oms_surface import account_state as ledger_account_state
+
+    return await ledger_account_state(quote_asset)
 
 
 def _external_global_kill() -> bool:
@@ -122,9 +120,11 @@ async def _journal(event_type: str, payload: dict[str, object], key: str | None 
 async def assess(intent: TradeIntent) -> RiskDecision:
     """Assess one proposal and journal the outcome (without the permit signature)."""
 
+    from .oms_surface import quote_asset_of
+
     decision = governor().assess(
         intent,
-        account=account_state(),
+        account=await account_state(quote_asset_of(intent)),
         quote=live_quote(intent.instrument_id, market_source=settings.live_market_source),
         now=datetime.now(UTC),
         external_global_kill=_external_global_kill(),
@@ -173,7 +173,7 @@ def risk_status() -> dict[str, object]:
             "signing_key": "configured" if settings.risk_permit_signing_key else "ephemeral",
         },
         "controls": {**gov.snapshot(), "runtime_kill_switch": runtime.kill_switch},
-        "account_source": "reference_capital_until_ledger",
+        "account_source": "paper_ledger",
         "decisions": len(_decisions),
         **_BOUNDARY,
     }
@@ -204,9 +204,13 @@ async def change_kill_switch(request: KillSwitchRequest) -> dict[str, object]:
 
 @router.post("/lockdown/release")
 async def release_lockdown() -> dict[str, object]:
+    from .oms_surface import _QUOTE_ASSETS
+
     gov = governor()
+    accounts = [await account_state(asset) for asset in _QUOTE_ASSETS]
     try:
-        gov.release_lockdown(account_state())
+        for account in accounts:
+            gov.release_lockdown(account)
     except GovernorError as exc:
         raise HTTPException(409, str(exc)) from exc
     await _journal("RISK_LOCKDOWN_RELEASED", {"by": "operator"})
