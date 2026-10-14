@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. No secret goes here: tokens and venue
+# credentials are created directly in OCI Vault (docs/runbooks/oracle-setup.md).
+
+tenancy_ocid     = "ocid1.tenancy.oc1..xxxx"     # Cloud Shell: echo $OCI_TENANCY
+compartment_ocid = "ocid1.compartment.oc1..xxxx" # a dedicated "proto" compartment
+region           = "sa-saopaulo-1"
+home_region      = "sa-saopaulo-1"               # Governance > Tenancy details > Home region
+
+ssh_public_key = "ssh-ed25519 AAAA... operator"
+operator_cidrs = ["203.0.113.10/32"]             # your public IP: curl -s ifconfig.me
+
+create_api = true # false if the API already runs on another instance
+create_mt5 = true # Windows VM for XP MetaTrader 5 (billed)

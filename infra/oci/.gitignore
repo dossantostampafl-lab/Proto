@@ -1,0 +1,7 @@
+# Terraform state and inputs may hold OCIDs and IPs; never commit them.
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+.terraform.lock.hcl
+crash.log
