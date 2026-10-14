@@ -1,6 +1,6 @@
 # Trading floor view (Phase 7 preview)
 
-The dashboard opens on **Floor**: an isometric pixel-art trading floor, drawn in code (SVG). Each
+The dashboard opens on **Floor**: an isometric pixel-art trading floor, drawn in code (SVG) with bloom lighting, light pools, a layered rainy city and a curved wall screen. Each
 step of the authority chain has a desk and an agent:
 
 TradingView → Fusion → AI Reviewer → Risk Engine → OMS / Executor → Reconciliation
