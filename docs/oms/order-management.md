@@ -13,8 +13,10 @@ TradingView ─> agents ─> Risk Engine ─(permit)─> OMS ─> paper venue (l
 
 ## Order lifecycle (`services/oms/manager.py`)
 
-1. **Permit.** `PermitLedger.consume` checks the signature, fingerprint and expiry, and allows a
-   single use. Without a valid permit the OMS does nothing.
+1. **Permit.** The signature, fingerprint and expiry are checked, and the permit is spent once.
+   With persistence the spend is a primary-key insert in `oms_consumed_permits`, committed before
+   the order is sent, so a permit stays spent across restarts and processes. Without a valid permit
+   the OMS does nothing.
 2. **Reservation.** A buy reserves `quantity × limit × 1.005` in the quote asset; a sell reserves the
    base quantity. When funds are short the order becomes `REJECTED` and the venue is never called.
 3. **Submit.** The client order id is derived from the intent (`intent.client_order_id(0)`).
@@ -27,6 +29,25 @@ TradingView ─> agents ─> Risk Engine ─(permit)─> OMS ─> paper venue (l
    venue confirms it never received it, the order is `REJECTED` and the reservation is released.
    An `UNKNOWN` order is **never resent**.
 
+## Durable state and restart recovery (`services/oms/store.py`)
+
+With persistence enabled, every order state change is written to `oms_orders` before the OMS moves
+on. The new order is written before its reservation is posted, so a crash never orphans funds.
+Decimals are stored as exact text. On start, `OrderManager.recover()` reloads the book:
+
+| State at restart | Becomes | Why |
+|---|---|---|
+| `FILLED`, `CANCELED`, `REJECTED`, `UNKNOWN` | unchanged | Already settled, or already awaiting a venue query |
+| `NEW` | `REJECTED` ("interrupted before submit") | It never reached the venue. Its reservation, if posted, is released |
+| `SUBMITTED`, `ACKNOWLEDGED`, `PARTIALLY_FILLED` | `UNKNOWN` ("restarted while open") | It may have changed at the venue while the process was down |
+
+Recovered `UNKNOWN` orders are resolved with `POST /v1/oms/orders/{id}/resolve`, which queries the
+venue. A fill found there is applied (fill entries are idempotent, so a fill posted just before the
+crash is not counted twice). An order the venue never received is rejected and released. Nothing
+is resent, and an unresolved order holds only its own reservation; it never halts the venue. Each
+recovery is journaled as `ORDER_RECOVERED`. Resubmitting an intent after a restart returns the
+persisted order.
+
 ## Ledger (`services/oms/ledger.py`)
 
 Balances are sums of signed entries; no total is stored as a mutable number.
@@ -38,7 +59,7 @@ Balances are sums of signed entries; no total is stored as a mutable number.
 | `available` | `total − reserved` |
 
 - A batch is posted atomically, in one database transaction with `SqlLedger` (migration
-  `0008_ledger_entries`). Entry ids are deterministic, so re-posting a batch is a no-op and a
+  `0008_ledger_entries`; the OMS state tables are in `0009_oms_state`). Entry ids are deterministic, so re-posting a batch is a no-op and a
   partially overlapping batch is refused.
 - Reservations are guarded: available balance cannot go negative, and a release cannot exceed what
   was reserved.
@@ -60,7 +81,9 @@ reconciles after every paper order and on `POST /v1/oms/reconcile`.
 
 - **Equity** is quote cash plus positions marked at the live mid price.
 - **Start-of-day equity** resets on each UTC day; **peak equity** is tracked continuously. Together
-  they drive the 1% daily-loss and 5% drawdown lockdowns.
+  they drive the 1% daily-loss and 5% drawdown lockdowns. Both are checkpointed per quote currency
+  in `oms_equity_checkpoints`, so a restart can neither reset the daily-loss baseline nor forget
+  the drawdown peak.
 - **No live mark for a held asset:** gross exposure becomes infinite, which blocks new risk while
   exits stay allowed, and equity holds at its baseline so a missing quote is never read as a loss.
 - **Agent sizing** uses the same equity and the position held in the ledger, so sell signals now
@@ -88,7 +111,9 @@ durable ledger and the venue stay reconciled across restarts.
 
 ## Current limitations (closed by later phases)
 
-- Orders live in memory with their full history in the journal; rebuilding open orders from the
-  journal after a restart belongs to the recovery gate (Phase 6).
+- Without persistence (`PERSISTENCE_ENABLED=false`), orders, spent permits and checkpoints live in
+  memory and are lost on restart. Spent permits expire within 60 s anyway.
+- Recovered `UNKNOWN` orders are resolved by the operator, not automatically. The recovery gate
+  (Phase 6) adds automated resolution and its adversarial tests.
 - Resting limit orders are not matched later by the paper venue. They rest until canceled.
 - The Binance and XP adapters arrive in Phase 5 and must pass the same OMS and reconciliation tests.

@@ -109,6 +109,9 @@ class InMemoryLedger:
     async def balances(self) -> dict[str, AssetBalance]:
         return summarize(self._entries.values())
 
+    async def has_entry(self, entry: UUID) -> bool:
+        return entry in self._entries
+
     async def entries(self) -> list[LedgerEntry]:
         return sorted(self._entries.values(), key=lambda e: (e.recorded_at, str(e.entry_id)))
 
@@ -201,6 +204,13 @@ class SqlLedger:
                 )
             ).all()
         return summarize(_row_entry(a, k, amt, self) for a, k, amt in rows)
+
+    async def has_entry(self, entry: UUID) -> bool:
+        async with self.engine.connect() as connection:
+            found = await connection.execute(
+                select(ledger_table.c.entry_id).where(ledger_table.c.entry_id == str(entry))
+            )
+            return found.first() is not None
 
 
 def _row_entry(asset: str, kind: str, amount, ledger: SqlLedger) -> LedgerEntry:

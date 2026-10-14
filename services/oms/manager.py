@@ -9,12 +9,17 @@ The OMS owns order state. For every order it:
    fees and reservation releases to the ledger;
 5. resolves UNKNOWN only by querying the venue - never by resending.
 
+With an order store every state change is persisted before the OMS moves on;
+`recover()` reloads the book after a restart and turns every order whose
+venue outcome was in flight into UNKNOWN, to be resolved by query.
+
 Real-money adapters are refused: no live scope is certified yet.
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -38,6 +43,7 @@ from services.execution.venue import VenueAdapter, VenueOrder
 from services.risk import PermitLedger, PermitRejected
 
 from .ledger import InMemoryLedger, LedgerRejected, SqlLedger, entry_id
+from .store import SqlOrderStore, SqlPermitLedger
 
 logger = logging.getLogger("proto.oms")
 
@@ -102,9 +108,10 @@ class OrderManager:
         *,
         adapter: VenueAdapter,
         ledger: InMemoryLedger | SqlLedger,
-        permits: PermitLedger,
+        permits: PermitLedger | SqlPermitLedger,
         instruments: Mapping[str, TradableInstrument],
         recorder: Recorder | None = None,
+        store: SqlOrderStore | None = None,
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
         if adapter.real_money_execution:
@@ -114,6 +121,7 @@ class OrderManager:
         self._permits = permits
         self._instruments = dict(instruments)
         self._recorder = recorder
+        self._store = store
         self._clock = clock
         self._orders: dict[str, ManagedOrder] = {}
         self._by_intent: dict[str, str] = {}
@@ -133,7 +141,9 @@ class OrderManager:
                 return self._orders[existing]
             now = self._clock()
             try:
-                self._permits.consume(permit, intent, now=now)
+                consumed = self._permits.consume(permit, intent, now=now)
+                if inspect.isawaitable(consumed):
+                    await consumed
             except PermitRejected as exc:
                 await self._record(
                     "ORDER_REFUSED",
@@ -145,17 +155,18 @@ class OrderManager:
                 raise OrderRejected("unsupported_intent")
 
             order = self._new_order(intent, instrument)
-            self._orders[order.client_order_id] = order
-            self._by_intent[str(intent.intent_id)] = order.client_order_id
+            self._register(order)
+            # Persisted before the reservation, so a crash never orphans funds.
+            await self._save(order)
             try:
                 await self._ledger.post([self._reservation(order, now)])
             except LedgerRejected as exc:
                 self._set_status(order, OrderStatus.REJECTED, reason=str(exc))
-                await self._record("ORDER_REJECTED", order.to_dict())
+                await self._commit(order)
                 return order
 
             self._set_status(order, OrderStatus.SUBMITTED)
-            await self._record("ORDER_SUBMITTED", order.to_dict())
+            await self._commit(order)
             try:
                 report = await self._adapter.submit(
                     VenueOrder(
@@ -170,7 +181,7 @@ class OrderManager:
             except Exception as exc:  # timeout, network, venue outage
                 logger.warning("submit outcome unknown for %s: %s", order.client_order_id, exc)
                 self._set_status(order, OrderStatus.UNKNOWN, reason=type(exc).__name__)
-                await self._record("ORDER_UNKNOWN", order.to_dict())
+                await self._commit(order)
                 return order
             await self._apply(order, report)
             return order
@@ -187,7 +198,7 @@ class OrderManager:
                 # The venue confirms it never received the order.
                 self._set_status(order, OrderStatus.REJECTED, reason="not found at venue")
                 await self._release_rest(order)
-                await self._record("ORDER_REJECTED", order.to_dict())
+                await self._commit(order)
                 return order
             await self._apply(order, report)
             return order
@@ -200,6 +211,40 @@ class OrderManager:
             report = await self._adapter.cancel(client_order_id)
             await self._apply(order, report)
             return order
+
+    async def recover(self) -> list[ManagedOrder]:
+        """Reload the persisted book after a restart.
+
+        An order still NEW never reached the venue: it is rejected and its
+        reservation, if one was posted, is released. Any other open order may
+        have changed at the venue while the process was down, so it becomes
+        UNKNOWN and is resolved only by querying the venue.
+        """
+
+        if self._store is None:
+            return []
+        recovered: list[ManagedOrder] = []
+        async with self._lock:
+            for order in await self._store.load():
+                self._register(order)
+                if order.status in TERMINAL_ORDER_STATUSES or order.status is OrderStatus.UNKNOWN:
+                    continue
+                if order.status is OrderStatus.NEW:
+                    reason = "interrupted before submit"
+                    self._set_status(order, OrderStatus.REJECTED, reason=reason)
+                    reservation = self._reservation(order, self._clock()).entry_id
+                    if not await self._ledger.has_entry(reservation):
+                        order.released = order.reserved  # nothing was ever held
+                    await self._release_rest(order)
+                else:
+                    self._set_status(order, OrderStatus.UNKNOWN, reason="restarted while open")
+                await self._commit(order, event_type="ORDER_RECOVERED")
+                recovered.append(order)
+        return recovered
+
+    def _register(self, order: ManagedOrder) -> None:
+        self._orders[order.client_order_id] = order
+        self._by_intent[str(order.intent.intent_id)] = order.client_order_id
 
     def _new_order(self, intent: TradeIntent, instrument: TradableInstrument) -> ManagedOrder:
         assert intent.limit_price is not None
@@ -271,10 +316,11 @@ class OrderManager:
                 report.status,
                 order.client_order_id,
             )
+            await self._save(order)
             return
         if order.status in TERMINAL_ORDER_STATUSES:
             await self._release_rest(order)
-        await self._record(f"ORDER_{order.status.value}", order.to_dict())
+        await self._commit(order)
 
     async def _post_fill(
         self, order: ManagedOrder, report: ExecutionReport, increment: Decimal, now: datetime
@@ -325,6 +371,14 @@ class OrderManager:
                 ]
             )
             order.released += rest
+
+    async def _save(self, order: ManagedOrder) -> None:
+        if self._store is not None:
+            await self._store.save(order)
+
+    async def _commit(self, order: ManagedOrder, *, event_type: str | None = None) -> None:
+        await self._save(order)
+        await self._record(event_type or f"ORDER_{order.status.value}", order.to_dict())
 
     async def _record(self, event_type: str, payload: dict[str, Any]) -> None:
         if self._recorder is not None:

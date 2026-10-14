@@ -38,7 +38,8 @@ so the book can always be de-risked during a lockdown. They never pass a kill sw
   quantity, and its issue and expiry times. Changing any field or the intent invalidates it.
 - The default TTL is 10 s. The contract caps it at 60 s.
 - `PermitLedger.consume` verifies the permit and records its id until expiry; a second use returns
-  `already_used`. The Phase 4 OMS must consume a permit there immediately before submitting.
+  `already_used`. With persistence the OMS spends permits through `SqlPermitLedger`, which keeps
+  every spent id in the database, so single use survives restarts.
 - The signing key comes from `RISK_PERMIT_SIGNING_KEY`. Production requires at least 32
   characters. When unset, each process uses a random key, so permits never survive a restart.
 - Signatures never leave the engine: journal events and API responses carry only the permit id

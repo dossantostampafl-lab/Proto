@@ -5,7 +5,9 @@ the Risk Engine are executed against live public quotes, with fills, fees and
 reservations posted to the ledger. The paper account opens with the reference
 capital in each quote currency (BRL and USDT; FX is not modelled). The ledger
 is durable when persistence is enabled; the simulated venue is re-seeded from
-it on start so the two stay reconciled across restarts.
+it on start so the two stay reconciled across restarts. With persistence the
+spent permits, the order book and the equity checkpoints are durable too, and
+orders left open by a restart come back as UNKNOWN for the operator to resolve.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException
@@ -23,11 +25,15 @@ from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import REFERENCE_CAPITAL
 from services.execution.venue import PaperVenueAdapter
 from services.oms import (
+    InMemoryCheckpoints,
     InMemoryLedger,
     ManagedOrder,
     OrderManager,
     OrderRejected,
+    SqlCheckpoints,
     SqlLedger,
+    SqlOrderStore,
+    SqlPermitLedger,
     opening_balances,
     reconcile_balances,
 )
@@ -51,11 +57,9 @@ _BOUNDARY = {"financial_connectivity": False, "real_money_execution": False}
 _oms: OrderManager | None = None
 _ledger: InMemoryLedger | SqlLedger | None = None
 _adapter: PaperVenueAdapter | None = None
+_checkpoints: InMemoryCheckpoints | SqlCheckpoints | None = None
 _oms_settings_id: int | None = None
 _start_lock = asyncio.Lock()
-# Per quote asset: (UTC day, start-of-day equity) and the running peak.
-_start_of_day: dict[str, tuple[date, Decimal]] = {}
-_peak: dict[str, Decimal] = {}
 
 
 def _quote(instrument_id: str):
@@ -72,7 +76,7 @@ async def _record(event_type: str, payload: dict) -> None:
 
 
 async def components() -> tuple[OrderManager, InMemoryLedger | SqlLedger, PaperVenueAdapter]:
-    global _oms, _ledger, _adapter, _oms_settings_id
+    global _oms, _ledger, _adapter, _checkpoints, _oms_settings_id
     async with _start_lock:
         if _oms is not None and _oms_settings_id == id(settings):
             assert _ledger is not None and _adapter is not None
@@ -80,12 +84,19 @@ async def components() -> tuple[OrderManager, InMemoryLedger | SqlLedger, PaperV
         from .risk_surface import permit_ledger
 
         now = datetime.now(UTC)
-        if persistence_engine is not None:
+        engine = persistence_engine
+        if engine is not None:
             ledger: InMemoryLedger | SqlLedger = SqlLedger(
-                persistence_engine, account_id=ACCOUNT_ID, venue=VENUE
+                engine, account_id=ACCOUNT_ID, venue=VENUE
+            )
+            permits = SqlPermitLedger(permit_ledger(), engine)
+            store = SqlOrderStore(engine, account_id=ACCOUNT_ID)
+            checkpoints: InMemoryCheckpoints | SqlCheckpoints = SqlCheckpoints(
+                engine, account_id=ACCOUNT_ID
             )
         else:
             ledger = InMemoryLedger(account_id=ACCOUNT_ID, venue=VENUE)
+            permits, store, checkpoints = permit_ledger(), None, InMemoryCheckpoints()
         opening = {asset: REFERENCE_CAPITAL for asset in _QUOTE_ASSETS}
         await ledger.post(opening_balances(opening, account_id=ACCOUNT_ID, venue=VENUE, now=now))
         totals = {a: b.total for a, b in (await ledger.balances()).items()}
@@ -97,23 +108,26 @@ async def components() -> tuple[OrderManager, InMemoryLedger | SqlLedger, PaperV
             slippage_bps=Decimal(str(settings.oms_paper_slippage_bps)),
             simulated_venue=VENUE,
         )
-        _oms = OrderManager(
+        oms = OrderManager(
             adapter=adapter,
             ledger=ledger,
-            permits=permit_ledger(),
+            permits=permits,
             instruments=_INSTRUMENTS,
             recorder=_record,
+            store=store,
         )
-        _ledger, _adapter, _oms_settings_id = ledger, adapter, id(settings)
-        return _oms, ledger, adapter
+        recovered = await oms.recover()
+        if recovered:
+            logger.warning("recovered %d open orders as UNKNOWN or REJECTED", len(recovered))
+        _oms, _ledger, _adapter, _checkpoints = oms, ledger, adapter, checkpoints
+        _oms_settings_id = id(settings)
+        return oms, ledger, adapter
 
 
 def reset_oms_state() -> None:
-    global _oms, _ledger, _adapter, _oms_settings_id
-    _oms = _ledger = _adapter = None
+    global _oms, _ledger, _adapter, _checkpoints, _oms_settings_id
+    _oms = _ledger = _adapter = _checkpoints = None
     _oms_settings_id = None
-    _start_of_day.clear()
-    _peak.clear()
 
 
 async def account_state(quote_asset: str) -> AccountState:
@@ -121,10 +135,12 @@ async def account_state(quote_asset: str) -> AccountState:
 
     A held asset without a live mark makes exposure unknown: gross exposure is
     then infinite (blocking new risk) and equity is held at its last baseline so
-    a missing quote is never mistaken for a loss.
+    a missing quote is never mistaken for a loss. Start-of-day and peak equity
+    are checkpointed, durably when persistence is enabled.
     """
 
     _, ledger, _ = await components()
+    assert _checkpoints is not None
     balances = await ledger.balances()
     cash = balances[quote_asset].total if quote_asset in balances else Decimal("0")
     positions: dict[str, Decimal] = {}
@@ -145,24 +161,26 @@ async def account_state(quote_asset: str) -> AccountState:
         exposure += quantity * (quote.bid + quote.ask) / 2
 
     today = datetime.now(UTC).date()
-    day, start = _start_of_day.get(quote_asset, (today, cash + exposure))
+    saved = await _checkpoints.get(quote_asset)
+    day, start, peak = saved or (today, cash + exposure, cash + exposure)
     if not marked:
         return AccountState(
             equity=start,
             start_of_day_equity=start,
-            peak_equity=max(_peak.get(quote_asset, start), start),
+            peak_equity=max(peak, start),
             gross_exposure=Decimal("Infinity"),
             positions=positions,
         )
     equity = cash + exposure
     if day != today:
         day, start = today, equity
-    _start_of_day[quote_asset] = (day, start)
-    _peak[quote_asset] = max(_peak.get(quote_asset, equity), equity)
+    checkpoint = (day, start, max(peak, equity))
+    if checkpoint != saved:
+        await _checkpoints.put(quote_asset, checkpoint)
     return AccountState(
         equity=equity,
         start_of_day_equity=start,
-        peak_equity=_peak[quote_asset],
+        peak_equity=checkpoint[2],
         gross_exposure=exposure,
         positions=positions,
     )

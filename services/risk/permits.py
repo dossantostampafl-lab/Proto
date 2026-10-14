@@ -98,8 +98,11 @@ class PermitLedger:
         self._spent: dict[UUID, datetime] = {}
         self._lock = Lock()
 
-    def consume(self, permit: RiskPermit, intent: TradeIntent, *, now: datetime) -> None:
+    def verify(self, permit: RiskPermit, intent: TradeIntent, *, now: datetime) -> None:
         self._signer.verify(permit, intent, now=now)
+
+    def consume(self, permit: RiskPermit, intent: TradeIntent, *, now: datetime) -> None:
+        self.verify(permit, intent, now=now)
         with self._lock:
             for permit_id, expires_at in list(self._spent.items()):
                 if expires_at <= now:

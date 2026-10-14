@@ -24,11 +24,14 @@ from services.oms import (
     OrderManager,
     OrderRejected,
     SqlLedger,
+    SqlOrderStore,
+    SqlPermitLedger,
+    ledger_metadata,
     opening_balances,
     reconcile_balances,
 )
 from services.oms.ledger import entry_id
-from services.risk import PermitLedger, PermitSigner
+from services.risk import PermitLedger, PermitRejected, PermitSigner
 
 NOW = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
 BTC_ID = "BINANCE_SPOT:BTCUSDT"
@@ -334,3 +337,126 @@ def test_reconciliation_reports_divergence_beyond_tolerance() -> None:
 def test_opening_balance_must_be_positive() -> None:
     with pytest.raises(ValueError, match="positive"):
         entry(LedgerEntryKind.OPENING_BALANCE, "USDT", "-1")
+
+
+# --- durability across restarts ----------------------------------------------
+
+
+@pytest.fixture
+async def engine(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'oms.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(ledger_metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+async def boot(engine, adapter=None) -> tuple[OrderManager, SqlLedger]:
+    """One process start: durable ledger, permits and orders on a shared database."""
+
+    ledger = SqlLedger(engine, account_id="paper-1", venue=VenueId.BINANCE_SPOT)
+    await ledger.post(
+        opening_balances(OPENING, account_id="paper-1", venue=VenueId.BINANCE_SPOT, now=NOW)
+    )
+    if adapter is None:
+        totals = {a: b.total for a, b in (await ledger.balances()).items()}
+        adapter = paper(totals)
+    oms = OrderManager(
+        adapter=adapter,
+        ledger=ledger,
+        permits=SqlPermitLedger(PermitLedger(SIGNER), engine),
+        instruments=PAPER_INSTRUMENTS,
+        store=SqlOrderStore(engine, account_id="paper-1"),
+        clock=lambda: NOW,
+    )
+    await oms.recover()
+    return oms, ledger
+
+
+async def test_a_permit_cannot_be_reused_by_another_process(engine) -> None:
+    trade = intent()
+    permit = SIGNER.issue(trade, now=NOW)
+    await SqlPermitLedger(PermitLedger(SIGNER), engine).consume(permit, trade, now=NOW)
+    with pytest.raises(PermitRejected, match="already_used"):
+        await SqlPermitLedger(PermitLedger(SIGNER), engine).consume(permit, trade, now=NOW)
+
+    forged = PermitSigner(b"x" * 32).issue(trade, now=NOW)
+    with pytest.raises(PermitRejected, match="bad_signature"):
+        await SqlPermitLedger(PermitLedger(SIGNER), engine).consume(forged, trade, now=NOW)
+
+
+async def test_filled_orders_and_spent_permits_survive_a_restart(engine) -> None:
+    oms, _ = await boot(engine)
+    trade = intent()
+    permit = SIGNER.issue(trade, now=NOW)
+    filled = await oms.submit(trade, permit)
+    assert filled.status is OrderStatus.FILLED
+
+    restarted, ledger = await boot(engine)
+    [reloaded] = restarted.orders
+    assert reloaded.to_dict() == filled.to_dict()
+    # Same intent: the persisted order is returned, nothing is sent twice.
+    assert (await restarted.submit(trade, SIGNER.issue(trade, now=NOW))).client_order_id == (
+        filled.client_order_id
+    )
+    other = intent()
+    with pytest.raises(OrderRejected, match="permit_intent_mismatch"):
+        await restarted.submit(other, permit)
+    assert (await ledger.balances())["BTC"].total == Decimal("0.01")
+
+
+async def test_open_orders_come_back_unknown_and_resolve_by_query(engine) -> None:
+    oms, _ = await boot(engine)
+    resting = intent(limit_price=Decimal("60000.00"))
+    order = await oms.submit(resting, SIGNER.issue(resting, now=NOW))
+    assert order.status is OrderStatus.ACKNOWLEDGED
+
+    # The simulated venue does not survive the restart, so the order is gone.
+    restarted, ledger = await boot(engine)
+    recovered = restarted.get(order.client_order_id)
+    assert recovered is not None
+    assert recovered.status is OrderStatus.UNKNOWN
+    assert recovered.reason == "restarted while open"
+    assert (await ledger.balances())["USDT"].reserved == Decimal("603.00000000")
+
+    resolved = await restarted.resolve_unknown(order.client_order_id)
+    assert resolved.status is OrderStatus.REJECTED
+    assert resolved.history[-3:] == ["ACKNOWLEDGED", "UNKNOWN", "REJECTED"]
+    usdt = (await ledger.balances())["USDT"]
+    assert usdt.reserved == 0 and usdt.available == Decimal("10000")
+
+
+async def test_unknown_after_restart_applies_the_venue_fill(engine) -> None:
+    adapter = venue_of(FlakyVenue)
+    oms, _ = await boot(engine, adapter)
+    trade = intent()
+    order = await oms.submit(trade, SIGNER.issue(trade, now=NOW))
+    assert order.status is OrderStatus.UNKNOWN
+
+    # Same venue (it kept the order), new process.
+    restarted, ledger = await boot(engine, adapter)
+    resolved = await restarted.resolve_unknown(order.client_order_id)
+    assert resolved.status is OrderStatus.FILLED
+    balances = await ledger.balances()
+    assert balances["USDT"].reserved == 0
+    assert reconcile_balances(balances, await adapter.balances()) == []
+
+
+@pytest.mark.parametrize("reserved", [True, False])
+async def test_order_interrupted_before_submit_is_rejected(engine, reserved) -> None:
+    oms, ledger = await boot(engine)
+    trade = intent()
+    order = oms._new_order(trade, PAPER_INSTRUMENTS[trade.instrument_id])
+    store = SqlOrderStore(engine, account_id="paper-1")
+    await store.save(order)  # crash right after persisting the NEW order...
+    if reserved:  # ...or right after posting its reservation
+        await ledger.post([oms._reservation(order, NOW)])
+
+    restarted, ledger = await boot(engine)
+    recovered = restarted.get(order.client_order_id)
+    assert recovered is not None
+    assert recovered.status is OrderStatus.REJECTED
+    assert recovered.reason == "interrupted before submit"
+    usdt = (await ledger.balances())["USDT"]
+    assert usdt.reserved == 0 and usdt.available == Decimal("10000")
+    assert (await store.load())[0].status is OrderStatus.REJECTED

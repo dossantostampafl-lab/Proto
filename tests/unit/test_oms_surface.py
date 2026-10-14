@@ -216,3 +216,64 @@ def test_ledger_migration_matches_the_runtime_table(monkeypatch) -> None:
         assert columns == set(ledger_table.columns.keys())
         migration.downgrade()
         assert migration.TABLE_NAME not in inspect(connection).get_table_names()
+
+
+async def test_equity_checkpoints_survive_a_restart(monkeypatch, tmp_path) -> None:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from services.oms import SqlCheckpoints, ledger_metadata
+
+    configure(monkeypatch)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'oms.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(ledger_metadata.create_all)
+    monkeypatch.setattr(oms_surface, "persistence_engine", engine)
+    try:
+        first = await oms_surface.account_state("USDT")
+        assert first.peak_equity == Decimal("10000")
+
+        # An earlier high and an earlier start of day were recorded before the restart.
+        checkpoints = SqlCheckpoints(engine, account_id=oms_surface.ACCOUNT_ID)
+        today = datetime.now(UTC).date()
+        await checkpoints.put("USDT", (today, Decimal("10080"), Decimal("10600")))
+        oms_surface.reset_oms_state()
+        restarted = await oms_surface.account_state("USDT")
+        assert restarted.start_of_day_equity == Decimal("10080")
+        assert restarted.peak_equity == Decimal("10600")
+
+        # A new UTC day resets the start of day but never the peak.
+        await checkpoints.put(
+            "USDT", (today - timedelta(days=1), Decimal("9000"), Decimal("10600"))
+        )
+        oms_surface.reset_oms_state()
+        next_day = await oms_surface.account_state("USDT")
+        assert next_day.start_of_day_equity == Decimal("10000")
+        assert next_day.peak_equity == Decimal("10600")
+        assert await checkpoints.get("USDT") == (today, Decimal("10000"), Decimal("10600"))
+    finally:
+        await engine.dispose()
+
+
+def test_oms_state_migration_matches_the_runtime_tables(monkeypatch) -> None:
+    from services.oms.store import consumed_permits_table, equity_checkpoints_table, orders_table
+
+    path = Path("migrations/versions/0009_oms_state.py")
+    spec = importlib.util.spec_from_file_location("migration_0009", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    assert migration.down_revision == "0008_ledger_entries"
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    runtime = {t.name: t for t in (consumed_permits_table, orders_table, equity_checkpoints_table)}
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(connection)))
+        migration.upgrade()
+        for name, table in runtime.items():
+            columns = {c["name"] for c in inspect(connection).get_columns(name)}
+            assert columns == set(table.columns.keys()), name
+        migration.downgrade()
+        assert not set(runtime) & set(inspect(connection).get_table_names())
