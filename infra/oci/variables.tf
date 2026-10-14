@@ -9,15 +9,15 @@ variable "compartment_ocid" {
 }
 
 variable "region" {
-  description = "Region for the network and the instances."
+  description = "Region for the network and the instances. Always Free resources exist only in the home region."
   type        = string
-  default     = "sa-saopaulo-1"
+  default     = "sa-valparaiso-1"
 }
 
 variable "home_region" {
   description = "Tenancy home region, where IAM is written. Console: Governance > Tenancy details."
   type        = string
-  default     = "sa-saopaulo-1"
+  default     = "sa-valparaiso-1"
 }
 
 variable "ssh_public_key" {

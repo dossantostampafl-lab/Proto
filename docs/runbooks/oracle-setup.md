@@ -29,6 +29,21 @@ API holds the permit signing key, and the executor holds the venue credentials. 
 is billed: Windows needs an x86 shape and a license. Check the price in Oracle's cost estimator
 before applying, or set `create_mt5 = false` until the XP path starts.
 
+## 0. Make room in the Always Free allowance
+
+The tenancy's free Arm allowance is 4 OCPUs and 24 GB in total, in the **home region only**
+(this tenancy: Chile West, `sa-valparaiso-1`). If another instance already takes all of the
+memory, shrink it first. For example, The Creation runs on `VM.Standard.A1.Flex` with 2 OCPUs and
+24 GB, while its own docs ask for 12 GB:
+
+1. Compute → Instances → `the-creation-os` → **Edit** → **Edit shape**.
+2. Keep 2 OCPUs and set **12 GB**. Save. The instance reboots, about a minute offline.
+3. Check it afterwards. Its `smoke-test.sh`, or the Deploy workflow's checks, should pass.
+
+That leaves 2 OCPUs and 12 GB for `proto-api` and `proto-executor` (1 OCPU and 6 GB each). If The
+Creation needs more memory, give it 16 GB, and set `api_memory_gb = 4` and
+`executor_memory_gb = 4`.
+
 ## 1. Compartment and Cloud Shell
 
 1. Console → Identity & Security → Compartments → **Create compartment** `proto`. Copy its OCID.

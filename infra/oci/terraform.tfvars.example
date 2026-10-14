@@ -3,8 +3,8 @@
 
 tenancy_ocid     = "ocid1.tenancy.oc1..xxxx"     # Cloud Shell: echo $OCI_TENANCY
 compartment_ocid = "ocid1.compartment.oc1..xxxx" # a dedicated "proto" compartment
-region           = "sa-saopaulo-1"
-home_region      = "sa-saopaulo-1"               # Governance > Tenancy details > Home region
+region           = "sa-valparaiso-1"             # Always Free lives in the home region only
+home_region      = "sa-valparaiso-1"             # Governance > Tenancy details > Home region
 
 ssh_public_key = "ssh-ed25519 AAAA... operator"
 operator_cidrs = ["203.0.113.10/32"]             # your public IP: curl -s ifconfig.me
