@@ -19,7 +19,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from services.execution import TradeIntent
+from services.execution import ReleaseStage, TradeIntent
 from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import (
     MAX_DAILY_LOSS,
@@ -128,16 +128,24 @@ async def _journal(event_type: str, payload: dict[str, object], key: str | None 
 async def assess(intent: TradeIntent) -> RiskDecision:
     """Assess one proposal and journal the outcome (without the permit signature)."""
 
+    from .fx_rates import canary_capital
     from .oms_surface import quote_asset_of
     from .promotion_surface import stage_for
 
+    quote_asset = quote_asset_of(intent)
     decision = governor().assess(
         intent,
-        account=await account_state(quote_asset_of(intent)),
+        account=await account_state(quote_asset),
         quote=live_quote(intent.instrument_id, market_source=settings.live_market_source),
         now=datetime.now(UTC),
         external_global_kill=_external_global_kill(),
         scope_stage=await stage_for(intent),
+        # Only a CANARY intent needs the BRL rate; nothing is fetched for paper.
+        canary_capital=(
+            await canary_capital(quote_asset, market_source=settings.live_market_source)
+            if intent.stage is ReleaseStage.CANARY
+            else None
+        ),
     )
     record = {
         "intent_id": str(intent.intent_id),

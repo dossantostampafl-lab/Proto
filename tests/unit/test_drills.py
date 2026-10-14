@@ -44,7 +44,9 @@ async def test_the_adversarial_seed_changes_the_fuzz_and_the_digest() -> None:
 class ApproveEverything(RiskEngine):
     """A broken engine: every intent gets a permit."""
 
-    def evaluate(self, intent, *, account, controls, quote, now, scope_stage=None) -> RiskDecision:
+    def evaluate(
+        self, intent, *, account, controls, quote, now, scope_stage=None, canary_capital=None
+    ) -> RiskDecision:
         return RiskDecision(True, self._signer.issue(intent, now=now), (), {}, None)
 
 

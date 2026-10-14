@@ -34,7 +34,11 @@ A scope advances **one stage at a time**, and only with the evidence the next st
 
 ## Canary (owner decisions)
 
-- **Capital.** A CANARY intent is sized on at most **R$500** (`CANARY_CAPITAL`). The 0.25% per
+- **Capital.** A CANARY intent is sized on at most **R$500** (`CANARY_CAPITAL`), converted to the
+  account's quote currency. A USDT account is converted at the public USDTBRL ask, read by
+  `apps/api/app/fx_rates.py`, at most 30 s old and between 2 and 20 BRL per USDT. The ask gives
+  the smaller cap. Without a fresh, sane rate the Risk Engine refuses the intent
+  (`canary_capital_known`). The 0.25% per
   position, 1% daily-loss and 5% drawdown limits still apply on top.
 - **Paper minimum.** At least **1 week** in PAPER without violations.
 - **Certification check.** The Risk Engine approves a CANARY intent only when its scope is

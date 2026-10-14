@@ -8,6 +8,7 @@ operator action, and a lockdown cannot be released while its breach persists.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from threading import Lock
 
@@ -54,6 +55,7 @@ class RiskGovernor:
         now: datetime,
         external_global_kill: bool = False,
         scope_stage: ReleaseStage | None = None,
+        canary_capital: Decimal | None = None,
     ) -> RiskDecision:
         decision = self.engine.evaluate(
             intent,
@@ -62,6 +64,7 @@ class RiskGovernor:
             quote=quote,
             now=now,
             scope_stage=scope_stage,
+            canary_capital=canary_capital,
         )
         if decision.breach is not None:
             with self._lock:
