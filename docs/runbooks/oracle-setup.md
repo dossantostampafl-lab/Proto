@@ -51,21 +51,43 @@ Creation needs more memory, give it 16 GB, and set `api_memory_gb = 4` and
    `terraform`, `git` and `oci`.
 3. Find the home region: Governance → Tenancy details → Home region.
 
-## 2. Apply the Terraform
+## 2. Apply the Terraform (Resource Manager)
+
+Resource Manager is Oracle's managed Terraform. It authenticates by itself and keeps the state.
+Cloud Shell's `oci` CLI is already authenticated, so it creates the stack:
 
 ```bash
 git clone https://github.com/dossantostampafl-lab/Proto.git && cd Proto/infra/oci
-cp terraform.tfvars.example terraform.tfvars
-# Fill in tenancy_ocid ($OCI_TENANCY), compartment_ocid, region, home_region,
-# ssh_public_key and operator_cidrs (your IP: curl -s ifconfig.me, then add /32).
-nano terraform.tfvars
-terraform init
-terraform plan -out proto.plan     # read it: 4 instances, 1 VCN, 1 vault, no secret
-terraform apply proto.plan
-terraform output
+zip -r ~/proto-oci.zip . -x '.terraform/*' '*.tfstate*' 'terraform.tfvars'
+ssh-keygen -t ed25519 -f ~/.ssh/proto -N "" -C proto-operator   # operator key, stays in Cloud Shell
+COMP=<compartment_ocid>
+cat > ~/proto-vars.json <<JSON
+{
+  "tenancy_ocid": "$OCI_TENANCY",
+  "compartment_ocid": "$COMP",
+  "region": "sa-valparaiso-1",
+  "home_region": "sa-valparaiso-1",
+  "ssh_public_key": "$(cat ~/.ssh/proto.pub)",
+  "operator_cidrs": "[\"$(curl -s ifconfig.me)/32\"]",
+  "create_mt5": "false"
+}
+JSON
+oci resource-manager stack create --compartment-id "$COMP" --display-name proto \
+  --config-source ~/proto-oci.zip --variables file://~/proto-vars.json --terraform-version 1.5.x
 ```
 
-For a private repository, clone with a fine-grained read-only token, and do not save it.
+Then, in the console, go to Developer Services → Resource Manager → Stacks → `proto`:
+
+1. **Plan**. Read the log: about 40 resources, 3 instances, no secret.
+2. **Apply**.
+3. Read the outputs on the job's **Outputs** tab.
+
+The operator CIDR is Cloud Shell's current egress IP. If Bastion refuses a later session, update
+`operator_cidrs` in the stack's variables and apply again. `create_mt5 = false` leaves the billed
+Windows VM out until the XP path starts.
+
+Terraform from a workstation with `~/.oci/config` works too:
+`cp terraform.tfvars.example terraform.tfvars`, then `terraform init && terraform apply`.
 
 Keep the outputs:
 
@@ -74,9 +96,8 @@ Keep the outputs:
 - `secret_names`: the secrets to create;
 - `bastion_id` and `private_ips`.
 
-`terraform.tfvars` and the state stay in Cloud Shell and are git-ignored. The reserved NAT IP and
-the vault have `prevent_destroy`, so a `terraform destroy` cannot silently change the Binance
-allowlist or delete the secrets.
+The reserved NAT IP and the vault have `prevent_destroy`, so a destroy cannot silently change the
+Binance allowlist or delete the secrets.
 
 ## 3. Create the secrets
 
