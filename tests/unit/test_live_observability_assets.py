@@ -56,7 +56,8 @@ def test_compose_mounts_alerts_dashboard_and_persistent_prometheus_storage() -> 
 
     assert "./infra/monitoring/live-alerts.yml:/etc/prometheus/live-alerts.yml:ro" in compose
     assert "proto_prometheus:/prometheus" in compose
-    assert "./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro" in compose
+    # The trading stack provisions the live dashboard and the safety one (test_safety_ops.py).
+    assert "./infra/monitoring/grafana/provisioning-trading:/etc/grafana/provisioning:ro" in compose
     assert "./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro" in compose
 
 

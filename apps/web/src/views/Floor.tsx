@@ -3,7 +3,7 @@ import { get, WS_BASE } from "../api";
 import type { Shared } from "../main";
 import { Button, Panel, Tag } from "../ui";
 
-import { type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone } from "./floorScene";
+import { type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone, type WatchdogSummary } from "./floorScene";
 
 function PromotionPath({ scopes }: { scopes: PromotionScope[] | undefined }) {
   if (!scopes) return <p className="empty">Promotion data unavailable.</p>;
@@ -34,6 +34,25 @@ function PromotionPath({ scopes }: { scopes: PromotionScope[] | undefined }) {
         );
       })}
     </ul>
+  );
+}
+
+/** The independent watchdog as the API last saw it. It can only halt; releasing is an operator action. */
+function Watchdog({ watchdog }: { watchdog: WatchdogSummary | undefined }) {
+  if (!watchdog) return <p className="empty">Watchdog status unavailable.</p>;
+  const covered = Math.min(1, watchdog.coverage_hours / watchdog.required_hours);
+  return (
+    <>
+      <ul className="floor-controls">
+        <li><span>Heartbeat</span><b className={watchdog.active ? "up" : "down"}>{watchdog.active ? "active" : watchdog.last_beat ? "stale" : "never seen"}</b></li>
+        <li><span>Last beat</span><b>{watchdog.last_beat ? watchdog.last_beat.slice(11, 19) : "—"}</b></li>
+        <li><span>Coverage</span><b className={covered >= 1 ? "up" : ""}>{watchdog.coverage_hours.toFixed(1)} h / {watchdog.required_hours} h</b></li>
+        <li><span>Halts</span><b className={watchdog.trips ? "down" : ""}>{watchdog.trips}</b></li>
+      </ul>
+      <div className="fl-cover" role="progressbar" aria-label="Watchdog coverage toward the canary gate" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(covered * 100)}><i style={{ width: `${covered * 100}%` }} /></div>
+      {watchdog.last_trip && <p className="hint down">Last halt {watchdog.last_trip.at.slice(0, 19).replace("T", " ")}: {watchdog.last_trip.reasons.join(", ") || "no reason given"}</p>}
+      <p className="hint">The watchdog only halts. CANARY needs {watchdog.required_hours} h of unbroken coverage.</p>
+    </>
   );
 }
 
@@ -172,6 +191,10 @@ export function Floor({ market }: Shared) {
           <p className="hint">Operator token required. Releasing a halt stays a deliberate operator action.</p>
         </Panel>
 
+        <Panel title="Watchdog" source={state == null ? undefined : state.data_mode === "TESTNET" ? "testnet" : "paper"}>
+          <Watchdog watchdog={state?.watchdog} />
+        </Panel>
+
         <Panel title="Promotion path" source={state == null ? undefined : state.data_mode === "TESTNET" ? "testnet" : "paper"}>
           <PromotionPath scopes={state?.promotion} />
         </Panel>
@@ -185,6 +208,12 @@ export function Floor({ market }: Shared) {
                   <b>{STATIONS.find(s => s.id === a.station)?.label}</b>
                   <span>{a.headline}</span>
                   <em>{TONE_LABEL[a.tone]}</em>
+                  {a.why && a.why.length > 0 && (
+                    <details>
+                      <summary>why</summary>
+                      <ul>{a.why.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                    </details>
+                  )}
                 </li>
               ))}
             </ol>

@@ -61,3 +61,11 @@ groups:
         annotations:
           summary: Real-money execution reported as enabled
           description: No live scope is certified. This must never fire before the owner authorises a canary.
+
+      - alert: ProtoScopeDemoted
+        expr: delta(proto_promotion_stage[15m]) < 0
+        labels:
+          severity: warning
+        annotations:
+          summary: A promotion scope was demoted
+          description: "{{ $labels.strategy }} on {{ $labels.venue }} fell back a stage (a violation or an operator rollback). Its clean period restarted."

@@ -5,7 +5,7 @@ import type { Shared } from "../main";
 
 export type Tone = "ok" | "warn" | "alert" | "working";
 export type StationId = "tradingview" | "fusion" | "reviewer" | "risk" | "oms" | "reconciliation";
-export type FloorAction = { seq: number; at: string; event_type: string; station: StationId; tone: Tone; headline: string; symbol: string | null };
+export type FloorAction = { seq: number; at: string; event_type: string; station: StationId; tone: Tone; headline: string; symbol: string | null; why?: string[] };
 export type Account = { equity: string; start_of_day_equity: string; peak_equity: string; gross_exposure: string; positions: Record<string, string> } | null;
 export const STAGES = ["RESEARCH", "REPLAY", "SHADOW", "PAPER", "CANARY", "LIVE"] as const;
 
@@ -17,8 +17,17 @@ export type PromotionScope = {
   blockers: string[];
   violations: number;
 };
+export type WatchdogSummary = {
+  active: boolean;
+  last_beat: string | null;
+  coverage_hours: number;
+  required_hours: number;
+  trips: number;
+  last_trip: { at: string; reasons: string[] } | null;
+};
 export type FloorState = {
   promotion?: PromotionScope[];
+  watchdog?: WatchdogSummary;
   data_mode: "PAPER" | "TESTNET";
   journal: string;
   stations: Record<StationId, FloorAction | null>;

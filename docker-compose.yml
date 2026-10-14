@@ -121,8 +121,9 @@ services:
       - prometheus
     volumes:
       - proto_grafana:/var/lib/grafana
-      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/grafana/provisioning-trading:/etc/grafana/provisioning:ro
       - ./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./infra/monitoring/grafana/dashboards-trading:/var/lib/grafana/dashboards-trading:ro
 
 volumes:
   proto_pgdata:

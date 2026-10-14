@@ -468,6 +468,12 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .floor-feed li.tone-warn { border-left-color: var(--warn); } .floor-feed li.tone-warn em { color: var(--warn); }
 .floor-feed li.tone-alert { border-left-color: var(--down); } .floor-feed li.tone-alert em { color: var(--down); }
 .floor-feed li.tone-working { border-left-color: var(--accent); } .floor-feed li.tone-working em { color: var(--accent); }
+.floor-feed li details { grid-column: 1 / -1; color: var(--muted); }
+.floor-feed li summary { cursor: pointer; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+.floor-feed li details ul { list-style: none; margin: 4px 0 0; padding: 0 0 0 8px; border-left: 1px solid rgba(183, 190, 198, 0.18); }
+.floor-feed li details li { display: block; padding: 1px 0; border: 0; background: none; color: #b3bdc6; overflow-wrap: anywhere; }
+.fl-cover { height: 4px; margin: 10px 0 0; background: rgba(183, 190, 198, 0.12); }
+.fl-cover i { display: block; height: 100%; background: var(--up); }
 
 @media (max-width: 1100px) {
   .floor-view { grid-template-columns: minmax(0, 1fr); }
