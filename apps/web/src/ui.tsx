@@ -24,8 +24,8 @@ export const CommandContext = createContext<Commander>({ busy: null, run: async 
 export const useCommand = () => useContext(CommandContext);
 
 // ---------- primitives ----------
-type Source = "live" | "research" | "paper";
-const SOURCE_LABEL: Record<Source, string> = { live: "LIVE PUBLIC", research: "SYNTHETIC RESEARCH", paper: "PAPER / SIM" };
+type Source = "live" | "research" | "paper" | "testnet";
+const SOURCE_LABEL: Record<Source, string> = { live: "LIVE PUBLIC", research: "SYNTHETIC RESEARCH", paper: "PAPER / SIM", testnet: "TESTNET · NO REAL MONEY" };
 
 export function Tag({ source }: { source: Source }) {
   return <span className={`tag ${source}`}>{SOURCE_LABEL[source]}</span>;

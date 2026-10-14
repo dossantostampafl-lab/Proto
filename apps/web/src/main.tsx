@@ -10,12 +10,13 @@ import { type Health, type LiveStatus, type Market, post, type Runtime, type Sym
 import { usePoll, useMarket } from "./hooks";
 import { CommandContext, Dot, type LogEntry, pct, tone, usd } from "./ui";
 import { Command } from "./views/Command";
+import { Floor } from "./views/Floor";
 import { Lab } from "./views/Lab";
 import { Replay } from "./views/Replay";
 import { System } from "./views/System";
 import { Trade } from "./views/Trade";
 
-const VIEWS = ["Command", "Trade", "Lab", "Replay", "System"] as const;
+const VIEWS = ["Floor", "Command", "Trade", "Lab", "Replay", "System"] as const;
 type View = (typeof VIEWS)[number];
 
 export type Shared = {
@@ -34,7 +35,7 @@ function useClock() {
 }
 
 function App() {
-  const [view, setView] = useState<View>("Command");
+  const [view, setView] = useState<View>("Floor");
   const [selected, select] = useState<Sym>("BTC");
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -110,6 +111,7 @@ function App() {
         </div>
 
         <main key={view} className="view">
+          {view === "Floor" && <Floor {...shared} />}
           {view === "Command" && <Command {...shared} />}
           {view === "Trade" && <Trade {...shared} />}
           {view === "Lab" && <Lab {...shared} />}

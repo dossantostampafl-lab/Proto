@@ -209,13 +209,18 @@ async def record_operational_event(
 ) -> RecordResult:
     """Append one operational event; raises JournalUnavailable if it cannot be made durable."""
 
-    return await operational_journal.record(
+    result = await operational_journal.record(
         event_type=event_type,
         source=source,
         payload=payload,
         correlation_id=correlation_id,
         idempotency_key=idempotency_key,
     )
+    if result.created:
+        from .floor_surface import publish
+
+        await publish(result.event)
+    return result
 
 
 def operational_journal_snapshot(*, limit: int = 100) -> dict[str, object]:

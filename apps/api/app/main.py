@@ -28,6 +28,7 @@ from .creation_surface import router as creation_router
 from .equity_market_surface import router as equity_market_router
 from .event_state import JournalUnavailable, operational_journal, record_operational_event
 from .event_surface import router as event_router
+from .floor_surface import router as floor_router
 from .live_routes import router as live_router
 from .live_websockets import router as live_websocket_router
 from .observability import access_log
@@ -78,6 +79,7 @@ for router in (
     live_router,
     live_websocket_router,
     event_router,
+    floor_router,
     paper_control_router,
     paper_autopilot_router,
     paper_autonomy_router,

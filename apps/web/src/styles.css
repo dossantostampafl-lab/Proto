@@ -368,6 +368,61 @@ tbody tr:hover td { background: rgba(0, 240, 255, 0.06); }
 .ticket strong { font: 600 34px var(--mono); color: var(--accent); text-shadow: var(--glow); }
 .replay { display: grid; }
 
+/* ---------- trading floor ---------- */
+.tag.testnet { color: var(--up); background: rgba(61, 255, 162, 0.08); }
+.floor-view { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+.floor-stage { padding-bottom: 10px; }
+.floor-badges { display: inline-flex; align-items: center; gap: 10px; font: 400 10px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
+.floor-live { color: var(--up); }
+.floor-live::before { content: "● "; animation: pulse 1.6s ease-in-out infinite; }
+.floor-stale { color: var(--warn); }
+.floor-scene { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--line); background: #070b16; }
+.floor-scene text { font-family: var(--mono); shape-rendering: auto; }
+.floor-scene .ws-title { font-size: 11px; font-weight: 600; fill: #7ff8ff; letter-spacing: 0.08em; }
+.floor-scene .ws-sym { font-size: 12px; font-weight: 600; fill: #e8f6ff; }
+.floor-scene .ws-num { font-size: 12px; fill: #ffd27a; }
+.floor-scene .ws-label { font-size: 9px; fill: #6f8aa6; letter-spacing: 0.1em; }
+.floor-scene .ws-up { fill: #3dffa2; }
+.floor-scene .ws-down { fill: #ff3b5c; }
+.floor-scene .holo-title { font-size: 9px; font-weight: 600; letter-spacing: 0.08em; }
+.floor-scene .holo-role { font-size: 7px; fill: #9fb6cf; }
+.floor-scene .holo-text { font-size: 8px; fill: #e8f6ff; }
+.floor-scene .holo { transition: opacity 400ms; }
+.floor-scene .station .holo { opacity: 0.75; }
+.floor-scene .station.busy .holo { opacity: 1; animation: holo 1.2s ease-in-out infinite; }
+.floor-scene .monitor { animation: monitor 3.2s steps(2) infinite; }
+.floor-scene .station.busy .monitor { animation-duration: 0.6s; }
+.floor-scene .person.busy .arm { animation: type 0.3s steps(2) infinite; }
+.floor-scene .person.busy .arm.right { animation-delay: 0.15s; }
+.floor-scene .beam { stroke-width: 2; stroke-dasharray: 3 9; opacity: 0.25; }
+.floor-scene .beam.busy { opacity: 0.95; animation: beam 0.8s linear infinite; }
+.floor-scene .neon { animation: flicker 5s infinite; }
+.floor-scene .neon.slow { animation-duration: 9s; }
+.floor-scene .rain line { stroke: rgba(127, 248, 255, 0.18); stroke-width: 1; }
+.floor-scene .rain { animation: rain 1.4s linear infinite; }
+@keyframes holo { 50% { filter: drop-shadow(0 0 6px currentColor); opacity: 0.85; } }
+@keyframes monitor { 50% { fill: #ffd27a; } }
+@keyframes type { 50% { transform: translateY(2px); } }
+@keyframes beam { to { stroke-dashoffset: -24; } }
+@keyframes rain { to { transform: translateY(18px); } }
+.floor-side { display: grid; gap: 18px; }
+.floor-controls { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.floor-controls li { display: flex; justify-content: space-between; gap: 12px; font: 400 12px var(--mono); }
+.floor-controls span { color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
+.floor-feed ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 420px; overflow-y: auto; }
+.floor-feed li { display: grid; grid-template-columns: 58px 1fr auto; gap: 2px 8px; padding: 6px 8px; border-left: 2px solid var(--muted); background: rgba(0, 240, 255, 0.03); font: 400 11px var(--mono); }
+.floor-feed li time { color: var(--muted); }
+.floor-feed li b { color: var(--text); font-weight: 600; font-size: 10px; letter-spacing: 0.08em; }
+.floor-feed li em { font-style: normal; font-size: 10px; text-transform: uppercase; }
+.floor-feed li span { grid-column: 1 / -1; color: #b8cde0; overflow-wrap: anywhere; }
+.floor-feed li.tone-ok { border-left-color: var(--up); } .floor-feed li.tone-ok em { color: var(--up); }
+.floor-feed li.tone-warn { border-left-color: var(--warn); } .floor-feed li.tone-warn em { color: var(--warn); }
+.floor-feed li.tone-alert { border-left-color: var(--down); } .floor-feed li.tone-alert em { color: var(--down); }
+.floor-feed li.tone-working { border-left-color: var(--accent); } .floor-feed li.tone-working em { color: var(--accent); }
+@media (max-width: 1100px) {
+  .floor-view { grid-template-columns: minmax(0, 1fr); }
+}
+
 @media (max-width: 1100px) {
   .status .mode, .status time { display: none; }
 }
