@@ -1,9 +1,12 @@
 # Trading floor view (Phase 7 preview)
 
-The dashboard opens on **Floor**: a cinematic trading room drawn live in code (SVG). The camera sits
-high behind the central desk and looks over the operators' shoulders at a curved wall of screens,
-with the city through the glass on both sides. Desks stand in a half circle and glowing floor lines
-carry work between them. Each step of the authority chain has a desk and an agent:
+The dashboard opens on **Floor**: a cinematic trading room. The room is a photograph with every screen
+blank (`apps/web/src/assets/floor-room.webp`). The wall screens, each desk's three monitors, the desk
+labels and the activity lights are drawn live on top of it, fitted to each screen's corners, and the
+operators' heads are cut from the photo back over their monitors. Nothing operational is baked into
+the picture, and the contract check enforces that the photo is the only image on the floor. If the
+photo cannot be loaded, a vector drawing of the same room (`floorSceneVector.tsx`) is shown instead.
+Each step of the authority chain has a desk and an agent:
 
 TradingView → Fusion → AI Reviewer → Risk Engine → OMS / Executor → Reconciliation
 

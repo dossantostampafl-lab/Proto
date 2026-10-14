@@ -388,6 +388,16 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fl-wp-label { font-size: 14px; fill: #a9b4be; letter-spacing: 0.08em; }
 .fl-wp-axis { font-size: 12px; fill: #8d98a2; }
 .fl-wp-tape { font-size: 13px; white-space: pre; }
+/* Photo scene: sizes are pixels of the 1179 x 664 room photo. */
+.fl-p-huge { font-size: 24px; font-weight: 600; fill: #f1f3f5; }
+.fl-p-big { font-size: 17px; font-weight: 600; fill: #eceff1; }
+.fl-p-num { font-size: 9.5px; font-weight: 600; fill: #e5e9ed; }
+.fl-p-label { font-size: 7px; fill: #a9b0b7; letter-spacing: 0.08em; }
+.fl-p-axis { font-size: 6px; fill: #8b939a; }
+.fl-p-tape { font-size: 7.5px; white-space: pre; }
+.fl-m-sym { font-size: 9px; fill: #a9b0b7; letter-spacing: 0.04em; }
+.fl-m-num { font-size: 14px; font-weight: 600; fill: #e6e9ec; }
+.fl-m-log { font-size: 7.5px; white-space: pre; }
 .fl-up { fill: var(--up); }
 .fl-down { fill: var(--down); }
 /* Desk labels and monitors are drawn in centimetres, so these sizes are physical. */

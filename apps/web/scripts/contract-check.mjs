@@ -78,7 +78,14 @@ assert.match(floorScene, /data-activity=\{busy \? "working" : "idle"\}/, "visual
 assert.match(floorView, /connected && \(activeAt\[s\]/, "agents must stop performing work when the floor stream disconnects");
 assert.match(floorScene, /market\.connected \? "LIVE PUBLIC" : "LAST KNOWN \/ REST"/, "screen must disclose a disconnected market stream");
 assert.doesNotMatch(floorScene, /shapeRendering="crispEdges"/, "new floor must not use pixel-art rendering");
-assert.doesNotMatch(floorScene, /<image\b|<img\b/, "trading room may not be a static generated picture");
+// The room may be a photograph, but only of a room with blank screens: every operational value is drawn
+// live over it, and the photo is the only picture on the floor.
+assert.equal((floorScene.match(/<image\b/g) ?? []).length, 1, "the floor may hold a single room photo");
+assert.doesNotMatch(floorScene, /<img\b/, "the floor may hold a single room photo");
+assert.match(floorScene, /import ROOM from "\.\.\/assets\/floor-room\.webp"/, "the room photo is the blank-screen asset");
+assert.match(floorScene, /<image id="fl-room" href=\{ROOM\}/, "the room photo is the blank-screen asset");
+assert.match(floorScene, /<WallScreens\b/, "wall screens must be drawn live over the photo");
+assert.match(floorScene, /onError=\{\(\) => setPhoto\(false\)\}/, "a missing photo falls back to the vector room");
 assert.match(floorView, /const \[stateFresh, setStateFresh\]/, "floor state polling must expose freshness");
 assert.match(floorView, /source=\{state == null \? undefined : state\.data_mode === "TESTNET"/, "floor sidebars must disclose paper vs testnet mode");
 
