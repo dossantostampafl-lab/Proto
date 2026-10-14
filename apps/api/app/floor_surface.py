@@ -125,6 +125,10 @@ def floor_actions(event: dict[str, Any]) -> list[dict[str, Any]]:
         headline = f"kill switch {payload.get('scope', '?')} {action}".strip()
         return [_action(event, "risk", "alert" if action == "TRIGGER" else "ok", headline)]
 
+    if kind == "WATCHDOG_TRIPPED":
+        reasons = ", ".join(str(r) for r in (payload.get("reasons") or [])[:3]) or "tripped"
+        return [_action(event, "risk", "alert", f"watchdog halt: {reasons}")]
+
     if kind.startswith("ORDER_"):
         status = kind.removeprefix("ORDER_")
         headline = f"{payload.get('side', '')} {payload.get('quantity', '')} {status}".strip()

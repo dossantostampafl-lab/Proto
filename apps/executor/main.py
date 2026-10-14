@@ -15,7 +15,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from services.execution import RiskPermit, TradeIntent
 from services.oms import OrderRejected
@@ -57,6 +57,29 @@ def authorized(request: Request, credentials: Bearer) -> Executor:
 
 
 Authorized = Annotated[Executor, Depends(authorized)]
+
+
+def watchdog_authorized(request: Request, credentials: Bearer) -> Executor:
+    """The watchdog's own token: health and halt only, never orders or releases."""
+
+    executor_ = runtime(request)
+    token = executor_.settings.watchdog_token
+    if token is None:
+        raise HTTPException(503, "watchdog token is not configured")
+    presented = credentials.credentials if credentials is not None else ""
+    if not hmac.compare_digest(presented.encode(), token.get_secret_value().encode()):
+        raise HTTPException(401, "invalid watchdog token")
+    return executor_
+
+
+Watchdog = Annotated[Executor, Depends(watchdog_authorized)]
+
+
+class WatchdogHalt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    watchdog_id: str = Field(min_length=1, max_length=40)
+    reasons: list[str] = Field(min_length=1, max_length=50)
 
 
 def create_app(executor: Executor | None = None) -> FastAPI:
@@ -138,6 +161,15 @@ def create_app(executor: Executor | None = None) -> FastAPI:
         except ExecutorHalted as exc:
             raise HTTPException(409, str(exc)) from exc
         return {**result, **_boundary(executor_)}
+
+    @app.get("/v1/watchdog/status")
+    async def watchdog_status(executor_: Watchdog):
+        return {**executor_.watchdog_status(), **_boundary(executor_)}
+
+    @app.post("/v1/watchdog/halt")
+    async def watchdog_halt(body: WatchdogHalt, executor_: Watchdog):
+        changed = executor_.watchdog_halt(body.watchdog_id, body.reasons)
+        return {"halted": executor_.halted, "already_halted": not changed, **_boundary(executor_)}
 
     @app.get("/v1/events")
     async def events(executor_: Authorized):

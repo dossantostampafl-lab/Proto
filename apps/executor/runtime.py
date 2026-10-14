@@ -85,6 +85,8 @@ class Executor:
         self.ledger: SqlLedger | None = None
         self.oms: OrderManager | None = None
         self.halted: str | None = None
+        self.last_reconcile_at: datetime | None = None
+        self.last_consistent: bool | None = None
         self.events: deque[dict[str, Any]] = deque(maxlen=500)
         self._tasks: list[asyncio.Task] = []
         self._reconcile_lock = asyncio.Lock()
@@ -194,6 +196,8 @@ class Executor:
             divergences = reconcile_balances(
                 await self.ledger.balances(), await self.adapter.balances()
             )
+            self.last_reconcile_at = self._clock()
+            self.last_consistent = not divergences
             if divergences and self.halted is None:
                 self.halted = "reconciliation divergence"
                 self._event(
@@ -207,6 +211,26 @@ class Executor:
                 "divergences": [d.to_dict() for d in divergences],
                 "venue_halted": self.halted is not None,
             }
+
+    def watchdog_halt(self, watchdog_id: str, reasons: list[str]) -> bool:
+        """Stop accepting orders. Returns False when already halted; never releases."""
+
+        if self.halted is not None:
+            return False
+        self.halted = f"watchdog: {', '.join(reasons)[:200]}"
+        self._event("WATCHDOG_HALT", {"watchdog_id": watchdog_id, "reasons": reasons})
+        logger.error("executor halted by the watchdog: %s", reasons)
+        return True
+
+    def watchdog_status(self) -> dict[str, Any]:
+        return {
+            "ready": self.ready,
+            "halted": self.halted,
+            "last_reconcile_at": (
+                self.last_reconcile_at.isoformat() if self.last_reconcile_at else None
+            ),
+            "consistent": self.last_consistent,
+        }
 
     async def release_halt(self) -> dict[str, Any]:
         """Operator action. Refused while the ledger and the venue still disagree."""
