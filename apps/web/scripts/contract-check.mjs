@@ -90,4 +90,16 @@ assert.match(floorView, /const \[stateFresh, setStateFresh\]/, "floor state poll
 assert.match(floorView, /source=\{state == null \? undefined : state\.data_mode === "TESTNET"/, "floor sidebars must disclose paper vs testnet mode");
 
 
+// The live 3D floor: loaded on demand, its screens carry the same provenance labels, its operators
+// move from verified desk activity only, and it builds no DOM outside React.
+const floor3d = files.filter(([p]) => p.includes("floor3d")).map(([, s]) => s).join("\n");
+assert.match(floorScene, /lazy\(\(\) => import\("\.\/floor3d\/Floor3D"\)\)/, "the 3D floor must load on demand");
+assert.match(floorScene, /<PhotoScene \{\.\.\.props\} \/>/, "the photo room stands in while the 3D floor loads or cannot run");
+for (const label of ["LIVE PUBLIC", "LAST KNOWN / REST", "PAPER / SIM", "TESTNET · NO REAL MONEY", "HALTED", "ARMED", "no feed"]) {
+  assert.ok(floor3d.includes(label), `3D floor screens must show ${label}`);
+}
+assert.match(floor3d, /operator\.update\(t, dt, busy, this\.reduced\)/, "3D operators must move from their desk's verified activity");
+assert.match(floor3d, /active\(s\.id\)/, "3D desk activity must come from the floor stream");
+assert.match(floor3d, /prefers-reduced-motion: reduce/, "the 3D floor must respect reduced motion");
+
 console.log(`frontend contracts: ok (${files.length} source files)`);

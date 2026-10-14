@@ -1,11 +1,20 @@
 # Trading floor view (Phase 7 preview)
 
-The dashboard opens on **Floor**: a cinematic trading room. The room is a photograph with every screen
-blank (`apps/web/src/assets/floor-room.webp`). The wall screens, each desk's three monitors, the desk
-labels and the activity lights are drawn live on top of it, fitted to each screen's corners, and the
-operators' heads are cut from the photo back over their monitors. Nothing operational is baked into
-the picture, and the contract check enforces that the photo is the only image on the floor. If the
-photo cannot be loaded, a vector drawing of the same room (`floorSceneVector.tsx`) is shown instead.
+The dashboard opens on **Floor**: a live 3D trading room (three.js), loaded on demand only on this
+view. The camera sits high behind the central desk and drifts slowly; the curved wall of screens,
+the three monitors on each desk and the floating desk labels are live canvas textures fed by
+`/v1/floor/state`, `/ws/floor` and the public market stream. Operators are procedural figures:
+they type and lean in only while their desk is working (a journal event arrived in the last few
+seconds over a connected stream), and otherwise breathe and glance at their screens. A supervisor
+walks the room and goes to a desk that raised an alert. The desk LEDs and the floor lines take the
+state colour of the desk's last action. With reduced motion the camera and idle movement stop.
+
+If WebGL or OffscreenCanvas is unavailable, the GPU context is lost or the 3D chunk fails to load,
+the photo room is shown instead: a photograph with every screen blank
+(`apps/web/src/assets/floor-room.webp`) with the same live screens drawn over it. If the photo
+cannot load either, a vector drawing of the room (`floorSceneVector.tsx`) is shown. Nothing
+operational is baked into any picture; the contract check enforces it.
+
 Each step of the authority chain has a desk and an agent:
 
 TradingView → Fusion → AI Reviewer → Risk Engine → OMS / Executor → Reconciliation
