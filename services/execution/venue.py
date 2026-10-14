@@ -20,6 +20,7 @@ from .contracts import (
     OrderStatus,
     OrderType,
     PositiveDecimal,
+    TimeInForce,
     TradableInstrument,
     VenueId,
     _Contract,
@@ -37,6 +38,7 @@ class VenueOrder(_Contract):
     quantity: PositiveDecimal
     order_type: OrderType
     limit_price: PositiveDecimal | None = None
+    time_in_force: TimeInForce = TimeInForce.GTC
 
     @model_validator(mode="after")
     def validate_price(self) -> VenueOrder:
@@ -61,9 +63,15 @@ class VenueAdapter(Protocol):
 
     async def submit(self, order: VenueOrder) -> ExecutionReport: ...
 
-    async def cancel(self, client_order_id: str) -> ExecutionReport: ...
+    # Venues such as Binance address an order by symbol plus client id, so the
+    # OMS always passes the instrument it holds for the order.
+    async def cancel(
+        self, client_order_id: str, *, instrument_id: str | None = None
+    ) -> ExecutionReport: ...
 
-    async def query(self, client_order_id: str) -> ExecutionReport | None: ...
+    async def query(
+        self, client_order_id: str, *, instrument_id: str | None = None
+    ) -> ExecutionReport | None: ...
 
     async def balances(self) -> dict[str, Decimal]: ...
 
@@ -77,8 +85,9 @@ class PaperVenueAdapter:
 
     Market orders fill at the touch plus slippage, rounded against the trader
     to the tick grid; limit orders fill only when marketable and never worse
-    than their limit, otherwise they rest until canceled. Resting orders do
-    not reserve balance or fill later: matching belongs to a later phase.
+    than their limit, otherwise they rest until canceled (IOC orders expire as
+    CANCELED instead). Resting orders do not reserve balance or fill later:
+    matching belongs to a later phase.
     """
 
     def __init__(
@@ -125,7 +134,9 @@ class PaperVenueAdapter:
         self._orders[order.client_order_id] = (order, report)
         return report
 
-    async def cancel(self, client_order_id: str) -> ExecutionReport:
+    async def cancel(
+        self, client_order_id: str, *, instrument_id: str | None = None
+    ) -> ExecutionReport:
         order, report = self._orders[client_order_id]
         if report.status is not OrderStatus.ACKNOWLEDGED:
             return report
@@ -135,7 +146,9 @@ class PaperVenueAdapter:
         self._orders[client_order_id] = (order, canceled)
         return canceled
 
-    async def query(self, client_order_id: str) -> ExecutionReport | None:
+    async def query(
+        self, client_order_id: str, *, instrument_id: str | None = None
+    ) -> ExecutionReport | None:
         entry = self._orders.get(client_order_id)
         return entry[1] if entry is not None else None
 
@@ -195,6 +208,8 @@ class PaperVenueAdapter:
                 violation = instrument.order_violation(order.quantity, order.limit_price)
                 if violation is not None:
                     return self._reject(order, violation)
+                if order.time_in_force is TimeInForce.IOC:
+                    return self._report(order, OrderStatus.CANCELED, reason="IOC not marketable")
                 return self._report(order, OrderStatus.ACKNOWLEDGED)
             price = min(price, order.limit_price) if buying else max(price, order.limit_price)
 

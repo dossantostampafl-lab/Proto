@@ -78,5 +78,6 @@ operational journal as `AGENT_DECISION`, with the proposal's fingerprint and the
   pairs abstain with `no market data` until a BRL feed is added.
 - Equity and positions come from the paper ledger (Phase 4), so SHORT signals exit positions the
   paper account actually holds.
-- Instrument grids in `services/execution/catalog.py` are paper approximations. Phase 5 loads
-  them from the venue.
+- Instrument grids in `services/execution/catalog.py` are paper approximations. The Binance
+  adapter loads the real ones from `exchangeInfo` (`docs/venues/binance-spot.md`); the agents
+  switch to them when the executor runs (Phase 5b).

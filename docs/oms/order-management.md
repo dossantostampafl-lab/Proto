@@ -116,4 +116,5 @@ durable ledger and the venue stay reconciled across restarts.
 - Recovered `UNKNOWN` orders are resolved by the operator, not automatically. The recovery gate
   (Phase 6) adds automated resolution and its adversarial tests.
 - Resting limit orders are not matched later by the paper venue. They rest until canceled.
-- The Binance and XP adapters arrive in Phase 5 and must pass the same OMS and reconciliation tests.
+- The Binance Spot adapter (testnet only) is in `docs/venues/binance-spot.md`. The isolated
+  executor that runs it, and the XP adapter, come next in Phase 5.
