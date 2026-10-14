@@ -70,7 +70,7 @@ function useFloor() {
     for (const a of actions) out[a.station] = a;
     return out;
   }, [actions]);
-  const active = (s: StationId) => (activeAt[s] ?? 0) > now - ACTIVE_MS;
+  const active = (s: StationId) => connected && (activeAt[s] ?? 0) > now - ACTIVE_MS;
   return { state, actions, latest, active, connected };
 }
 
