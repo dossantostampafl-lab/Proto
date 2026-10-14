@@ -6,7 +6,7 @@ compartment_ocid = "ocid1.compartment.oc1..xxxx" # a dedicated "proto" compartme
 region           = "sa-valparaiso-1"             # Always Free lives in the home region only
 home_region      = "sa-valparaiso-1"             # Governance > Tenancy details > Home region
 
-ssh_public_key = "ssh-ed25519 AAAA... operator"
+ssh_public_key = "ssh-rsa AAAA... operator" # RSA: Cloud Shell (FIPS) refuses ED25519
 operator_cidrs = ["203.0.113.10/32"]             # your public IP: curl -s ifconfig.me
 
 create_api = true # false if the API already runs on another instance

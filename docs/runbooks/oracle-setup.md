@@ -59,7 +59,8 @@ Cloud Shell's `oci` CLI is already authenticated, so it creates the stack:
 ```bash
 git clone https://github.com/dossantostampafl-lab/Proto.git && cd Proto/infra/oci
 zip -r ~/proto-oci.zip . -x '.terraform/*' '*.tfstate*' 'terraform.tfvars'
-ssh-keygen -t ed25519 -f ~/.ssh/proto -N "" -C proto-operator   # operator key, stays in Cloud Shell
+# Cloud Shell runs in FIPS mode: ED25519 keys are refused there, so use RSA.
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/proto -N "" -C proto-operator   # stays in Cloud Shell
 COMP=<compartment_ocid>
 cat > ~/proto-vars.json <<JSON
 {
