@@ -317,6 +317,7 @@ class ExecutionReport(_Contract):
 
 
 class LedgerEntryKind(StrEnum):
+    OPENING_BALANCE = "OPENING_BALANCE"  # snapshot of funds already at the venue
     TRADE = "TRADE"
     FEE = "FEE"
     RESERVATION = "RESERVATION"
@@ -345,6 +346,8 @@ class LedgerEntry(_Contract):
 
     @model_validator(mode="after")
     def validate_sign(self) -> LedgerEntry:
+        if self.kind is LedgerEntryKind.OPENING_BALANCE and self.amount < 0:
+            raise ValueError("an opening balance must be positive")
         if self.kind is LedgerEntryKind.FEE and self.amount > 0:
             raise ValueError("a fee entry must debit the account")
         if self.kind is LedgerEntryKind.RESERVATION and self.amount > 0:

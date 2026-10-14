@@ -76,7 +76,7 @@ operational journal as `AGENT_DECISION`, with the proposal's fingerprint and the
 
 - Live quotes exist only for `BINANCE_SPOT:<BASE>USDT` while `LIVE_MARKET_SOURCE=BINANCE`. BRL
   pairs abstain with `no market data` until a BRL feed is added.
-- Until the Phase 4 ledger exists, equity is the reference capital and positions are zero. SHORT
-  signals therefore abstain.
+- Equity and positions come from the paper ledger (Phase 4), so SHORT signals exit positions the
+  paper account actually holds.
 - Instrument grids in `services/execution/catalog.py` are paper approximations. Phase 5 loads
   them from the venue.

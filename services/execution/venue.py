@@ -90,9 +90,13 @@ class PaperVenueAdapter:
         fee_bps: Decimal,
         slippage_bps: Decimal,
         clock: Callable[[], datetime] = _utc_now,
+        simulated_venue: VenueId | None = None,
     ) -> None:
-        if any(instrument.venue is not VenueId.PAPER for instrument in instruments):
-            raise ValueError("PaperVenueAdapter only trades PAPER instruments")
+        # A paper venue may stand in for one real venue so PAPER-stage intents for
+        # that venue can be executed; it still reports itself as PAPER.
+        allowed = {VenueId.PAPER} | ({simulated_venue} if simulated_venue else set())
+        if any(instrument.venue not in allowed for instrument in instruments):
+            raise ValueError("PaperVenueAdapter only trades PAPER (or its simulated venue)")
         if fee_bps < 0 or slippage_bps < 0:
             raise ValueError("fee_bps and slippage_bps must be non-negative")
         self._instruments = {item.instrument_id: item for item in instruments}

@@ -2,9 +2,10 @@
 
 Accepted signals are buffered here; when the pipeline is enabled each new
 signal triggers an evaluation for its instrument. Every decision is written to
-the operational journal as AGENT_DECISION. Positions are taken as zero and
-equity as the constitutional reference capital until the Phase 4 ledger exists,
-so SHORT signals abstain and sizing never exceeds the reference budget.
+the operational journal as AGENT_DECISION. Equity and positions come from the
+paper ledger (Phase 4); sizing never exceeds the constitutional reference
+budget. Proposals go to the Risk Engine, and approved ones to the paper OMS
+when paper execution is enabled.
 """
 
 from __future__ import annotations
@@ -33,11 +34,14 @@ from services.execution import Signal
 from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import REFERENCE_CAPITAL
 from services.execution.venue import Quote
+from services.oms import ManagedOrder
 from services.risk import RiskDecision
 
 from .event_state import JournalUnavailable, record_operational_event
 from .live_monitor import live_monitor  # noqa: F401  (re-exported for tests)
 from .market_quotes import live_quote as _market_quote
+from .oms_surface import account_state as ledger_account_state
+from .oms_surface import execute as execute_paper
 from .risk_surface import assess as assess_risk
 from .settings import settings
 
@@ -96,8 +100,26 @@ def live_quote(instrument_id: str) -> Quote | None:
     return _market_quote(instrument_id, market_source=settings.live_market_source)
 
 
-def _portfolio(_instrument_id: str) -> PortfolioView:
-    return PortfolioView(equity=REFERENCE_CAPITAL, position_quantity=Decimal("0"))
+_portfolio_views: dict[str, PortfolioView] = {}
+
+
+def _portfolio(instrument_id: str) -> PortfolioView:
+    return _portfolio_views.get(
+        instrument_id, PortfolioView(equity=REFERENCE_CAPITAL, position_quantity=Decimal("0"))
+    )
+
+
+async def _refresh_portfolio(instrument_id: str) -> None:
+    """Size from the paper ledger: equity in the quote currency and the held position."""
+
+    instrument = PAPER_INSTRUMENTS.get(instrument_id)
+    if instrument is None:
+        return
+    state = await ledger_account_state(instrument.quote_asset)
+    _portfolio_views[instrument_id] = PortfolioView(
+        equity=state.equity,
+        position_quantity=state.positions.get(instrument_id, Decimal("0")),
+    )
 
 
 async def _record(decision: AgentDecision) -> None:
@@ -139,17 +161,26 @@ def reset_agent_state() -> None:
     _signals.clear()
     _decisions.clear()
     _outcomes.clear()
+    _portfolio_views.clear()
     _pipeline = None
     _pipeline_settings_id = None
     _record_failures = 0
 
 
-async def _evaluate(instrument_id: str) -> tuple[AgentDecision, RiskDecision | None]:
-    """Run the pipeline, then send any proposal to the Risk Engine for a permit."""
+async def _evaluate(
+    instrument_id: str,
+) -> tuple[AgentDecision, RiskDecision | None, ManagedOrder | None]:
+    """Pipeline -> Risk Engine permit -> paper OMS (when paper execution is enabled)."""
 
+    await _refresh_portfolio(instrument_id)
     decision = await pipeline().evaluate(instrument_id, list(_signals))
-    risk = await assess_risk(decision.proposal) if decision.proposal is not None else None
-    return decision, risk
+    if decision.proposal is None:
+        return decision, None, None
+    risk = await assess_risk(decision.proposal)
+    order = None
+    if risk.approved and risk.permit is not None:
+        order = await execute_paper(decision.proposal, risk.permit)
+    return decision, risk, order
 
 
 def on_signal_accepted(signal: Signal) -> None:
@@ -204,9 +235,10 @@ async def evaluate_now(request: EvaluateRequest) -> dict[str, object]:
 
     if request.instrument_id not in PAPER_INSTRUMENTS:
         raise HTTPException(422, "instrument is not supported")
-    decision, risk = await _evaluate(request.instrument_id)
+    decision, risk, order = await _evaluate(request.instrument_id)
     return {
         "decision": decision.to_dict(),
         "risk": risk.to_dict() if risk is not None else None,
+        "order": order.to_dict() if order is not None else None,
         "evaluated_at": datetime.now(UTC).isoformat(),
     }

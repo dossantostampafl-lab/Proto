@@ -67,7 +67,7 @@ Every proposal from the agent pipeline is assessed automatically. The journal re
 
 ## Current limitations (closed by later phases)
 
-- There is no OMS yet, so approved permits expire unused.
-- Until the Phase 4 ledger, the account is the reference capital with no positions or exposure.
-  The loss and drawdown checks are fully implemented and tested, but in the running API they
-  cannot trigger yet.
+- Permits are consumed by the paper OMS (`docs/oms/order-management.md`) when
+  `OMS_PAPER_EXECUTION_ENABLED=true`; otherwise they expire unused.
+- Account state comes from the paper ledger. FX between BRL and USDT is not modelled, so each quote
+  currency is risk-managed as its own account.
