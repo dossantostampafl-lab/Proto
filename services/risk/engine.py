@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 from services.execution import ReleaseStage, RiskPermit, TradableInstrument, TradeIntent
 from services.execution.constitution import (
+    CANARY_CAPITAL,
     MAX_DAILY_LOSS,
     MAX_DRAWDOWN,
     MAX_GROSS_LEVERAGE,
@@ -149,7 +150,14 @@ class RiskEngine:
         controls: Controls,
         quote: Quote | None,
         now: datetime,
+        scope_stage: ReleaseStage | None = None,
     ) -> RiskDecision:
+        """`scope_stage` is the promotion registry's stage for the intent's scope.
+
+        PAPER and SHADOW need no certification. CANARY needs the scope certified
+        at CANARY and sizes on at most CANARY_CAPITAL. LIVE is never certified yet.
+        """
+
         checks: dict[str, str] = {}
         rejections: list[str] = []
 
@@ -164,7 +172,15 @@ class RiskEngine:
         reducing = intent.side == "SELL" and intent.reduce_only and intent.quantity <= position
 
         # Halts and scope.
-        check("stage_certified", intent.stage in CERTIFIED_STAGES, intent.stage.value)
+        canary = intent.stage is ReleaseStage.CANARY
+        certified = intent.stage in CERTIFIED_STAGES or (
+            canary and scope_stage is ReleaseStage.CANARY
+        )
+        check(
+            "stage_certified",
+            certified,
+            f"{intent.stage.value} (scope {scope_stage.value if scope_stage else 'unregistered'})",
+        )
         check("global_kill_switch", not controls.global_kill)
         check("venue_kill_switch", intent.venue.value not in controls.killed_venues)
         check("strategy_kill_switch", intent.strategy_id not in controls.killed_strategies)
@@ -206,6 +222,8 @@ class RiskEngine:
         if not reducing:
             check("no_lockdown", lockdown is None, lockdown.value if lockdown else "")
             equity = conservative_equity(account.equity)
+            if canary:
+                equity = min(equity, CANARY_CAPITAL)
             notional = intent.quantity * (price or Decimal("0"))
             budget = equity * MAX_RISK_PER_POSITION
             check(

@@ -38,6 +38,7 @@ from .paper_autonomy_bootstrap import router as paper_autonomy_router
 from .paper_autopilot import router as paper_autopilot_router
 from .paper_control import router as paper_control_router
 from .persistence import init_database
+from .promotion_surface import router as promotion_router
 from .research import metrics
 from .research import router as research_router
 from .risk_surface import router as risk_router
@@ -92,6 +93,7 @@ for router in (
     agent_router,
     risk_router,
     oms_router,
+    promotion_router,
 ):
     app.include_router(router)
 

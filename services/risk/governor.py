@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import StrEnum
 from threading import Lock
 
-from services.execution import TradeIntent
+from services.execution import ReleaseStage, TradeIntent
 from services.execution.venue import Quote
 
 from .engine import AccountState, Controls, LockdownReason, RiskDecision, RiskEngine
@@ -53,6 +53,7 @@ class RiskGovernor:
         quote: Quote | None,
         now: datetime,
         external_global_kill: bool = False,
+        scope_stage: ReleaseStage | None = None,
     ) -> RiskDecision:
         decision = self.engine.evaluate(
             intent,
@@ -60,6 +61,7 @@ class RiskGovernor:
             controls=self.controls(external_global_kill=external_global_kill),
             quote=quote,
             now=now,
+            scope_stage=scope_stage,
         )
         if decision.breach is not None:
             with self._lock:

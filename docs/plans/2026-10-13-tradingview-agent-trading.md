@@ -171,7 +171,7 @@ Ciclo de cada PR: PLAN → IMPLEMENT → TEST → AUDIT → FIND DEFECTS → FIX
 | B3 | XP, via MetaTrader 5 em VM Windows. Confirmar com a XP que MT5 para B3 e ordens automáticas são permitidos na conta |
 | Hospedagem do executor | Oracle Cloud, em instância separada e subnet privada (ver `docs/adr/venues-and-executor-hosting.md`) |
 | Forex | A definir. Fica fora do escopo até escolher uma corretora |
-| Capital do canary | A definir antes da Fase 6 |
+| Capital do canary | R$ 500, com mínimo de 1 semana em PAPER sem violação (ver `docs/promotion/gates.md`) |
 | Plano do TradingView | A confirmar antes da Fase 1. O webhook exige plano pago e 2FA |
 
 ## Fora de escopo

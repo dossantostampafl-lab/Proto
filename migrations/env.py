@@ -15,6 +15,7 @@ from apps.api.app.persistence import Base
 from apps.api.app.schema_registry import canonical_metadata
 from services.events import journal_metadata
 from services.oms import ledger_metadata
+from services.promotion import promotion_metadata
 
 config = context.config
 
@@ -31,6 +32,7 @@ target_metadata = [
     canonical_metadata,
     journal_metadata,
     ledger_metadata,
+    promotion_metadata,
 ]
 
 

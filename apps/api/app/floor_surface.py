@@ -190,6 +190,7 @@ async def floor_state(limit: int = 80) -> dict[str, object]:
         }
 
     return {
+        "promotion": await _promotion_summary(),
         "data_mode": data_mode(),
         "journal": operational_journal.integrity.value,
         "stations": stations,
@@ -204,6 +205,37 @@ async def floor_state(limit: int = 80) -> dict[str, object]:
         },
         **_BOUNDARY,
     }
+
+
+async def _promotion_summary() -> list[dict[str, Any]]:
+    """Each scope's stage, clean days and what blocks its next step (operator aside)."""
+
+    from datetime import UTC, datetime
+
+    from services.promotion import gate_check, next_stage
+
+    from .promotion_surface import registry
+
+    now = datetime.now(UTC)
+    summary = []
+    try:
+        records = await registry().records()
+    except Exception:  # promotion data unavailable is shown as such, never guessed
+        logger.exception("floor: promotion registry unavailable")
+        return []
+    for record in records:
+        target = next_stage(record.stage)
+        summary.append(
+            {
+                "scope": record.scope.to_dict(),
+                "stage": record.stage.value,
+                "clean_days": round(record.clean_for(now).total_seconds() / 86_400, 2),
+                "next_stage": target.value if target else None,
+                "blockers": gate_check(record, target, now=now, operator=True) if target else [],
+                "violations": len(record.violations),
+            }
+        )
+    return summary
 
 
 @router.websocket("/ws/floor")

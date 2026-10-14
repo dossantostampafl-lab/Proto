@@ -24,7 +24,7 @@ from typing import Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from services.execution import RiskPermit, TradeIntent, VenueId
+from services.execution import ReleaseStage, RiskPermit, TradeIntent, VenueId
 from services.oms import (
     ManagedOrder,
     OrderManager,
@@ -35,7 +35,8 @@ from services.oms import (
     opening_balances,
     reconcile_balances,
 )
-from services.risk import PermitLedger, PermitSigner
+from services.risk import Ed25519PermitVerifier, PermitLedger, PermitSigner, PermitVerifier
+from services.risk.permit_keys import decode_key
 from services.venues.binance import BinanceSpotAdapter, load_instruments
 from services.venues.credentials import load_credentials
 
@@ -109,7 +110,12 @@ class Executor:
                 opening_balances(snapshot, account_id=account_id, venue=VENUE, now=self._clock())
             )
             self._event("LEDGER_OPENED", {"assets": sorted(snapshot)})
-        signer = PermitSigner(self.settings.permit_signing_key.get_secret_value().encode())
+        signer: PermitVerifier
+        if self.settings.permit_public_key:
+            signer = Ed25519PermitVerifier(decode_key(self.settings.permit_public_key))
+        else:
+            assert self.settings.permit_signing_key is not None
+            signer = PermitSigner(self.settings.permit_signing_key.get_secret_value().encode())
         self.oms = OrderManager(
             adapter=adapter,
             ledger=ledger,
@@ -165,6 +171,9 @@ class Executor:
             raise ExecutorHalted(self.halted)
         if intent.venue is not VENUE:
             raise ValueError(f"this executor only trades {VENUE.value}")
+        if intent.stage not in (ReleaseStage.PAPER, ReleaseStage.SHADOW):
+            # CANARY and LIVE move real money: never on a testnet executor.
+            raise ValueError(f"{intent.stage.value} intents need a certified live executor")
         order = await oms.submit(intent, permit)
         await self.reconcile()
         return order

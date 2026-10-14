@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     agent_stop_distance: float = Field(default=0.02, gt=0.0, lt=0.5, allow_inf_nan=False)
     # Risk Engine (Phase 3). Unset key -> ephemeral per-process key (permits live seconds).
     risk_permit_signing_key: str | None = None
+    # Ed25519 seed (base64, 32 bytes). Takes precedence over the HMAC key; required for canary.
+    risk_permit_private_key: str | None = None
     risk_permit_ttl_seconds: float = Field(default=10.0, gt=0.0, le=60.0, allow_inf_nan=False)
     risk_stop_distance: float = Field(default=0.02, gt=0.0, lt=0.5, allow_inf_nan=False)
     risk_price_collar_bps: float = Field(default=50.0, gt=0.0, le=500.0, allow_inf_nan=False)
@@ -167,9 +169,11 @@ class Settings(BaseSettings):
         token = self.executor_api_token or ""
         if len(token) < _MIN_PRODUCTION_SECRET_LENGTH:
             raise ValueError("EXECUTOR_API_TOKEN must be at least 32 characters")
-        # The executor verifies permits with the same key; an ephemeral key never matches.
-        if not self.risk_permit_signing_key:
-            raise ValueError("RISK_PERMIT_SIGNING_KEY is required with the executor backend")
+        # The executor must be able to verify permits; an ephemeral key never matches.
+        if not (self.risk_permit_signing_key or self.risk_permit_private_key):
+            raise ValueError(
+                "RISK_PERMIT_SIGNING_KEY or RISK_PERMIT_PRIVATE_KEY is required with the executor"
+            )
         return self
 
     @field_validator("live_market_source")
@@ -197,6 +201,7 @@ class Settings(BaseSettings):
         "tradingview_webhook_secret",
         "risk_permit_signing_key",
         "executor_api_token",
+        "risk_permit_private_key",
     )
     @classmethod
     def normalize_optional_secret(cls, value: str | None) -> str | None:

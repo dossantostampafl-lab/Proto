@@ -17,7 +17,7 @@ issued.
 
 | Check | Rule |
 |---|---|
-| `stage_certified` | Only `PAPER` and `SHADOW`. `CANARY` and `LIVE` need certified scope (Phase 6) |
+| `stage_certified` | `PAPER` and `SHADOW` always. `CANARY` only for a scope certified at CANARY (`docs/promotion/gates.md`), sized on at most R$500. `LIVE` never yet |
 | `global_kill_switch` / `venue_kill_switch` / `strategy_kill_switch` | Halt everything in scope, including exits |
 | `instrument_known`, `venue_grid` | Instrument is in the catalog; quantity and price fit the lot, tick and minimum notional |
 | `spot_no_short`, `sell_is_reduce_only` | A sell never exceeds the position and must be reduce-only |

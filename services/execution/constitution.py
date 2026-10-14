@@ -12,6 +12,10 @@ MAX_DRAWDOWN: Final = Decimal("0.05")
 MAX_GROSS_LEVERAGE: Final = Decimal("1.0")
 
 
+# Owner decision (Phase 6): the real-money canary never sizes on more than this.
+CANARY_CAPITAL: Final = Decimal("500")
+
+
 def conservative_equity(current_equity: Decimal) -> Decimal:
     """Size against the lower of reference capital and current equity, never above it."""
 

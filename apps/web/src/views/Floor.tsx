@@ -3,7 +3,57 @@ import { get, WS_BASE } from "../api";
 import type { Shared } from "../main";
 import { Button, Panel, Tag } from "../ui";
 
-import { type FloorAction, type FloorState, isHalted, Scene, STATIONS, type StationId, type Tone } from "./floorScene";
+import { type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone } from "./floorScene";
+
+function PromotionPath({ scopes }: { scopes: PromotionScope[] | undefined }) {
+  if (!scopes) return <p className="empty">Promotion data unavailable.</p>;
+  if (!scopes.length) return <p className="empty">No scope registered yet. Operators promote scopes through /v1/promotion.</p>;
+  return (
+    <ul className="fl-promo">
+      {scopes.map(p => {
+        const at = STAGES.indexOf(p.stage as (typeof STAGES)[number]);
+        return (
+          <li key={p.scope.key}>
+            <header>
+              <b>{p.scope.strategy_id}</b>
+              <span>{p.scope.venue} · {p.scope.credential_id} · {p.scope.model_version}</span>
+            </header>
+            <ol className="fl-ladder" aria-label={`Stage ${p.stage}`}>
+              {STAGES.map((stage, i) => (
+                <li key={stage} className={i < at ? "done" : i === at ? "now" : ""}>{stage}</li>
+              ))}
+            </ol>
+            <p className="fl-promo-meta">
+              <span>{p.clean_days.toFixed(1)} clean days</span>
+              <span className={p.violations ? "down" : ""}>{p.violations} violations</span>
+              {p.next_stage && <span>next: {p.next_stage}</span>}
+            </p>
+            {p.blockers.length > 0 && <ul className="fl-blockers">{p.blockers.map(b => <li key={b}>{b}</li>)}</ul>}
+            {p.next_stage === "CANARY" && <p className="hint">CANARY also needs an authenticated operator and sizes on at most R$500.</p>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function DeskCards({ latest, active }: { latest: Partial<Record<StationId, FloorAction>>; active: (s: StationId) => boolean }) {
+  return (
+    <ul className="fl-desks" aria-label="Agent desks">
+      {STATIONS.map(s => {
+        const a = latest[s.id];
+        const color = TONE_COLOR[a?.tone ?? "idle"];
+        return (
+          <li key={s.id} className={active(s.id) ? "busy" : ""} style={{ borderColor: color }}>
+            <b style={{ color }}>{s.label}</b>
+            <span>{a?.headline ?? "waiting for work"}</span>
+            <small>{a ? `${a.at.slice(11, 19)}${a.symbol ? ` · ${a.symbol}` : ""}` : s.role}</small>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 const ACTIVE_MS = 7000;
 
@@ -81,6 +131,12 @@ const TONE_LABEL: Record<Tone, string> = { ok: "ok", warn: "attention", alert: "
 
 export function Floor({ market }: Shared) {
   const floor = useFloor();
+  const pan = useRef<HTMLDivElement>(null);
+  // On narrow screens the scene pans; start centred on the desks, not on the window wall.
+  useEffect(() => {
+    const el = pan.current;
+    if (el && el.scrollWidth > el.clientWidth) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+  }, []);
   const { state } = floor;
   const killed = isHalted(state);
   const recent = [...floor.actions].reverse().slice(0, 30);
@@ -96,7 +152,8 @@ export function Floor({ market }: Shared) {
           {!floor.stateFresh && <span className="floor-stale">floor state {state == null ? "unavailable" : "last known"}</span>}
         </span>}
       >
-        <Scene market={market} state={state} actions={floor.actions} latest={floor.latest} active={floor.active} />
+        <div className="fl-pan" ref={pan}><Scene market={market} state={state} actions={floor.actions} latest={floor.latest} active={floor.active} /></div>
+        <DeskCards latest={floor.latest} active={floor.active} />
       </Panel>
 
       <div className="floor-side">
@@ -104,7 +161,7 @@ export function Floor({ market }: Shared) {
           <ul className="floor-controls">
             <li><span>Agents</span><b>{state ? (state.pipeline.agents_enabled ? `on · ${state.pipeline.reviewer}` : "off") : "—"}</b></li>
             <li><span>Execution</span><b>{state ? (state.pipeline.execution_backend === "executor" ? "executor · testnet" : state.pipeline.paper_execution_enabled ? "paper venue" : "proposals only") : "—"}</b></li>
-            <li><span>Journal</span><b className={state?.journal === "VALID" ? "up" : "down"}>{state?.journal ?? "—"}</b></li>
+            <li><span>Journal</span><b className={state == null ? "muted" : state.journal === "VALID" ? "up" : "down"}>{state?.journal ?? "—"}</b></li>
             <li><span>Kill switch</span><b className={state == null ? "muted" : killed ? "down" : "up"}>{state == null ? "—" : killed ? "ON" : "armed"}</b></li>
             <li><span>Lockdown</span><b className={state?.controls.lockdown ? "down" : ""}>{state == null ? "—" : state.controls.lockdown ?? "none"}</b></li>
             <li><span>Halted venues</span><b className={state?.controls.killed_venues?.length ? "down" : ""}>{state == null ? "—" : state.controls.killed_venues?.join(", ") || "none"}</b></li>
@@ -113,6 +170,10 @@ export function Floor({ market }: Shared) {
             <Button label="Halt all trading" path="/v1/risk/killswitch" body={{ scope: "GLOBAL", action: "TRIGGER" }} kind="danger">Halt all trading</Button>
           </div>
           <p className="hint">Operator token required. Releasing a halt stays a deliberate operator action.</p>
+        </Panel>
+
+        <Panel title="Promotion path" source={state == null ? undefined : state.data_mode === "TESTNET" ? "testnet" : "paper"}>
+          <PromotionPath scopes={state?.promotion} />
         </Panel>
 
         <Panel title="Agent feed" source={state == null ? undefined : state.data_mode === "TESTNET" ? "testnet" : "paper"} className="floor-feed">

@@ -30,6 +30,7 @@ from services.execution.constitution import (
 )
 from services.risk import (
     AccountState,
+    Ed25519PermitSigner,
     GovernorError,
     KillScope,
     PermitLedger,
@@ -39,6 +40,7 @@ from services.risk import (
     RiskGovernor,
     RiskPolicy,
 )
+from services.risk.permit_keys import decode_key
 
 from .app_state import runtime
 from .event_state import JournalUnavailable, record_operational_event
@@ -62,9 +64,15 @@ _decisions: deque[dict[str, object]] = deque(maxlen=_DECISION_CAPACITY)
 def _build() -> tuple[RiskGovernor, PermitLedger]:
     global _governor, _ledger, _governor_settings_id
     if _governor is None or _ledger is None or _governor_settings_id != id(settings):
-        configured = settings.risk_permit_signing_key
-        key = configured.encode() if configured else os.urandom(32)
-        signer = PermitSigner(key, ttl=timedelta(seconds=settings.risk_permit_ttl_seconds))
+        ttl = timedelta(seconds=settings.risk_permit_ttl_seconds)
+        signer: PermitSigner | Ed25519PermitSigner
+        if settings.risk_permit_private_key:
+            # Asymmetric: the executor holds only the public key and cannot mint permits.
+            signer = Ed25519PermitSigner(decode_key(settings.risk_permit_private_key), ttl=ttl)
+        else:
+            configured = settings.risk_permit_signing_key
+            key = configured.encode() if configured else os.urandom(32)
+            signer = PermitSigner(key, ttl=ttl)
         engine = RiskEngine(
             instruments=PAPER_INSTRUMENTS,
             signer=signer,
@@ -121,6 +129,7 @@ async def assess(intent: TradeIntent) -> RiskDecision:
     """Assess one proposal and journal the outcome (without the permit signature)."""
 
     from .oms_surface import quote_asset_of
+    from .promotion_surface import stage_for
 
     decision = governor().assess(
         intent,
@@ -128,6 +137,7 @@ async def assess(intent: TradeIntent) -> RiskDecision:
         quote=live_quote(intent.instrument_id, market_source=settings.live_market_source),
         now=datetime.now(UTC),
         external_global_kill=_external_global_kill(),
+        scope_stage=await stage_for(intent),
     )
     record = {
         "intent_id": str(intent.intent_id),
@@ -142,6 +152,11 @@ async def assess(intent: TradeIntent) -> RiskDecision:
     await _journal("RISK_DECISION", record, key)
     if decision.breach is not None:
         await _journal("RISK_LOCKDOWN_LATCHED", {"reason": decision.breach.value, **_BOUNDARY})
+        from .promotion_surface import violation
+
+        await violation(
+            venue=intent.venue.value, kind="RISK_LOCKDOWN_LATCHED", detail=decision.breach.value
+        )
     return decision
 
 
@@ -170,7 +185,11 @@ def risk_status() -> dict[str, object]:
             "max_quote_age_seconds": policy.max_quote_age.total_seconds(),
             "price_collar_bps": str(policy.price_collar_bps),
             "permit_ttl_seconds": settings.risk_permit_ttl_seconds,
-            "signing_key": "configured" if settings.risk_permit_signing_key else "ephemeral",
+            "signing_key": (
+                "ed25519"
+                if settings.risk_permit_private_key
+                else "configured" if settings.risk_permit_signing_key else "ephemeral"
+            ),
         },
         "controls": {**gov.snapshot(), "runtime_kill_switch": runtime.kill_switch},
         "account_source": "paper_ledger",

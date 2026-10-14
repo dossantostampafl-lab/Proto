@@ -22,6 +22,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from services.events import journal_metadata
 from services.oms import ledger_metadata
 from services.orchestration import DecisionMemoryBase, OrchestrationBase
+from services.promotion import promotion_metadata
 
 from .models import Fill, SimulationOrder
 from .portfolio import PaperPortfolio
@@ -100,6 +101,7 @@ async def init_database(engine: AsyncEngine) -> None:
         await connection.run_sync(DecisionMemoryBase.metadata.create_all)
         await connection.run_sync(journal_metadata.create_all)
         await connection.run_sync(ledger_metadata.create_all)
+        await connection.run_sync(promotion_metadata.create_all)
 
     journal = AsyncSqlFillJournal(engine)
     await journal.ensure_active_session()
