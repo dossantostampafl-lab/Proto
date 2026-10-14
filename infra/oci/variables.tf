@@ -70,7 +70,7 @@ variable "api_ocpus" {
 
 variable "api_memory_gb" {
   type    = number
-  default = 6
+  default = 4
 }
 
 variable "executor_ocpus" {
@@ -80,15 +80,14 @@ variable "executor_ocpus" {
 
 variable "executor_memory_gb" {
   type    = number
-  default = 6
+  default = 4
 }
 
-# The watchdog is light: by default it runs on the Always Free AMD micro shape (1/8 OCPU, 1 GB),
-# which leaves the Arm allowance to the API and the executor. For an A1 watchdog, set
-# watchdog_shape = "VM.Standard.A1.Flex" with watchdog_ocpus and watchdog_memory_gb.
+# Arm by default: some home regions (Chile West, Valparaiso) have no Always Free AMD micro shape.
+# Where VM.Standard.E2.1.Micro exists, it frees an Arm OCPU for something else.
 variable "watchdog_shape" {
   type    = string
-  default = "VM.Standard.E2.1.Micro"
+  default = "VM.Standard.A1.Flex"
 }
 
 variable "watchdog_ocpus" {

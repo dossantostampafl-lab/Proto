@@ -16,33 +16,31 @@ operator ──Bastion──> SSH (Linux) · RDP (Windows)
 
 | Instance | Shape | Subnet | Notes |
 |---|---|---|---|
-| `proto-api` | A1 (Arm), 1 OCPU / 6 GB | public | Dashboard + API, TLS on 443 |
-| `proto-executor` | A1, 1 OCPU / 6 GB | private, `10.20.2.10` | Only holder of venue credentials |
-| `proto-watchdog` | E2.1.Micro (AMD, 1/8 OCPU / 1 GB) | private, `10.20.2.11` | Halts only |
+| `proto-api` | A1 (Arm), 1 OCPU / 4 GB | public | Dashboard + API, TLS on 443 |
+| `proto-executor` | A1, 1 OCPU / 4 GB | private, `10.20.2.10` | Only holder of venue credentials |
+| `proto-watchdog` | A1, 1 OCPU / 4 GB | private, `10.20.2.11` | Halts only |
 | `proto-mt5` | E5 (x86), 1 OCPU / 8 GB, Windows Server 2022 | private, `10.20.2.20` | XP MetaTrader 5 terminal |
 
-The API and the executor use 2 of the 4 Arm OCPUs and 12 of the 24 GB in the Always Free
-allowance. The watchdog uses one of the two free AMD micro instances. An existing instance on the
-same tenancy (for example The Creation) shares that allowance: check what it uses before applying,
-and shrink the A1 sizes if needed. Proto never shares an instance with another application: the
-API holds the permit signing key, and the executor holds the venue credentials. The Windows VM
+Proto takes 3 of the 4 Always Free Arm OCPUs and 12 of the 24 GB. Each A1 instance needs at least
+1 OCPU, and Chile West (Valparaiso) has no free AMD micro shape. An existing instance on the
+same tenancy (for example The Creation) shares that allowance: check what it uses before applying.
+Proto never shares an instance with another application: the API holds the permit signing key,
+and the executor holds the venue credentials. The Windows VM
 is billed: Windows needs an x86 shape and a license. Check the price in Oracle's cost estimator
 before applying, or set `create_mt5 = false` until the XP path starts.
 
 ## 0. Make room in the Always Free allowance
 
 The tenancy's free Arm allowance is 4 OCPUs and 24 GB in total, in the **home region only**
-(this tenancy: Chile West, `sa-valparaiso-1`). If another instance already takes all of the
-memory, shrink it first. For example, The Creation runs on `VM.Standard.A1.Flex` with 2 OCPUs and
-24 GB, while its own docs ask for 12 GB:
+(this tenancy: Chile West, `sa-valparaiso-1`, which has no free AMD micro shape). Proto needs
+3 OCPUs and 12 GB. Another instance gets the rest. For example, set The Creation to 1 OCPU and 12 GB:
 
 1. Compute → Instances → `the-creation-os` → **Edit** → **Edit shape**.
-2. Keep 2 OCPUs and set **12 GB**. Save. The instance reboots, about a minute offline.
+2. Set **1 OCPU** and **12 GB**. Save. The instance reboots, about a minute offline.
 3. Check it afterwards. Its `smoke-test.sh`, or the Deploy workflow's checks, should pass.
 
-That leaves 2 OCPUs and 12 GB for `proto-api` and `proto-executor` (1 OCPU and 6 GB each). If The
-Creation needs more memory, give it 16 GB, and set `api_memory_gb = 4` and
-`executor_memory_gb = 4`.
+With 2 OCPUs kept for it, the account must be upgraded to Pay As You Go: the fifth OCPU is billed.
+Free-tier accounts also get Arm capacity last ("Out of host capacity"), which an upgrade lifts.
 
 ## 1. Compartment and Cloud Shell
 
@@ -180,10 +178,7 @@ sudo podman build -t proto .
      `-e PUBLIC_ORIGIN=https://<your domain>`. The NSG lets port 8000 in only from the watchdog.
   2. Run its own Postgres the same way.
   3. Put TLS in front with a reverse proxy on 443 (for example Caddy with your domain).
-- **Watchdog:** the free micro has 1 GB, too little to build the image, which has a Node stage.
-  Build it on the API instance, then copy it over through your machine:
-  `podman save proto | gzip > proto.tar.gz` there, `scp` it to the watchdog through the Bastion,
-  and `podman load -i proto.tar.gz` on the watchdog. Then run:
+- **Watchdog:**
 
   ```bash
   sudo podman run -d --name watchdog --restart=always --network host --env-file /run/proto/watchdog.env \
