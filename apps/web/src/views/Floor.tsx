@@ -87,8 +87,9 @@ export function Floor({ market }: Shared) {
         title="Trading floor"
         className="floor-stage"
         actions={<span className="floor-badges">
-          <Tag source={state?.data_mode === "TESTNET" ? "testnet" : "paper"} />
-          <span className={floor.connected ? "floor-live" : "floor-stale"}>{floor.connected ? "agents streaming" : "reconnecting"}</span>
+          {state ? <Tag source={state.data_mode === "TESTNET" ? "testnet" : "paper"} /> : <span className="floor-stale">mode unavailable</span>}
+          <span className={floor.connected ? "floor-live" : "floor-stale"}>{floor.connected ? "agent stream connected" : "agent stream reconnecting"}</span>
+          <span className={market.connected ? "floor-live" : "floor-stale"}>{market.connected ? "market stream connected" : "market stream · REST fallback"}</span>
         </span>}
       >
         <Scene market={market} state={state} actions={floor.actions} latest={floor.latest} active={floor.active} />
@@ -100,9 +101,9 @@ export function Floor({ market }: Shared) {
             <li><span>Agents</span><b>{state ? (state.pipeline.agents_enabled ? `on · ${state.pipeline.reviewer}` : "off") : "—"}</b></li>
             <li><span>Execution</span><b>{state ? (state.pipeline.execution_backend === "executor" ? "executor · testnet" : state.pipeline.paper_execution_enabled ? "paper venue" : "proposals only") : "—"}</b></li>
             <li><span>Journal</span><b className={state?.journal === "VALID" ? "up" : "down"}>{state?.journal ?? "—"}</b></li>
-            <li><span>Kill switch</span><b className={killed ? "down" : "up"}>{killed ? "ON" : "armed"}</b></li>
-            <li><span>Lockdown</span><b className={state?.controls.lockdown ? "down" : ""}>{state?.controls.lockdown ?? "none"}</b></li>
-            <li><span>Halted venues</span><b className={state?.controls.killed_venues?.length ? "down" : ""}>{state?.controls.killed_venues?.join(", ") || "none"}</b></li>
+            <li><span>Kill switch</span><b className={state == null ? "muted" : killed ? "down" : "up"}>{state == null ? "—" : killed ? "ON" : "armed"}</b></li>
+            <li><span>Lockdown</span><b className={state?.controls.lockdown ? "down" : ""}>{state == null ? "—" : state.controls.lockdown ?? "none"}</b></li>
+            <li><span>Halted venues</span><b className={state?.controls.killed_venues?.length ? "down" : ""}>{state == null ? "—" : state.controls.killed_venues?.join(", ") || "none"}</b></li>
           </ul>
           <div className="row">
             <Button label="Halt all trading" path="/v1/risk/killswitch" body={{ scope: "GLOBAL", action: "TRIGGER" }} kind="danger">Halt all trading</Button>
