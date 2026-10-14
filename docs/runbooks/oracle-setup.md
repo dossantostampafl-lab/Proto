@@ -18,10 +18,14 @@ operator ──Bastion──> SSH (Linux) · RDP (Windows)
 |---|---|---|---|
 | `proto-api` | A1 (Arm), 1 OCPU / 6 GB | public | Dashboard + API, TLS on 443 |
 | `proto-executor` | A1, 1 OCPU / 6 GB | private, `10.20.2.10` | Only holder of venue credentials |
-| `proto-watchdog` | A1, 1 OCPU / 4 GB | private, `10.20.2.11` | Halts only |
+| `proto-watchdog` | E2.1.Micro (AMD, 1/8 OCPU / 1 GB) | private, `10.20.2.11` | Halts only |
 | `proto-mt5` | E5 (x86), 1 OCPU / 8 GB, Windows Server 2022 | private, `10.20.2.20` | XP MetaTrader 5 terminal |
 
-The three A1 instances (3 OCPUs, 16 GB) fit Oracle's Always Free Arm allowance. The Windows VM
+The API and the executor use 2 of the 4 Arm OCPUs and 12 of the 24 GB in the Always Free
+allowance. The watchdog uses one of the two free AMD micro instances. An existing instance on the
+same tenancy (for example The Creation) shares that allowance: check what it uses before applying,
+and shrink the A1 sizes if needed. Proto never shares an instance with another application: the
+API holds the permit signing key, and the executor holds the venue credentials. The Windows VM
 is billed: Windows needs an x86 shape and a license. Check the price in Oracle's cost estimator
 before applying, or set `create_mt5 = false` until the XP path starts.
 
@@ -139,7 +143,10 @@ sudo podman build -t proto .
      `-e PUBLIC_ORIGIN=https://<your domain>`. The NSG lets port 8000 in only from the watchdog.
   2. Run its own Postgres the same way.
   3. Put TLS in front with a reverse proxy on 443 (for example Caddy with your domain).
-- **Watchdog:**
+- **Watchdog:** the free micro has 1 GB, too little to build the image, which has a Node stage.
+  Build it on the API instance, then copy it over through your machine:
+  `podman save proto | gzip > proto.tar.gz` there, `scp` it to the watchdog through the Bastion,
+  and `podman load -i proto.tar.gz` on the watchdog. Then run:
 
   ```bash
   sudo podman run -d --name watchdog --restart=always --network host --env-file /run/proto/watchdog.env \

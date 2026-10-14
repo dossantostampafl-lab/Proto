@@ -83,6 +83,14 @@ variable "executor_memory_gb" {
   default = 6
 }
 
+# The watchdog is light: by default it runs on the Always Free AMD micro shape (1/8 OCPU, 1 GB),
+# which leaves the Arm allowance to the API and the executor. For an A1 watchdog, set
+# watchdog_shape = "VM.Standard.A1.Flex" with watchdog_ocpus and watchdog_memory_gb.
+variable "watchdog_shape" {
+  type    = string
+  default = "VM.Standard.E2.1.Micro"
+}
+
 variable "watchdog_ocpus" {
   type    = number
   default = 1

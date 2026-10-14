@@ -11,6 +11,15 @@ data "oci_core_images" "oracle_linux_arm" {
   sort_order               = "DESC"
 }
 
+data "oci_core_images" "watchdog" {
+  compartment_id           = var.compartment_ocid
+  operating_system         = "Oracle Linux"
+  operating_system_version = "9"
+  shape                    = var.watchdog_shape
+  sort_by                  = "TIMECREATED"
+  sort_order               = "DESC"
+}
+
 data "oci_core_images" "windows" {
   count                    = var.create_mt5 ? 1 : 0
   compartment_id           = var.compartment_ocid
@@ -123,17 +132,21 @@ resource "oci_core_instance" "watchdog" {
   compartment_id      = var.compartment_ocid
   availability_domain = local.ad
   display_name        = "${local.name}-watchdog"
-  shape               = var.a1_shape
+  shape               = var.watchdog_shape
   freeform_tags       = local.tags
 
-  shape_config {
-    ocpus         = var.watchdog_ocpus
-    memory_in_gbs = var.watchdog_memory_gb
+  # Fixed shapes (the free micro) take no shape_config; flex shapes need one.
+  dynamic "shape_config" {
+    for_each = endswith(var.watchdog_shape, ".Flex") ? [1] : []
+    content {
+      ocpus         = var.watchdog_ocpus
+      memory_in_gbs = var.watchdog_memory_gb
+    }
   }
 
   source_details {
     source_type = "image"
-    source_id   = local.linux_image
+    source_id   = data.oci_core_images.watchdog.images[0].id
   }
 
   create_vnic_details {
