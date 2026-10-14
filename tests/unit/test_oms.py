@@ -13,6 +13,7 @@ from services.execution import (
     LedgerEntryKind,
     OrderStatus,
     OrderType,
+    TimeInForce,
     TradeIntent,
     VenueId,
 )
@@ -460,3 +461,12 @@ async def test_order_interrupted_before_submit_is_rejected(engine, reserved) -> 
     usdt = (await ledger.balances())["USDT"]
     assert usdt.reserved == 0 and usdt.available == Decimal("10000")
     assert (await store.load())[0].status is OrderStatus.REJECTED
+
+
+async def test_unmarketable_ioc_expires_and_releases_the_hold() -> None:
+    oms, ledger = await setup()
+    trade = intent(limit_price=Decimal("60000.00"), time_in_force=TimeInForce.IOC)
+    order = await oms.submit(trade, SIGNER.issue(trade, now=NOW))
+    assert order.status is OrderStatus.CANCELED
+    assert order.reason == "IOC not marketable"
+    assert (await ledger.balances())["USDT"].reserved == 0

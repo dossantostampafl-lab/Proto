@@ -176,6 +176,7 @@ class OrderManager:
                         quantity=intent.quantity,
                         order_type=intent.order_type,
                         limit_price=intent.limit_price,
+                        time_in_force=intent.time_in_force,
                     )
                 )
             except Exception as exc:  # timeout, network, venue outage
@@ -193,7 +194,9 @@ class OrderManager:
             order = self._orders[client_order_id]
             if order.status is not OrderStatus.UNKNOWN:
                 return order
-            report = await self._adapter.query(client_order_id)
+            report = await self._adapter.query(
+                client_order_id, instrument_id=order.intent.instrument_id
+            )
             if report is None:
                 # The venue confirms it never received the order.
                 self._set_status(order, OrderStatus.REJECTED, reason="not found at venue")
@@ -208,7 +211,9 @@ class OrderManager:
             order = self._orders[client_order_id]
             if order.status in TERMINAL_ORDER_STATUSES or order.status is OrderStatus.UNKNOWN:
                 return order
-            report = await self._adapter.cancel(client_order_id)
+            report = await self._adapter.cancel(
+                client_order_id, instrument_id=order.intent.instrument_id
+            )
             await self._apply(order, report)
             return order
 
@@ -342,7 +347,9 @@ class OrderManager:
             self._entry(order, trade, quote, -notional if buying else notional, now, mark),
         ]
         if fee > 0:
-            batch.append(self._entry(order, LedgerEntryKind.FEE, quote, -fee, now, mark))
+            # Binance may charge the fee in the base asset (or another one, e.g. BNB).
+            fee_asset = report.fee_asset or quote
+            batch.append(self._entry(order, LedgerEntryKind.FEE, fee_asset, -fee, now, mark))
         if release > 0:
             batch.append(
                 self._entry(
