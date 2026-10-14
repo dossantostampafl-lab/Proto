@@ -22,14 +22,7 @@ from typing import Any
 
 from services.execution import ReleaseStage
 
-STAGE_ORDER = (
-    ReleaseStage.RESEARCH,
-    ReleaseStage.REPLAY,
-    ReleaseStage.SHADOW,
-    ReleaseStage.PAPER,
-    ReleaseStage.CANARY,
-    ReleaseStage.LIVE,
-)
+STAGE_ORDER = tuple(ReleaseStage)
 
 MIN_PAPER_PERIOD = timedelta(days=7)
 EVIDENCE_MAX_AGE = timedelta(days=14)
@@ -132,6 +125,10 @@ class ScopeRecord:
     violations: list[dict[str, str]] = field(default_factory=list)
     history: list[dict[str, str]] = field(default_factory=list)
 
+    def clean_for(self, now: datetime) -> timedelta:
+        """How long the scope has run in its stage without a violation."""
+        return now - max(self.stage_since, self.clean_since)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "scope": self.scope.to_dict(),
@@ -163,10 +160,10 @@ def gate_check(
     if target in OPERATOR_ONLY and not operator:
         reasons.append(f"{target.value} needs an operator")
     if target is ReleaseStage.CANARY:
-        paper_for = now - max(record.stage_since, record.clean_since)
+        paper_for = record.clean_for(now)
         if paper_for < MIN_PAPER_PERIOD:
             days = paper_for.total_seconds() / 86_400
-            reasons.append(f"needs 7 clean days in PAPER (has {days:.1f})")
+            reasons.append(f"needs {MIN_PAPER_PERIOD.days} clean days in PAPER (has {days:.1f})")
     for kind in sorted(REQUIRED_EVIDENCE.get(target, frozenset())):
         fresh = [
             e
@@ -180,7 +177,3 @@ def gate_check(
         elif not fresh[-1].passed:
             reasons.append(f"latest {kind.value} evidence failed")
     return reasons
-
-
-def demotion_target(stage: ReleaseStage) -> ReleaseStage | None:
-    return DEMOTION.get(stage)

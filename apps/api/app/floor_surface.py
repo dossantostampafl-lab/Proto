@@ -212,8 +212,7 @@ async def _promotion_summary() -> list[dict[str, Any]]:
 
     from datetime import UTC, datetime
 
-    from services.promotion import gate_check
-    from services.promotion.gates import next_stage
+    from services.promotion import gate_check, next_stage
 
     from .promotion_surface import registry
 
@@ -226,12 +225,11 @@ async def _promotion_summary() -> list[dict[str, Any]]:
         return []
     for record in records:
         target = next_stage(record.stage)
-        clean = now - max(record.stage_since, record.clean_since)
         summary.append(
             {
                 "scope": record.scope.to_dict(),
                 "stage": record.stage.value,
-                "clean_days": round(clean.total_seconds() / 86_400, 2),
+                "clean_days": round(record.clean_for(now).total_seconds() / 86_400, 2),
                 "next_stage": target.value if target else None,
                 "blockers": gate_check(record, target, now=now, operator=True) if target else [],
                 "violations": len(record.violations),

@@ -20,6 +20,7 @@ from services.execution.constitution import CANARY_CAPITAL
 from services.promotion import (
     EVIDENCE_MAX_AGE,
     MIN_PAPER_PERIOD,
+    OPERATOR_ONLY,
     REQUIRED_EVIDENCE,
     STAGE_ORDER,
     EvidenceKind,
@@ -145,7 +146,7 @@ def policy() -> dict[str, object]:
         "canary_capital_brl": str(CANARY_CAPITAL),
         "min_paper_days": MIN_PAPER_PERIOD.days,
         "evidence_max_age_days": EVIDENCE_MAX_AGE.days,
-        "operator_only": ["CANARY", "LIVE"],
+        "operator_only": sorted(s.value for s in OPERATOR_ONLY),
         "live_certifiable": False,
         **_BOUNDARY,
     }

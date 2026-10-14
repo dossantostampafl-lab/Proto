@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import Column, DateTime, MetaData, String, Table, Text, select, update
@@ -13,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from services.execution import ReleaseStage
 
 from .gates import (
+    DEMOTION,
     STAGE_ORDER,
     Evidence,
     EvidenceKind,
     PromotionRefused,
     Scope,
     ScopeRecord,
-    demotion_target,
     gate_check,
 )
 
@@ -171,12 +171,9 @@ class PromotionRegistry:
                 await self._save(record)
             return record
 
-    async def violation(
-        self, *, venue: str, kind: str, detail: str, accounts: Iterable[str] | None = None
-    ) -> list[ScopeRecord]:
+    async def violation(self, *, venue: str, kind: str, detail: str) -> list[ScopeRecord]:
         """A safety violation on a venue: reset every matching clean period, demote live scopes."""
 
-        wanted = set(accounts) if accounts is not None else None
         async with self._lock:
             await self._ensure_loaded()
             now = self._clock()
@@ -184,11 +181,9 @@ class PromotionRegistry:
             for record in self._records.values():
                 if record.scope.venue != venue:
                     continue
-                if wanted is not None and record.scope.account not in wanted:
-                    continue
                 record.clean_since = now
                 record.violations.append({"at": now.isoformat(), "kind": kind, "detail": detail})
-                target = demotion_target(record.stage)
+                target = DEMOTION.get(record.stage)
                 if target is not None:
                     self._move(record, target, now, f"automatic demotion: {kind}")
                 await self._save(record)

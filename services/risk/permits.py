@@ -66,39 +66,40 @@ def _material(
     ).encode()
 
 
+def _check_ttl(ttl: timedelta) -> None:
+    if not timedelta(0) < ttl <= MAX_PERMIT_LIFETIME:
+        raise ValueError("permit ttl must be positive and at most 60 seconds")
+
+
+def _permit_fields(intent: TradeIntent, *, now: datetime, ttl: timedelta) -> dict:
+    """The fields every permit signs, whatever the scheme."""
+    return {
+        "permit_id": uuid4(),
+        "intent_id": intent.intent_id,
+        "intent_fingerprint": intent.fingerprint(),
+        "max_quantity": str(intent.quantity),
+        "issued_at": now,
+        "expires_at": now + ttl,
+    }
+
+
 class PermitSigner:
     def __init__(self, key: bytes, *, ttl: timedelta = timedelta(seconds=10)) -> None:
         if len(key) < MIN_KEY_BYTES:
             raise ValueError("permit signing key must be at least 32 bytes")
-        if not timedelta(0) < ttl <= MAX_PERMIT_LIFETIME:
-            raise ValueError("permit ttl must be positive and at most 60 seconds")
+        _check_ttl(ttl)
         self._key = key
         self.ttl = ttl
 
-    def _sign(self, **fields) -> str:
-        return hmac.new(self._key, _material(**fields), hashlib.sha256).hexdigest()
+    def _sign(self, material: bytes) -> str:
+        return hmac.new(self._key, material, hashlib.sha256).hexdigest()
 
     def issue(self, intent: TradeIntent, *, now: datetime) -> RiskPermit:
-        fields = {
-            "permit_id": uuid4(),
-            "intent_id": intent.intent_id,
-            "intent_fingerprint": intent.fingerprint(),
-            "max_quantity": str(intent.quantity),
-            "issued_at": now,
-            "expires_at": now + self.ttl,
-        }
-        return RiskPermit(**fields, signature=self._sign(**fields))
+        fields = _permit_fields(intent, now=now, ttl=self.ttl)
+        return RiskPermit(**fields, signature=self._sign(_material(**fields)))
 
     def verify(self, permit: RiskPermit, intent: TradeIntent, *, now: datetime) -> None:
-        expected = self._sign(
-            permit_id=permit.permit_id,
-            intent_id=permit.intent_id,
-            intent_fingerprint=permit.intent_fingerprint,
-            max_quantity=str(permit.max_quantity),
-            issued_at=permit.issued_at,
-            expires_at=permit.expires_at,
-        )
-        if not hmac.compare_digest(expected, permit.signature):
+        if not hmac.compare_digest(self._sign(_permit_material(permit)), permit.signature):
             raise PermitRejected("bad_signature")
         _check_scope(permit, intent, now=now)
 
@@ -148,22 +149,13 @@ class Ed25519PermitSigner:
     def __init__(self, private_key: bytes, *, ttl: timedelta = timedelta(seconds=10)) -> None:
         if len(private_key) != 32:
             raise ValueError("Ed25519 private key must be the 32-byte seed")
-        if not timedelta(0) < ttl <= MAX_PERMIT_LIFETIME:
-            raise ValueError("permit ttl must be positive and at most 60 seconds")
+        _check_ttl(ttl)
         self._key = Ed25519PrivateKey.from_private_bytes(private_key)
         self.ttl = ttl
-        self.public_key = self._key.public_key().public_bytes_raw()
-        self._verifier = Ed25519PermitVerifier(self.public_key)
+        self._verifier = Ed25519PermitVerifier(self._key.public_key().public_bytes_raw())
 
     def issue(self, intent: TradeIntent, *, now: datetime) -> RiskPermit:
-        fields = {
-            "permit_id": uuid4(),
-            "intent_id": intent.intent_id,
-            "intent_fingerprint": intent.fingerprint(),
-            "max_quantity": str(intent.quantity),
-            "issued_at": now,
-            "expires_at": now + self.ttl,
-        }
+        fields = _permit_fields(intent, now=now, ttl=self.ttl)
         signature = self._key.sign(_material(**fields)).hex()
         return RiskPermit(**fields, signature=ED25519_PREFIX + signature)
 

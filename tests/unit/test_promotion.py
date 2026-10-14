@@ -242,18 +242,15 @@ def api(monkeypatch):
     configured = Settings(operator_api_token="o" * 32)
     for module in (main, oms_surface, promotion_surface, risk_surface):
         monkeypatch.setattr(module, "settings", configured)
-    for reset in (
+    resets = (
         promotion_surface.reset_promotion_state,
         risk_surface.reset_risk_state,
         oms_surface.reset_oms_state,
-    ):
+    )
+    for reset in resets:
         reset()
     yield promotion_surface
-    for reset in (
-        promotion_surface.reset_promotion_state,
-        risk_surface.reset_risk_state,
-        oms_surface.reset_oms_state,
-    ):
+    for reset in resets:
         reset()
 
 

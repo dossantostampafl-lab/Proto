@@ -9,6 +9,8 @@ export type Tone = "ok" | "warn" | "alert" | "working";
 export type StationId = "tradingview" | "fusion" | "reviewer" | "risk" | "oms" | "reconciliation";
 export type FloorAction = { seq: number; at: string; event_type: string; station: StationId; tone: Tone; headline: string; symbol: string | null };
 export type Account = { equity: string; start_of_day_equity: string; peak_equity: string; gross_exposure: string; positions: Record<string, string> } | null;
+export const STAGES = ["RESEARCH", "REPLAY", "SHADOW", "PAPER", "CANARY", "LIVE"] as const;
+
 export type PromotionScope = {
   scope: { account: string; venue: string; strategy_id: string; model_version: string; credential_id: string; key: string };
   stage: string;
@@ -177,8 +179,8 @@ function WallScreen({ market, state, actions }: { market: Shared["market"]; stat
   const drawdown = equity != null && usdt && Number(usdt.peak_equity) > 0 ? equity / Number(usdt.peak_equity) - 1 : null;
   const halted = isHalted(state);
   const btc = market.series.BTC.slice(-90);
-  const stageRank = ["RESEARCH", "REPLAY", "SHADOW", "PAPER", "CANARY", "LIVE"];
-  const lead = [...(state?.promotion ?? [])].sort((a, b) => stageRank.indexOf(b.stage) - stageRank.indexOf(a.stage))[0];
+  const rank = (stage: string) => STAGES.indexOf(stage as (typeof STAGES)[number]);
+  const lead = [...(state?.promotion ?? [])].sort((a, b) => rank(b.stage) - rank(a.stage))[0];
   const chartX = 150, chartW = 196, chartY = top + 36, chartH = 104;
   // Curved glass: the top and bottom edges bow away from the viewer.
   const outline = `M0,${top} Q${width / 2},${top - bow} ${width},${top} L${width},${top + height} Q${width / 2},${top + height + bow} 0,${top + height} Z`;

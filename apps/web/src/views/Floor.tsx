@@ -3,9 +3,7 @@ import { get, WS_BASE } from "../api";
 import type { Shared } from "../main";
 import { Button, Panel, Tag } from "../ui";
 
-import { type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STATIONS, type StationId, TONE_COLOR, type Tone } from "./floorScene";
-
-const STAGES = ["RESEARCH", "REPLAY", "SHADOW", "PAPER", "CANARY", "LIVE"] as const;
+import { type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone } from "./floorScene";
 
 function PromotionPath({ scopes }: { scopes: PromotionScope[] | undefined }) {
   if (!scopes) return <p className="empty">Promotion data unavailable.</p>;
