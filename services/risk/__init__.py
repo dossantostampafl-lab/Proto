@@ -11,17 +11,27 @@ from .engine import (
     session_open,
 )
 from .governor import GovernorError, KillScope, RiskGovernor
-from .permits import PermitLedger, PermitRejected, PermitSigner
+from .permits import (
+    Ed25519PermitSigner,
+    Ed25519PermitVerifier,
+    PermitLedger,
+    PermitRejected,
+    PermitSigner,
+    PermitVerifier,
+)
 
 __all__ = [
     "AccountState",
     "Controls",
+    "Ed25519PermitSigner",
+    "Ed25519PermitVerifier",
     "GovernorError",
     "KillScope",
     "LockdownReason",
     "PermitLedger",
     "PermitRejected",
     "PermitSigner",
+    "PermitVerifier",
     "RiskDecision",
     "RiskEngine",
     "RiskGovernor",

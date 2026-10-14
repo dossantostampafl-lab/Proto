@@ -248,6 +248,9 @@ async def _halt_venue(divergences: list[dict]) -> None:
 
     governor().trigger_kill(KillScope.VENUE, VENUE.value)
     await _record("RECONCILIATION_DIVERGENCE", {"venue": VENUE.value, "divergences": divergences})
+    from .promotion_surface import violation
+
+    await violation(venue=VENUE.value, kind="RECONCILIATION_DIVERGENCE", detail="ledger != venue")
 
 
 async def reconcile() -> dict[str, object]:

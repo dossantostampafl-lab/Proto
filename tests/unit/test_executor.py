@@ -294,3 +294,26 @@ def test_executor_backend_settings_are_complete() -> None:
         Settings(
             oms_execution_backend="executor", executor_url="http://x", executor_api_token=TOKEN
         )
+
+
+def test_executor_with_a_public_key_accepts_only_risk_engine_signatures(fake, db) -> None:
+    from services.risk import Ed25519PermitSigner
+    from services.risk.permit_keys import decode_key, generate
+
+    private_b64, public_b64 = generate()
+    signer = Ed25519PermitSigner(decode_key(private_b64), ttl=timedelta(seconds=60))
+    runtime = Executor(
+        ExecutorSettings(api_token=TOKEN, permit_public_key=public_b64, symbols="BTCUSDT"),
+        adapter_factory=factory(fake),
+        engine=create_async_engine(db),
+    )
+    with TestClient(create_app(runtime)) as client:
+        trade = intent()
+        hmac_permit = SIGNER.issue(trade, now=datetime.now(UTC))
+        refused = client.post("/v1/orders", json=body(trade, hmac_permit), headers=AUTH)
+        assert refused.json()["detail"] == "permit_bad_signature"
+        other = intent()
+        accepted = client.post(
+            "/v1/orders", json=body(other, signer.issue(other, now=datetime.now(UTC))), headers=AUTH
+        )
+        assert accepted.json()["order"]["status"] == "FILLED"

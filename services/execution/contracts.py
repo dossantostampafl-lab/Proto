@@ -204,7 +204,8 @@ class RiskPermit(_Contract):
     max_quantity: PositiveDecimal
     issued_at: AwareDatetime
     expires_at: AwareDatetime
-    signature: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # HMAC-SHA256 (hex) or Ed25519 ("ed25519:" + hex), see services/risk/permits.py.
+    signature: str = Field(pattern=r"^(?:[0-9a-f]{64}|ed25519:[0-9a-f]{128})$")
 
     @model_validator(mode="after")
     def validate_lifetime(self) -> RiskPermit:

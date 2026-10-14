@@ -63,7 +63,7 @@ Set these on the public API:
 OMS_EXECUTION_BACKEND=executor
 EXECUTOR_URL=http://10.0.2.10:8100          # executor's private address
 EXECUTOR_API_TOKEN=<same value as the executor>
-RISK_PERMIT_SIGNING_KEY=<same value as EXECUTOR_PERMIT_SIGNING_KEY>
+RISK_PERMIT_PRIVATE_KEY=<Ed25519 seed matching EXECUTOR_PERMIT_PUBLIC_KEY>
 ```
 
 - **Execution.** Approved proposals are dispatched to the executor. `/v1/oms/*` then reads orders,
@@ -88,7 +88,7 @@ export EXECUTOR_API_TOKEN=...        # from the secret store
 export EXECUTOR_ENVIRONMENT=TESTNET
 export EXECUTOR_ACCOUNT=main
 export EXECUTOR_DATABASE_URL=postgresql+asyncpg://executor:...@10.0.2.20:5432/executor
-export EXECUTOR_PERMIT_SIGNING_KEY=...
+export EXECUTOR_PERMIT_PUBLIC_KEY=...      # Ed25519 public key (python -m services.risk.permit_keys)
 export EXECUTOR_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT
 export PROTO_CRED_BINANCE_SPOT_TESTNET_MAIN_API_KEY=...
 export PROTO_CRED_BINANCE_SPOT_TESTNET_MAIN_API_SECRET_FILE=/run/secrets/binance-testnet-secret
@@ -101,9 +101,9 @@ uvicorn apps.executor.main:app --host 10.0.2.10 --port 8100
 
 ## Current limitations
 
-- **Permit key.** Permits are signed with a shared HMAC key, so the executor could also mint
-  permits. Moving to an asymmetric signature (the Risk Engine signs, the executor only verifies)
-  is planned before any live scope.
+- **Permit key.** Set `EXECUTOR_PERMIT_PUBLIC_KEY` (Ed25519, see `docs/promotion/gates.md`) so the
+  executor can only verify permits. The HMAC key fallback lets it mint them too.
+- **Stages.** The testnet executor refuses CANARY and LIVE intents.
 - **Fills on resting orders** arrive by polling. A user-data WebSocket stream would lower latency
   and can replace it.
 - **Halt state** lives in memory. It re-latches on start, because the executor reconciles before

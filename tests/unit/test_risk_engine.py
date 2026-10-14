@@ -258,3 +258,48 @@ def test_kill_switches_by_scope() -> None:
     assert "global_kill_switch" in external.rejections
     with pytest.raises(GovernorError):
         governor.trigger_kill(KillScope.VENUE)
+
+
+def test_canary_needs_a_certified_scope_and_sizes_on_the_canary_capital() -> None:
+    small = intent(stage=ReleaseStage.CANARY, quantity=Decimal("0.001"))  # 62 notional, 1.24 risk
+    uncertified = engine().evaluate(
+        small,
+        account=account(),
+        controls=Controls(),
+        quote=QUOTE,
+        now=NOW,
+        scope_stage=ReleaseStage.PAPER,
+    )
+    assert "stage_certified" in uncertified.rejections
+
+    certified = engine().evaluate(
+        small,
+        account=account(),
+        controls=Controls(),
+        quote=QUOTE,
+        now=NOW,
+        scope_stage=ReleaseStage.CANARY,
+    )
+    assert certified.approved, certified.checks
+
+    # 124 notional -> 2.48 risk: fine on R$10,000, too much on the R$500 canary (1.25).
+    larger = intent(stage=ReleaseStage.CANARY)
+    capped = engine().evaluate(
+        larger,
+        account=account(),
+        controls=Controls(),
+        quote=QUOTE,
+        now=NOW,
+        scope_stage=ReleaseStage.CANARY,
+    )
+    assert "risk_per_position" in capped.rejections
+
+    live = engine().evaluate(
+        intent(stage=ReleaseStage.LIVE, quantity=Decimal("0.001")),
+        account=account(),
+        controls=Controls(),
+        quote=QUOTE,
+        now=NOW,
+        scope_stage=ReleaseStage.LIVE,
+    )
+    assert "stage_certified" in live.rejections
