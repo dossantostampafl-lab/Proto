@@ -368,6 +368,65 @@ tbody tr:hover td { background: rgba(0, 240, 255, 0.06); }
 .ticket strong { font: 600 34px var(--mono); color: var(--accent); text-shadow: var(--glow); }
 .replay { display: grid; }
 
+/* ---------- trading floor ---------- */
+.tag.testnet { color: var(--up); background: rgba(61, 255, 162, 0.08); }
+.floor-view { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+.floor-stage { padding-bottom: 10px; }
+.floor-badges { display: inline-flex; align-items: center; gap: 10px; font: 400 10px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
+.floor-live { color: var(--up); }
+.floor-live::before { content: "● "; animation: pulse 1.6s ease-in-out infinite; }
+.floor-stale { color: var(--warn); }
+.fl-scene { display: block; width: 100%; height: auto; border: 1px solid var(--line); background: #04060d; }
+.fl-scene text { font-family: var(--mono); shape-rendering: auto; }
+.fl-ws-title { font-size: 12px; font-weight: 600; fill: #9ff6ff; letter-spacing: 0.1em; }
+.fl-ws-sym { font-size: 11px; font-weight: 600; fill: #8fb3d9; letter-spacing: 0.08em; }
+.fl-ws-big { font-size: 15px; font-weight: 600; fill: #ffd27a; }
+.fl-ws-num { font-size: 12px; fill: #e8f6ff; }
+.fl-ws-label { font-size: 9px; fill: #6f95c4; letter-spacing: 0.12em; }
+.fl-ws-tape { font-size: 10px; white-space: pre; }
+.fl-up { fill: #3dffa2; }
+.fl-down { fill: #ff3b5c; }
+.fl-holo-title { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; }
+.fl-holo-role { font-size: 8px; fill: #9fb6cf; letter-spacing: 0.06em; }
+.fl-holo-text { font-size: 10px; fill: #f2fbff; }
+.fl-station .fl-holo { opacity: 0.82; transition: opacity 400ms; }
+.fl-station.busy .fl-holo { opacity: 1; animation: fl-float 2.4s ease-in-out infinite; }
+.fl-monitor { animation: fl-monitor 4s steps(3) infinite; }
+.fl-station.busy .fl-monitor { animation-duration: 0.7s; }
+.fl-station.busy .fl-pool { animation: fl-pool 1.4s ease-in-out infinite; }
+.fl-person.busy .fl-arm { animation: fl-type 0.28s steps(2) infinite; }
+.fl-person.busy .fl-arm.right { animation-delay: 0.14s; }
+.fl-beam { stroke-width: 3; stroke-dasharray: 4 10; opacity: 0.22; }
+.fl-beam.busy { opacity: 1; animation: fl-beam 0.7s linear infinite; }
+.fl-neon { animation: flicker 5s infinite; }
+.fl-neon.slow { animation-duration: 9s; }
+.fl-blink { animation: blink 1.6s steps(2) infinite; }
+.fl-rain line { stroke: rgba(159, 246, 255, 0.22); stroke-width: 1; }
+.fl-rain { animation: fl-rain 1.1s linear infinite; }
+@keyframes fl-float { 50% { transform: translateY(-3px); } }
+@keyframes fl-monitor { 33% { fill: #ffc56b; } 66% { fill: #ff9a2e; } }
+@keyframes fl-pool { 50% { opacity: 0.6; } }
+@keyframes fl-type { 50% { transform: translateY(2px); } }
+@keyframes fl-beam { to { stroke-dashoffset: -28; } }
+@keyframes fl-rain { to { transform: translateY(22px); } }
+.floor-side { display: grid; gap: 18px; }
+.floor-controls { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.floor-controls li { display: flex; justify-content: space-between; gap: 12px; font: 400 12px var(--mono); }
+.floor-controls span { color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
+.floor-feed ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 420px; overflow-y: auto; }
+.floor-feed li { display: grid; grid-template-columns: 58px 1fr auto; gap: 2px 8px; padding: 6px 8px; border-left: 2px solid var(--muted); background: rgba(0, 240, 255, 0.03); font: 400 11px var(--mono); }
+.floor-feed li time { color: var(--muted); }
+.floor-feed li b { color: var(--text); font-weight: 600; font-size: 10px; letter-spacing: 0.08em; }
+.floor-feed li em { font-style: normal; font-size: 10px; text-transform: uppercase; }
+.floor-feed li span { grid-column: 1 / -1; color: #b8cde0; overflow-wrap: anywhere; }
+.floor-feed li.tone-ok { border-left-color: var(--up); } .floor-feed li.tone-ok em { color: var(--up); }
+.floor-feed li.tone-warn { border-left-color: var(--warn); } .floor-feed li.tone-warn em { color: var(--warn); }
+.floor-feed li.tone-alert { border-left-color: var(--down); } .floor-feed li.tone-alert em { color: var(--down); }
+.floor-feed li.tone-working { border-left-color: var(--accent); } .floor-feed li.tone-working em { color: var(--accent); }
+@media (max-width: 1100px) {
+  .floor-view { grid-template-columns: minmax(0, 1fr); }
+}
+
 @media (max-width: 1100px) {
   .status .mode, .status time { display: none; }
 }

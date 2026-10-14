@@ -1,0 +1,14 @@
+{
+  "extraKnownMarketplaces": {
+    "ecc": {
+      "source": { "source": "github", "repo": "affaan-m/everything-claude-code" }
+    },
+    "superpowers-marketplace": {
+      "source": { "source": "github", "repo": "obra/superpowers-marketplace" }
+    }
+  },
+  "enabledPlugins": {
+    "ecc@ecc": true,
+    "superpowers@superpowers-marketplace": true
+  }
+}
