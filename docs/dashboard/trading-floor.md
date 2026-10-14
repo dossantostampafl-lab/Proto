@@ -1,7 +1,9 @@
 # Trading floor view (Phase 7 preview)
 
-The dashboard opens on **Floor**: an isometric pixel-art trading floor, drawn in code (SVG) with bloom lighting, light pools, a layered rainy city and a curved wall screen. Each
-step of the authority chain has a desk and an agent:
+The dashboard opens on **Floor**: a cinematic trading room drawn live in code (SVG). The camera sits
+high behind the central desk and looks over the operators' shoulders at a curved wall of screens,
+with the city through the glass on both sides. Desks stand in a half circle and glowing floor lines
+carry work between them. Each step of the authority chain has a desk and an agent:
 
 TradingView → Fusion → AI Reviewer → Risk Engine → OMS / Executor → Reconciliation
 
@@ -28,7 +30,10 @@ The wall screen shows:
 - live public mids for BTC, ETH and SOL;
 - the USDT account's equity;
 - the daily result against the 1% limit;
-- the drawdown against the 5% limit.
+- the drawdown against the 5% limit;
+- an **Últimas ações** strip with the latest agent actions.
+
+Each desk has three monitors: two live public mids and the desk's own journal events.
 
 A missing value is shown as `—` and is never estimated.
 
@@ -41,7 +46,7 @@ The **Promotion path** panel lists every scope from `/v1/promotion` (see
 - the clean days and the violations;
 - every reason the next stage is still refused, as the gates report it.
 
-The wall screen header shows the most advanced scope's stage and its next stage.
+The **Últimas ações** strip ends with the most advanced scope's stage and its next stage.
 
 ## Phones
 
