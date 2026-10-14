@@ -470,3 +470,22 @@ async def test_unmarketable_ioc_expires_and_releases_the_hold() -> None:
     assert order.status is OrderStatus.CANCELED
     assert order.reason == "IOC not marketable"
     assert (await ledger.balances())["USDT"].reserved == 0
+
+
+async def test_refresh_applies_venue_changes_and_escalates_a_lost_order() -> None:
+    adapter = paper()
+    oms, ledger = await setup(adapter)
+    trade = intent(limit_price=Decimal("60000.00"))
+    order = await oms.submit(trade, SIGNER.issue(trade, now=NOW))
+    assert [o.client_order_id for o in oms.open_orders()] == [order.client_order_id]
+
+    await adapter.cancel(order.client_order_id)  # canceled at the venue directly
+    assert (await oms.refresh(order.client_order_id)).status is OrderStatus.CANCELED
+    assert (await ledger.balances())["USDT"].reserved == 0
+
+    other = intent(limit_price=Decimal("60000.00"))
+    lost = await oms.submit(other, SIGNER.issue(other, now=NOW))
+    adapter._orders.pop(lost.client_order_id)  # the venue no longer knows it
+    refreshed = await oms.refresh(lost.client_order_id)
+    assert refreshed.status is OrderStatus.UNKNOWN and refreshed.reason == "missing at venue"
+    assert oms.open_orders() == []

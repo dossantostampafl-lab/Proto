@@ -206,6 +206,31 @@ class OrderManager:
             await self._apply(order, report)
             return order
 
+    def open_orders(self) -> list[ManagedOrder]:
+        """Orders resting or partially filled at the venue (UNKNOWN excluded)."""
+
+        working = (OrderStatus.ACKNOWLEDGED, OrderStatus.PARTIALLY_FILLED)
+        return [o for o in self._orders.values() if o.status in working]
+
+    async def refresh(self, client_order_id: str) -> ManagedOrder:
+        """Apply the venue's current view of a working order (fills on resting orders)."""
+
+        async with self._lock:
+            order = self._orders[client_order_id]
+            if order.status not in (OrderStatus.ACKNOWLEDGED, OrderStatus.PARTIALLY_FILLED):
+                return order
+            report = await self._adapter.query(
+                client_order_id, instrument_id=order.intent.instrument_id
+            )
+            if report is None:
+                # A venue that acknowledged the order cannot lose it: escalate, never guess.
+                self._set_status(order, OrderStatus.UNKNOWN, reason="missing at venue")
+                await self._commit(order)
+                return order
+            if report.status is not order.status or report.filled_quantity != order.filled_quantity:
+                await self._apply(order, report)
+            return order
+
     async def cancel(self, client_order_id: str) -> ManagedOrder:
         async with self._lock:
             order = self._orders[client_order_id]

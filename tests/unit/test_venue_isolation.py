@@ -58,3 +58,13 @@ def test_venue_package_never_offers_money_movement() -> None:
         ]
         hits = [route for route in code for token in forbidden if token in route.lower()]
         assert hits == [], f"{path}: {hits}"
+
+
+def test_public_api_never_imports_the_executor() -> None:
+    violations = [
+        f"{path}:{module}"
+        for path in Path("apps/api").rglob("*.py")
+        for module in _imports(path)
+        if module == "apps.executor" or module.startswith("apps.executor.")
+    ]
+    assert violations == []
