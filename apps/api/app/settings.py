@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     oms_paper_execution_enabled: bool = False
     oms_paper_fee_bps: float = Field(default=10.0, ge=0.0, le=100.0, allow_inf_nan=False)
     oms_paper_slippage_bps: float = Field(default=2.0, ge=0.0, le=100.0, allow_inf_nan=False)
+    # Phase 5b: "paper" runs the OMS in-process against the paper venue; "executor" sends
+    # permitted intents to the isolated executor (Binance testnet) over the private network.
+    oms_execution_backend: str = "paper"
+    executor_url: str | None = None
+    executor_api_token: str | None = None
     operator_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
     public_origin: str | None = None
@@ -145,6 +150,28 @@ class Settings(BaseSettings):
             raise ValueError("agent_effort must be low, medium, high, xhigh or max")
         return normalized
 
+    @field_validator("oms_execution_backend")
+    @classmethod
+    def enforce_oms_execution_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"paper", "executor"}:
+            raise ValueError("oms_execution_backend must be paper or executor")
+        return normalized
+
+    @model_validator(mode="after")
+    def enforce_executor_backend(self) -> Settings:
+        if self.oms_execution_backend != "executor":
+            return self
+        if not self.executor_url:
+            raise ValueError("EXECUTOR_URL is required with OMS_EXECUTION_BACKEND=executor")
+        token = self.executor_api_token or ""
+        if len(token) < _MIN_PRODUCTION_SECRET_LENGTH:
+            raise ValueError("EXECUTOR_API_TOKEN must be at least 32 characters")
+        # The executor verifies permits with the same key; an ephemeral key never matches.
+        if not self.risk_permit_signing_key:
+            raise ValueError("RISK_PERMIT_SIGNING_KEY is required with the executor backend")
+        return self
+
     @field_validator("live_market_source")
     @classmethod
     def enforce_live_market_source(cls, value: str) -> str:
@@ -169,6 +196,7 @@ class Settings(BaseSettings):
         "operator_api_token",
         "tradingview_webhook_secret",
         "risk_permit_signing_key",
+        "executor_api_token",
     )
     @classmethod
     def normalize_optional_secret(cls, value: str | None) -> str | None:

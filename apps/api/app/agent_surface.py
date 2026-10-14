@@ -34,7 +34,6 @@ from services.execution import Signal
 from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import REFERENCE_CAPITAL
 from services.execution.venue import Quote
-from services.oms import ManagedOrder
 from services.risk import RiskDecision
 
 from .event_state import JournalUnavailable, record_operational_event
@@ -169,7 +168,7 @@ def reset_agent_state() -> None:
 
 async def _evaluate(
     instrument_id: str,
-) -> tuple[AgentDecision, RiskDecision | None, ManagedOrder | None]:
+) -> tuple[AgentDecision, RiskDecision | None, dict | None]:
     """Pipeline -> Risk Engine permit -> paper OMS (when paper execution is enabled)."""
 
     await _refresh_portfolio(instrument_id)
@@ -239,6 +238,6 @@ async def evaluate_now(request: EvaluateRequest) -> dict[str, object]:
     return {
         "decision": decision.to_dict(),
         "risk": risk.to_dict() if risk is not None else None,
-        "order": order.to_dict() if order is not None else None,
+        "order": order,
         "evaluated_at": datetime.now(UTC).isoformat(),
     }

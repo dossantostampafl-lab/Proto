@@ -83,10 +83,7 @@ The fake verifies every signature and timestamp. The tests cover:
 - refusal of a LIVE adapter by the OMS;
 - credential redaction and file-backed secrets.
 
-## Next (Phase 5b)
+## Executor
 
-- **Isolated executor.** A separate process on the private OCI subnet holds the credentials and
-  runs the OMS and ledger with this adapter. The public API sends it intents and permits over the
-  private network.
-- **User-data stream.** A WebSocket stream for fills on resting orders.
-- **Reconciliation** of the testnet account.
+The adapter runs inside the isolated executor (`docs/executor/isolated-executor.md`). That is the
+only process that holds the credentials.

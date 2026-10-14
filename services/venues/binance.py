@@ -139,6 +139,12 @@ class BinanceSpotAdapter:
     def real_money_execution(self) -> bool:
         return self._credentials.environment is VenueEnvironment.LIVE
 
+    @property
+    def instruments(self) -> dict[str, TradableInstrument]:
+        """Grids loaded from exchangeInfo; the OMS must use exactly these."""
+
+        return dict(self._instruments)
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

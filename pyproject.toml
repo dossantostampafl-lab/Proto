@@ -33,7 +33,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["apps.api.app*", "services*"]
+include = ["apps.api.app*", "apps.executor*", "services*"]
 exclude = ["apps.web*", "engines*", "tests*"]
 namespaces = true
 
