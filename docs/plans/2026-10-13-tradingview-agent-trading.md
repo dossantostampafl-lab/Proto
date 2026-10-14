@@ -170,6 +170,11 @@ Qualquer falha rebaixa o caminho automaticamente para um estado mais seguro.
 - **Executor:** a liberação da parada passa pela API, como ação de operador.
 - **Runbooks:** `docs/runbooks/incident.md` e `docs/runbooks/rollback.md`.
 
+**Estado (Fase 7b, feita):**
+- **Promoção no Prometheus:** estágio, dias limpos, bloqueios do gate e violações por escopo. O alerta `ProtoScopeDemoted` dispara quando um escopo cai de estágio.
+- **Painel Grafana de segurança:** *Proto Safety*, só leitura, provisionado apenas na stack de trading. A stack live só-leitura não muda.
+- **Dinheiro real:** continua desligado. O painel mostra `proto_real_money_execution = 0`.
+
 ## Como vamos executar (skills)
 
 | Etapa | Skill |

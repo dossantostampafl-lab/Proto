@@ -99,3 +99,10 @@ journalctl -u proto-watchdog -f
 - **Alerts:** Prometheus scrapes `/v1/safety/metrics/prometheus` (`infra/monitoring/prometheus-trading.yml`). `ProtoWatchdogDown` fires after a
   minute without heartbeats, and `ProtoWatchdogTripped` on every halt
   (`infra/monitoring/safety-alerts.yml`, `docs/runbooks/incident.md`).
+- **Dashboard:** Grafana provisions *Proto Safety* (`infra/monitoring/grafana/dashboards-trading/proto-safety.json`)
+  in the trading stack only (`docker-compose.yml`, `provisioning-trading/`). It shows the watchdog, the kill
+  switches, the lockdown, journal integrity, `proto_real_money_execution` (always 0) and, per promotion scope,
+  the stage, clean days, open gate blockers and violations. It is read-only: halts and releases stay with the
+  operator API. The read-only live stack (`docker-compose.live.yml`) keeps its own provisioning.
+- **Promotion metrics:** `proto_promotion_stage` carries the stage as its value (0 RESEARCH … 5 LIVE), so the
+  series survives a promotion or demotion and `ProtoScopeDemoted` fires when it falls.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 from pathlib import Path
 
@@ -9,6 +11,9 @@ import httpx
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+
+from services.execution import ReleaseStage
+from services.promotion import PromotionRegistry, Scope
 
 WATCH = {"X-Proto-Watchdog-Token": "w" * 32}
 OPERATOR = {"X-Proto-Operator-Token": "o" * 32}
@@ -43,6 +48,29 @@ def metrics(client: TestClient) -> dict[str, float]:
     }
 
 
+SCOPE = Scope("acct", "BINANCE_SPOT", "hybrid-fusion-v1", "fusion-v1", "testnet")
+LABELS = (
+    'account="acct",venue="BINANCE_SPOT",strategy="hybrid-fusion-v1",'
+    'model="fusion-v1",credential="testnet"'
+)
+
+
+@pytest.fixture
+def scoped(api, monkeypatch):
+    """A registry with one scope in REPLAY, so the promotion series have a row."""
+
+    from apps.api.app import promotion_surface
+
+    registry = PromotionRegistry()
+    monkeypatch.setattr(promotion_surface, "registry", lambda: registry)
+    asyncio.run(registry.promote(SCOPE, ReleaseStage.REPLAY, operator=False, by="test"))
+    return registry
+
+
+def exported_names(client: TestClient) -> set[str]:
+    return {name.split("{")[0] for name in metrics(client)}
+
+
 def test_safety_metrics_follow_the_watchdog_and_the_halts(api) -> None:
     from apps.api.app import main
 
@@ -67,11 +95,23 @@ def test_safety_metrics_follow_the_watchdog_and_the_halts(api) -> None:
         assert metrics(client)["proto_global_kill_switch"] == 0
 
 
-def test_every_alert_reads_a_metric_that_is_exported(api) -> None:
+def test_promotion_metrics_follow_the_scope_stage(scoped) -> None:
     from apps.api.app import main
 
     with TestClient(main.app) as client:
-        exported = set(metrics(client))
+        replay = metrics(client)
+        assert replay[f"proto_promotion_stage{{{LABELS}}}"] == 1  # REPLAY
+        assert replay[f"proto_promotion_violations{{{LABELS}}}"] == 0
+        assert replay[f"proto_promotion_blockers{{{LABELS}}}"] >= 1  # no replay evidence yet
+        asyncio.run(scoped.demote(SCOPE, reason="test", by="operator"))
+        assert metrics(client)[f"proto_promotion_stage{{{LABELS}}}"] == 0  # RESEARCH
+
+
+def test_every_alert_reads_a_metric_that_is_exported(scoped) -> None:
+    from apps.api.app import main
+
+    with TestClient(main.app) as client:
+        exported = exported_names(client)
     rules = yaml.safe_load(Path("infra/monitoring/safety-alerts.yml").read_text())["groups"][0][
         "rules"
     ]
@@ -83,7 +123,39 @@ def test_every_alert_reads_a_metric_that_is_exported(api) -> None:
         "ProtoWatchdogTripped",
         "ProtoLockdownLatched",
         "ProtoJournalInvalid",
+        "ProtoScopeDemoted",
     }
+
+
+def test_the_safety_dashboard_reads_only_exported_metrics(scoped) -> None:
+    from apps.api.app import main
+
+    with TestClient(main.app) as client:
+        exported = exported_names(client)
+    dashboard = json.loads(
+        Path("infra/monitoring/grafana/dashboards-trading/proto-safety.json").read_text()
+    )
+    exprs = [t["expr"] for p in dashboard["panels"] for t in p["targets"]]
+    used = {n for e in exprs for n in re.findall(r"\bproto_[a-z_]+", e)}
+    assert used and used <= exported, used - exported
+    assert {"proto_real_money_execution", "proto_promotion_stage"} <= used
+    assert dashboard["editable"] is False  # read-only: no buttons, no writes
+
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text())["services"]["grafana"]
+    assert (
+        "./infra/monitoring/grafana/provisioning-trading:/etc/grafana/provisioning:ro"
+        in compose["volumes"]
+    )
+    providers = yaml.safe_load(
+        Path("infra/monitoring/grafana/provisioning-trading/dashboards/default.yml").read_text()
+    )["providers"]
+    paths = {p["options"]["path"] for p in providers}
+    assert paths == {"/var/lib/grafana/dashboards", "/var/lib/grafana/dashboards-trading"}
+    mounts = {v.split(":")[1] for v in compose["volumes"]}
+    assert paths <= mounts
+    # The read-only live stack keeps its own provisioning and never sees the trading dashboard.
+    live = yaml.safe_load(Path("docker-compose.live.yml").read_text())["services"]["grafana"]
+    assert not any("trading" in v for v in live["volumes"])
 
 
 def test_prometheus_and_compose_wire_the_safety_job_and_the_watchdog() -> None:
