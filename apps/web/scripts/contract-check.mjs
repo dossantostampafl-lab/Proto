@@ -68,4 +68,16 @@ assert.match(code, /onclose/, "WebSocket loss must be handled with reconnect");
 // Motion is optional.
 assert.ok(files.some(([p, s]) => p.endsWith(".css") && s.includes("prefers-reduced-motion: reduce")), "reduced motion must be respected");
 
+
+// Trading-room presentation must derive its animation from actual station events,
+// never from a decorative looping animation or an image of fake market data.
+const floorScene = files.find(([p]) => p.endsWith("floorScene.tsx"))?.[1] ?? "";
+const floorView = files.find(([p]) => p.endsWith("Floor.tsx"))?.[1] ?? "";
+assert.match(floorScene, /<AgentOperator\b/, "trading-room agents must be rendered as live React scene elements");
+assert.match(floorScene, /data-activity=\{busy \? "working" : "idle"\}/, "visual agent work must track real station events");
+assert.match(floorView, /connected && \(activeAt\[s\]/, "agents must stop performing work when the floor stream disconnects");
+assert.match(floorScene, /market\.connected \? "LIVE PUBLIC" : "LAST KNOWN \/ REST"/, "screen must disclose a disconnected market stream");
+assert.doesNotMatch(floorScene, /shapeRendering="crispEdges"/, "new floor must not use pixel-art rendering");
+assert.doesNotMatch(floorScene, /<image\b|<img\b/, "trading room may not be a static generated picture");
+
 console.log(`frontend contracts: ok (${files.length} source files)`);
