@@ -247,7 +247,7 @@ step "5/5 Deploy (pull the image, start, health check)"
 for role in "${ROLES[@]}"; do
   if [ "${RESULT[$role.secrets]:-}" != ok ]; then RESULT[$role.deploy]="skipped"; continue; fi
   report="$(run "$role" 'sudo systemctl start proto-deploy.service; echo "rc=$?";
-    sudo podman ps --format "{{.Names}} {{.Status}}"; sudo journalctl -u proto-deploy -n 6 --no-pager -o cat' </dev/null)"
+    sudo podman ps --format "{{.Names}} {{.Status}}"; sudo journalctl -u proto-deploy -t proto-deploy -t systemd -n 40 --no-pager -o cat' </dev/null)"
   sed 's/^/    /' <<<"$report"
   if grep -q 'rc=0' <<<"$report"; then RESULT[$role.deploy]=running
   elif grep -qiE 'unauthorized|denied|manifest unknown' <<<"$report"; then

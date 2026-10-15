@@ -60,6 +60,9 @@ After=network-online.target proto-secrets.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/proto-deploy
+# podman leaves each container's conmon in this unit's cgroup. The default KillMode kills the whole
+# cgroup when the oneshot ends, which took the container down with it; only the script may die.
+KillMode=process
 EOF
 
 cat >/etc/systemd/system/proto-deploy.timer <<'EOF'

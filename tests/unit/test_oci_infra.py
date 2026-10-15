@@ -241,3 +241,18 @@ def test_create_secrets_creates_what_an_empty_list_reports_as_missing(tmp_path: 
         ["bash", script], env={**env, "PROTO_NO_PROMPT": "1"}, capture_output=True
     )
     assert quiet.returncode == 0 and b"missing proto-binance-testnet-key" in quiet.stdout
+
+
+def test_the_deploy_unit_leaves_the_containers_running_and_failures_show_their_cause() -> None:
+    bootstrap = (OCI / "deploy/bootstrap.sh").read_text()
+    unit = bootstrap.split("proto-deploy.service <<'EOF'", 1)[1].split("EOF", 1)[0]
+    # The default KillMode killed conmon (and the container) when the oneshot ended.
+    assert "KillMode=process" in unit
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    failure = deploy.split("if healthy; then", 1)[1]
+    assert "show_logs" in failure
+    show = deploy.split("show_logs() {", 1)[1].split("\n}\n", 1)[0]
+    assert '"***"' in show and '"$secrets"' in show and "-db.env" in show
+    # setup.sh shows only the script's and systemd's lines, never the raw container output.
+    setup = (OCI / "deploy/setup.sh").read_text()
+    assert "journalctl -u proto-deploy -t proto-deploy -t systemd" in setup

@@ -83,6 +83,21 @@ start() {  # start <image id>
   esac
 }
 
+# The container's last lines, with every secret value of this role replaced: a failed start shows
+# its cause in the journal (and in setup.sh) without printing a credential.
+show_logs() {
+  podman logs --tail 30 "proto-${role}" 2>&1 | python3 -c '
+import os, sys
+values = [l.split("=", 1)[1].strip() for f in sys.argv[1:] if os.path.exists(f)
+          for l in open(f) if "=" in l]
+for line in sys.stdin:
+    for v in values:
+        if len(v) >= 8:
+            line = line.replace(v, "***")
+    sys.stdout.write("  | " + line)
+' "$secrets" "/run/proto/${role}-db.env" || true
+}
+
 healthy() {
   local url
   case "$role" in
@@ -134,6 +149,8 @@ if healthy; then
   exit 0
 fi
 
+log "revision $(revision "$new") is not healthy; its last lines:"
+show_logs
 previous="$(cat "$state/good-image" 2>/dev/null || true)"
 if [ -n "$previous" ] && [ "$previous" != "$new" ] && podman image exists "$previous"; then
   log "revision $(revision "$new") failed its health check; back to $(revision "$previous")"
