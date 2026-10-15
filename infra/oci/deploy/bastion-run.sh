@@ -45,10 +45,21 @@ session="$(oci bastion session create-port-forwarding --bastion-id "$bastion" \
 [ "$(oci bastion session get --session-id "$session" --query 'data."lifecycle-state"' \
   --raw-output)" = ACTIVE ] || { echo "the Bastion session did not become active" >&2; exit 1; }
 
-proxy="ssh -i $key -o StrictHostKeyChecking=accept-new -W %h:%p -p 22 ${session}@host.bastion.${region}.oci.oraclecloud.com"
+opts="-i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
+proxy="ssh $opts -W %h:%p -p 22 ${session}@host.bastion.${region}.oci.oraclecloud.com"
 ssh_to() {
-  ssh -i "$key" -o StrictHostKeyChecking=accept-new -o ProxyCommand="$proxy" "opc@$ip" "$@"
+  # shellcheck disable=SC2086
+  ssh $opts -o ProxyCommand="$proxy" "opc@$ip" "$@"
 }
+
+# A new session reads ACTIVE before the Bastion accepts its key ("Permission denied (publickey)"
+# for up to a minute or two), so wait until a no-op connection gets through.
+for attempt in $(seq 12); do
+  ssh_to true 2>/dev/null && break
+  [ "$attempt" = 12 ] && { echo "still refused: retry, and check that ~/.ssh/proto.pub is the key the instance was created with" >&2; exit 1; }
+  echo "waiting for the Bastion to accept the key ($attempt/12)..."
+  sleep 15
+done
 
 case "$action" in
   bootstrap)
