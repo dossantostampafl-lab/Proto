@@ -81,6 +81,11 @@ Then, in the console, go to Developer Services → Resource Manager → Stacks �
 2. **Apply**.
 3. Read the outputs on the job's **Outputs** tab.
 
+If the apply fails only with `Out of host capacity`, pin the fault domain of an instance that was
+just shrunk, so the new instances land where it freed capacity. Find it with
+`oci compute instance list --compartment-id $OCI_TENANCY --query 'data[].{n:"display-name",fd:"fault-domain"}'`,
+then add `"fault_domain": "FAULT-DOMAIN-N"` to the stack variables.
+
 The operator CIDR is Cloud Shell's current egress IP. If Bastion refuses a later session, update
 `operator_cidrs` in the stack's variables and apply again. `create_mt5 = false` leaves the billed
 Windows VM out until the XP path starts.

@@ -54,6 +54,7 @@ resource "oci_core_instance" "api" {
   count               = var.create_api ? 1 : 0
   compartment_id      = var.compartment_ocid
   availability_domain = local.ad
+  fault_domain        = var.fault_domain
   display_name        = "${local.name}-api"
   shape               = var.a1_shape
   freeform_tags       = local.tags
@@ -92,6 +93,7 @@ resource "oci_core_instance" "api" {
 resource "oci_core_instance" "executor" {
   compartment_id      = var.compartment_ocid
   availability_domain = local.ad
+  fault_domain        = var.fault_domain
   display_name        = "${local.name}-executor"
   shape               = var.a1_shape
   freeform_tags       = local.tags
@@ -131,6 +133,7 @@ resource "oci_core_instance" "executor" {
 resource "oci_core_instance" "watchdog" {
   compartment_id      = var.compartment_ocid
   availability_domain = local.ad
+  fault_domain        = var.fault_domain
   display_name        = "${local.name}-watchdog"
   shape               = var.watchdog_shape
   freeform_tags       = local.tags
@@ -175,6 +178,7 @@ resource "oci_core_instance" "mt5" {
   count               = var.create_mt5 ? 1 : 0
   compartment_id      = var.compartment_ocid
   availability_domain = local.ad
+  fault_domain        = var.fault_domain
   display_name        = "${local.name}-mt5"
   shape               = var.mt5_shape
   freeform_tags       = local.tags

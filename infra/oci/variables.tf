@@ -147,3 +147,11 @@ variable "mt5_bridge_port" {
   type        = number
   default     = 8200
 }
+
+# Optional placement. "Out of host capacity" on Always Free Arm often means Oracle looked on full
+# hosts; pinning the fault domain of an instance that just shrank (for example The Creation) lands
+# the new ones where capacity was freed. null lets Oracle choose.
+variable "fault_domain" {
+  type    = string
+  default = null
+}
