@@ -158,3 +158,10 @@ def test_the_bastion_can_reach_the_instances_and_nothing_enters_by_security_list
     rules = block(network, "oci_core_security_list", "bastion_egress")
     assert "egress_security_rules" in rules and "ingress_security_rules" not in rules
     assert "ssh = 22, rdp = 3389" in rules and "destination      = var.vcn_cidr" in rules
+
+
+def test_secret_policy_has_one_flat_statement_per_secret() -> None:
+    policy = block(tf("iam.tf"), "oci_identity_policy", "secrets")
+    assert "for s in local.secrets[each.key]" in policy
+    assert "any {" not in policy  # nested conditions returned 404 on every read
+    assert "target.vault.id = '%s', target.secret.name = '%s'" in policy

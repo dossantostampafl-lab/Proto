@@ -26,13 +26,15 @@ resource "oci_identity_policy" "secrets" {
   name           = "${local.name}-${each.key}-secrets"
   description    = "PROTO ${each.key}: read its own secrets in the PROTO vault, nothing else"
   freeform_tags  = local.tags
+  # One statement per secret, each a flat "all" of the vault and the name. A nested
+  # all { ..., any { ... } } was accepted, but every read under it returned 404.
   statements = [
-    format(
-      "Allow dynamic-group %s to read secret-bundles in compartment id %s where all {target.vault.id = '%s', any {%s}}",
+    for s in local.secrets[each.key] : format(
+      "Allow dynamic-group %s to read secret-bundles in compartment id %s where all {target.vault.id = '%s', target.secret.name = '%s'}",
       oci_identity_dynamic_group.role[each.key].name,
       var.compartment_ocid,
       oci_kms_vault.proto.id,
-      join(", ", [for s in local.secrets[each.key] : "target.secret.name = '${s}'"]),
-    ),
+      s,
+    )
   ]
 }
