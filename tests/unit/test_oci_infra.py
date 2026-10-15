@@ -185,3 +185,53 @@ def test_setup_never_reads_a_secret_value_and_never_applies_a_destroy() -> None:
     assert '\\"content-type\\"' in setup and '\\"content\\"' not in setup
     assert "0 to destroy" in setup and "nothing applied" in setup
     assert "oci iam policy delete" in setup  # the temporary test policy never stays
+
+
+def test_create_secrets_creates_what_an_empty_list_reports_as_missing(tmp_path: Path) -> None:
+    """The OCI CLI prints nothing for an empty list; a count check read that as 'exists'."""
+    import base64
+    import json
+    import os
+    import subprocess
+
+    store, fake = tmp_path / "store", tmp_path / "bin"
+    store.mkdir()
+    fake.mkdir()
+    (fake / "oci").write_text(
+        "#!/usr/bin/env python3\n"
+        "import base64, json, os, sys\n"
+        "store = os.environ['FAKE_STORE']; a = sys.argv[1:]\n"
+        "if a[:3] == ['vault', 'secret', 'list']:\n"
+        "    if os.path.exists(os.path.join(store, a[a.index('--name') + 1])):\n"
+        "        print('ocid1.vaultsecret.oc1..x')\n"
+        "    sys.exit(0)  # empty list: no output at all, like the real CLI\n"
+        "req = json.load(open(a[a.index('--from-json') + 1][7:]))\n"
+        "path = os.path.join(store, req['secretName'])\n"
+        "open(path, 'w').write(base64.b64decode(req['secretContentContent']).decode())\n"
+    )
+    (fake / "oci").chmod(0o755)
+    (tmp_path / "vars.json").write_text(json.dumps({"compartment_ocid": "ocid1.compartment.x"}))
+    (tmp_path / "state.json").write_text(
+        json.dumps({"outputs": {"vault_id": {"value": "v"}, "secrets_key_id": {"value": "k"}}})
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{fake}:{os.environ['PATH']}",
+        "FAKE_STORE": str(store),
+        "PROTO_VARS": str(tmp_path / "vars.json"),
+        "PROTO_TFSTATE": str(tmp_path / "state.json"),
+    }
+    script = str(OCI / "scripts/create-secrets.sh")
+    run = subprocess.run(
+        ["setsid", "bash", script], env=env, stdin=subprocess.DEVNULL, capture_output=True
+    )
+    assert run.returncode == 0, run.stderr
+    created = {p.name for p in store.iterdir()}
+    assert len(created) == 10 and "proto-permit-private-key" in created
+    assert not any(name.startswith("proto-binance") for name in created)  # typed by the operator
+    private = base64.b64decode((store / "proto-permit-private-key").read_text())
+    assert len(private) == 32
+    again = subprocess.run(
+        ["setsid", "bash", script], env=env, stdin=subprocess.DEVNULL, capture_output=True
+    )
+    assert again.returncode == 0 and b"created" not in again.stdout

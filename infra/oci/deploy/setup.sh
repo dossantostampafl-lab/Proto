@@ -5,11 +5,13 @@
 #
 # 1. Syncs the Resource Manager stack with the repository and applies it, unless the plan would
 #    destroy or replace something: then it stops and applies nothing.
-# 2. Bootstraps each instance over the Bastion (bootstrap.sh), retrying the Bastion's slow start.
-# 3. Checks that each instance reads its own secrets. If one cannot, it tests the policy forms of
+# 2. Creates the Vault secrets that are missing (create-secrets.sh); asks only for the Binance
+#    testnet key and secret, on the terminal, the first time.
+# 3. Bootstraps each instance over the Bastion (bootstrap.sh), retrying the Bastion's slow start.
+# 4. Checks that each instance reads its own secrets. If one cannot, it tests the policy forms of
 #    iam.tf (secret_policy_mode) with a temporary policy, keeps the first that reads and applies
 #    it through the stack. Every form keeps the per-secret restriction.
-# 4. Runs the deploy on each instance and reports what is running.
+# 5. Runs the deploy on each instance and reports what is running.
 # Prints no secret value. Reads ~/proto-vars.json and ~/.ssh/proto; logs to ~/proto-setup.log.
 set -uo pipefail
 
@@ -103,11 +105,16 @@ stack_apply() {
   oci_retry resource-manager stack get-stack-tf-state --stack-id "$STACK" --file "$STATE" >/dev/null
 }
 
-step "1/4 Stack (Resource Manager)"
+step "1/5 Stack (Resource Manager)"
 stack_apply || die "the stack could not be synced"
 BASTION="$(out bastion_id)"; VAULT="$(out vault_id)"
 EXECUTOR_IP="$(out private_ips executor)"; API_IP="$(out private_ips api)"
 DOMAIN="$(var domain)"
+
+# --- 2. Secrets in the Vault -------------------------------------------------------------------
+step "2/5 Secrets in the Vault (created once, values never shown)"
+PROTO_VARS="$VARS" PROTO_TFSTATE="$STATE" bash "$REPO/infra/oci/scripts/create-secrets.sh" \
+  || die "the secrets could not be created"
 
 # --- Bastion -----------------------------------------------------------------------------------
 SSH_OPTS=(-i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20
@@ -138,8 +145,8 @@ run() {  # run <role> <command>: reopens the session once if SSH itself fails (e
   return "$rc"
 }
 
-# --- 2. Bootstrap ------------------------------------------------------------------------------
-step "2/4 Bootstrap (podman, Vault reader, deploy timer)"
+# --- 3. Bootstrap ------------------------------------------------------------------------------
+step "3/5 Bootstrap (podman, Vault reader, deploy timer)"
 for role in "${ROLES[@]}"; do
   ok=false
   for attempt in 1 2 3; do
@@ -155,7 +162,7 @@ for role in "${ROLES[@]}"; do
   note "$role: bootstrap ${RESULT[$role.bootstrap]}"
 done
 
-# --- 3. Secrets --------------------------------------------------------------------------------
+# --- 4. Secrets --------------------------------------------------------------------------------
 can_read() {  # prints nothing of the secret: only its content type
   run "$1" "oci secrets secret-bundle get-secret-bundle-by-name --auth instance_principal \
     --vault-id $VAULT --secret-name $2 --query 'data.\"secret-bundle-content\".\"content-type\"' \
@@ -204,7 +211,7 @@ find_policy_mode() {  # find_policy_mode <role>: prints the first form under whi
   echo "$found"
 }
 
-step "3/4 Secrets from the Vault"
+step "4/5 Secrets read by each instance"
 old="$(oci iam policy list --compartment-id "$COMP" --name proto-setup-test --query 'data[0].id' --raw-output 2>/dev/null)"
 [ -n "$old" ] && oci iam policy delete --policy-id "$old" --force >/dev/null 2>&1
 # A policy changed by the stack apply above can take a minute or two to reach the instances.
@@ -223,8 +230,8 @@ if ! check_secrets && { note "waiting 2 min for IAM to propagate, then checking 
   fi
 fi
 
-# --- 4. Deploy ---------------------------------------------------------------------------------
-step "4/4 Deploy (pull the image, start, health check)"
+# --- 5. Deploy ---------------------------------------------------------------------------------
+step "5/5 Deploy (pull the image, start, health check)"
 for role in "${ROLES[@]}"; do
   if [ "${RESULT[$role.secrets]:-}" != ok ]; then RESULT[$role.deploy]="skipped"; continue; fi
   report="$(run "$role" 'sudo systemctl start proto-deploy.service; echo "rc=$?";
