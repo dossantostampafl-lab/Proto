@@ -78,6 +78,15 @@ uvicorn apps.executor.main:app --port 8100   # executor (needs EXECUTOR_* and PR
 - **Bundle budget.** At most 450 KB per JS file and 700 KB loaded up front. The live 3D floor
   (three.js) is the one on-demand chunk: at most 1.2 MB, never preloaded, 2 MB of assets in total.
 
+## PRAGMA-CORE 2.0
+
+@docs/pragma/PRAGMA-CORE.md
+
+The contract above is imported for efficiency and reporting only; `AGENTS.md` still wins on any
+conflict. Project skills `pragma-debug`, `pragma-feature`, `pragma-audit`, `pragma-delivery` and
+`pragma-benchmark` live in `.claude/skills/` (mirrored for Codex in `.agents/skills/`); invoke
+them only when the task matches. Templates: `docs/pragma/`.
+
 ## Skills and plugins
 
 `.claude/settings.json` registers two plugin marketplaces and turns the plugins on for everyone who

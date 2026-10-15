@@ -1,0 +1,1 @@
+versao,tarefa,execucao,modelo,ambiente,criterios_ok,tokens_input_nao_cache,tokens_cache_leitura,tokens_cache_escrita,tokens_output,chamadas_llm,subagentes,chamadas_ferramentas,latencia_segundos,custo_estimado_usd,regressoes,observacoes
