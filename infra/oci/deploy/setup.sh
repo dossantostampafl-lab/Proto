@@ -50,6 +50,23 @@ out() {
     "$STATE" "$@"
 }
 
+# Oracle throttles bursts of API calls (429 TooManyRequests), Resource Manager jobs above all.
+# oci_retry waits and tries again on 429 only; any other error is returned as is.
+oci_retry() {
+  local i rc err out
+  err="$(mktemp)"
+  for i in 1 2 3 4 5 6; do
+    out="$(oci "$@" 2>"$err")"; rc=$?
+    if [ "$rc" = 0 ]; then rm -f "$err"; printf '%s' "$out"; return 0; fi
+    if grep -qE 'TooManyRequests|"status": 429' "$err"; then
+      echo "  Oracle asked to slow down (429); waiting $((i * 30)) s" >&2
+      sleep $((i * 30)); continue
+    fi
+    break
+  done
+  cat "$err" >&2; rm -f "$err"; return "$rc"
+}
+
 COMP="$(var compartment_ocid)"
 REGION="$(var region)"; REGION="${REGION:-sa-valparaiso-1}"
 STACK="$(oci resource-manager stack list --compartment-id "$COMP" --display-name proto \
@@ -57,16 +74,16 @@ STACK="$(oci resource-manager stack list --compartment-id "$COMP" --display-name
 [ -n "$STACK" ] || die "stack 'proto' not found in the compartment"
 
 # --- 1. Stack ----------------------------------------------------------------------------------
-job_state() { oci resource-manager job get --job-id "$1" --query 'data."lifecycle-state"' --raw-output; }
+job_state() { oci_retry resource-manager job get --job-id "$1" --query 'data."lifecycle-state"' --raw-output; }
 stack_apply() {
   (cd "$REPO/infra/oci" && rm -f "$HOME/proto-oci.zip" \
     && zip -qr "$HOME/proto-oci.zip" . -x '.terraform/*' '*.tfstate*' 'terraform.tfvars') || return 1
-  oci resource-manager stack update --stack-id "$STACK" --config-source "$HOME/proto-oci.zip" \
+  oci_retry resource-manager stack update --stack-id "$STACK" --config-source "$HOME/proto-oci.zip" \
     --variables "file://$VARS" --force >/dev/null || return 1
   local plan log summary apply
-  plan="$(oci resource-manager job create-plan-job --stack-id "$STACK" --display-name setup-plan \
+  plan="$(oci_retry resource-manager job create-plan-job --stack-id "$STACK" --display-name setup-plan \
     --wait-for-state SUCCEEDED --wait-for-state FAILED --query data.id --raw-output)" || return 1
-  log="$(oci resource-manager job get-job-logs-content --job-id "$plan" --query data --raw-output)"
+  log="$(oci_retry resource-manager job get-job-logs-content --job-id "$plan" --query data --raw-output)"
   if [ "$(job_state "$plan")" != SUCCEEDED ]; then
     grep -iE 'error' <<<"$log" | tail -5; return 1
   fi
@@ -77,13 +94,13 @@ stack_apply() {
     grep -E 'will be|must be replaced' <<<"$log" | sed 's/^.*# /    # /'
     note "$summary"
     grep -q ' 0 to destroy' <<<"$summary" || { note "the plan destroys or replaces resources: nothing applied"; return 2; }
-    apply="$(oci resource-manager job create-apply-job --stack-id "$STACK" --display-name setup-apply \
+    apply="$(oci_retry resource-manager job create-apply-job --stack-id "$STACK" --display-name setup-apply \
       --execution-plan-strategy FROM_PLAN_JOB_ID --execution-plan-job-id "$plan" \
       --wait-for-state SUCCEEDED --wait-for-state FAILED --query data.id --raw-output)" || return 1
     [ "$(job_state "$apply")" = SUCCEEDED ] || { note "apply failed (Resource Manager > job setup-apply)"; return 1; }
     note "applied"
   fi
-  oci resource-manager stack get-stack-tf-state --stack-id "$STACK" --file "$STATE" >/dev/null
+  oci_retry resource-manager stack get-stack-tf-state --stack-id "$STACK" --file "$STATE" >/dev/null
 }
 
 step "1/4 Stack (Resource Manager)"
@@ -102,7 +119,7 @@ on() {  # on <role> <command>: one SSH command through the role's current Bastio
 }
 open_session() {  # a new session reads ACTIVE before the Bastion accepts its key; wait for that
   local role="$1" i
-  SESSION[$role]="$(oci bastion session create-port-forwarding --bastion-id "$BASTION" \
+  SESSION[$role]="$(oci_retry bastion session create-port-forwarding --bastion-id "$BASTION" \
     --display-name "proto-setup-$role" --target-private-ip "$(out private_ips "$role")" --target-port 22 \
     --ssh-public-key-file "$KEY.pub" --session-ttl 10800 --wait-for-state SUCCEEDED --wait-for-state FAILED \
     --wait-interval-seconds 5 --query 'data.resources[0].identifier' --raw-output)" || return 1
@@ -174,7 +191,7 @@ find_policy_mode() {  # find_policy_mode <role>: prints the first form under whi
   sid="$(oci vault secret list --compartment-id "$COMP" --vault-id "$VAULT" --name "$name" \
     --lifecycle-state ACTIVE --query 'data[0].id' --raw-output)"
   for mode in dg_vault_name dg_name dg_id principal_name principal_id; do
-    pid="$(oci iam policy create --compartment-id "$COMP" --name proto-setup-test \
+    pid="$(oci_retry iam policy create --compartment-id "$COMP" --name proto-setup-test \
       --description "temporary: setup.sh policy test" \
       --statements "$(policy_statement "$mode" "proto-$role" "$COMP" "$VAULT" "$name" "$sid" "$inst")" \
       --query data.id --raw-output 2>/dev/null)" || continue
