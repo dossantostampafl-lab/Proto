@@ -31,6 +31,12 @@ data "oci_core_images" "windows" {
 }
 
 locals {
+  # An instance created by hand (from the console, when Arm capacity was scarce) is adopted by
+  # its OCID instead of being created here, so Terraform never replaces it.
+  executor_id = coalesce(var.executor_instance_id, one(oci_core_instance.executor[*].id))
+  watchdog_id = coalesce(var.watchdog_instance_id, one(oci_core_instance.watchdog[*].id))
+  api_id      = var.create_api ? coalesce(var.api_instance_id, one(oci_core_instance.api[*].id)) : null
+
   ad           = data.oci_identity_availability_domains.ads.availability_domains[0].name
   linux_image  = data.oci_core_images.oracle_linux_arm.images[0].id
   fetch_script = base64encode(file("${path.module}/scripts/fetch-secrets.sh"))
@@ -51,7 +57,7 @@ locals {
 
 # Public API + dashboard. Only 443 is open to the internet (nsg.tf); TLS terminates on it.
 resource "oci_core_instance" "api" {
-  count               = var.create_api ? 1 : 0
+  count               = var.create_api && var.api_instance_id == null ? 1 : 0
   compartment_id      = var.compartment_ocid
   availability_domain = local.ad
   fault_domain        = var.fault_domain
@@ -91,6 +97,7 @@ resource "oci_core_instance" "api" {
 
 # The only process with venue credentials. No public IP, ever.
 resource "oci_core_instance" "executor" {
+  count               = var.executor_instance_id == null ? 1 : 0
   compartment_id      = var.compartment_ocid
   availability_domain = local.ad
   fault_domain        = var.fault_domain
@@ -131,6 +138,7 @@ resource "oci_core_instance" "executor" {
 
 # Independent watchdog: its own instance, halts only (docs/watchdog/watchdog.md).
 resource "oci_core_instance" "watchdog" {
+  count               = var.watchdog_instance_id == null ? 1 : 0
   compartment_id      = var.compartment_ocid
   availability_domain = local.ad
   fault_domain        = var.fault_domain

@@ -3,8 +3,8 @@
 
 locals {
   instance_ids = merge(
-    { executor = oci_core_instance.executor.id, watchdog = oci_core_instance.watchdog.id },
-    var.create_api ? { api = oci_core_instance.api[0].id } : {},
+    { executor = local.executor_id, watchdog = local.watchdog_id },
+    var.create_api ? { api = local.api_id } : {},
     var.create_mt5 ? { mt5 = oci_core_instance.mt5[0].id } : {},
   )
 }

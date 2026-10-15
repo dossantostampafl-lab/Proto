@@ -86,6 +86,12 @@ just shrunk, so the new instances land where it freed capacity. Find it with
 `oci compute instance list --compartment-id $OCI_TENANCY --query 'data[].{n:"display-name",fd:"fault-domain"}'`,
 then add `"fault_domain": "FAULT-DOMAIN-N"` to the stack variables.
 
+**When Arm capacity is scarce, create the instances by hand.** In the console, create each one
+(Compute → Create instance) on the existing `proto-vcn` subnet with its NSG, using the
+`Create instance without specifying a fault domain` retry. Then give the stack its OCID:
+`executor_instance_id`, `watchdog_instance_id` or `api_instance_id`. Terraform adopts it without
+replacing it, and wires its dynamic group and its Vault policy.
+
 The operator CIDR is Cloud Shell's current egress IP. If Bastion refuses a later session, update
 `operator_cidrs` in the stack's variables and apply again. `create_mt5 = false` leaves the billed
 Windows VM out until the XP path starts.

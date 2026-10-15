@@ -155,3 +155,20 @@ variable "fault_domain" {
   type    = string
   default = null
 }
+
+# Instances created by hand are adopted by OCID (Compute > Instances > the instance > OCID).
+# When set, Terraform does not create that instance; it only wires its IAM and outputs.
+variable "executor_instance_id" {
+  type    = string
+  default = null
+}
+
+variable "watchdog_instance_id" {
+  type    = string
+  default = null
+}
+
+variable "api_instance_id" {
+  type    = string
+  default = null
+}
