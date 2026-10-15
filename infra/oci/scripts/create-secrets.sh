@@ -90,7 +90,9 @@ ensure proto-executor-database-url db_url executor
 for name in proto-binance-testnet-key proto-binance-testnet-secret; do
   if exists "$name"; then echo "exists  $name"; continue; fi
   # The prompt reads the terminal, so it works even when this script is run from setup.sh.
-  if ! { exec 3</dev/tty; } 2>/dev/null; then echo "skipped $name: no terminal to type it"; continue; fi
+  if [ -n "${PROTO_NO_PROMPT:-}" ] || ! { exec 3</dev/tty; } 2>/dev/null; then
+    echo "missing $name: add it in the Vault console (runbook, 'Binance testnet key')"; continue
+  fi
   read -rsp "$name (testnet.binance.vision; Enter to skip for now): " value <&3; echo
   exec 3<&-
   if [ -z "$value" ]; then echo "skipped $name: run this script again once you have it"; continue; fi

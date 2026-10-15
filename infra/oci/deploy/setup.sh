@@ -5,8 +5,8 @@
 #
 # 1. Syncs the Resource Manager stack with the repository and applies it, unless the plan would
 #    destroy or replace something: then it stops and applies nothing.
-# 2. Creates the Vault secrets that are missing (create-secrets.sh); asks only for the Binance
-#    testnet key and secret, on the terminal, the first time.
+# 2. Creates the Vault secrets that are missing (create-secrets.sh). It asks for nothing: the
+#    Binance testnet key and secret are added once in the Vault console (see the runbook).
 # 3. Bootstraps each instance over the Bastion (bootstrap.sh), retrying the Bastion's slow start.
 # 4. Checks that each instance reads its own secrets. If one cannot, it tests the policy forms of
 #    iam.tf (secret_policy_mode) with a temporary policy, keeps the first that reads and applies
@@ -113,8 +113,17 @@ DOMAIN="$(var domain)"
 
 # --- 2. Secrets in the Vault -------------------------------------------------------------------
 step "2/5 Secrets in the Vault (created once, values never shown)"
-PROTO_VARS="$VARS" PROTO_TFSTATE="$STATE" bash "$REPO/infra/oci/scripts/create-secrets.sh" \
+# No prompt here: on a tablet, switching tabs to copy a key drops the Cloud Shell connection and
+# kills the script. The Binance testnet key and secret go in through the Vault console instead.
+PROTO_NO_PROMPT=1 PROTO_VARS="$VARS" PROTO_TFSTATE="$STATE" bash "$REPO/infra/oci/scripts/create-secrets.sh" \
   || die "the secrets could not be created"
+BINANCE_MISSING=false
+for name in proto-binance-testnet-key proto-binance-testnet-secret; do
+  id="$(oci_retry vault secret list --compartment-id "$COMP" --vault-id "$VAULT" --name "$name" \
+    --lifecycle-state ACTIVE --query 'data[0].id' --raw-output 2>/dev/null)"
+  [[ "$id" == ocid1.* ]] || BINANCE_MISSING=true
+done
+$BINANCE_MISSING && note "Binance testnet key/secret not in the Vault yet: the executor waits for them (docs/runbooks/oracle-setup.md, 'Binance testnet key')"
 
 # --- Bastion -----------------------------------------------------------------------------------
 SSH_OPTS=(-i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20
@@ -173,6 +182,10 @@ check_secrets() {
   local role all=true
   for role in "${ROLES[@]}"; do
     [ "${RESULT[$role.bootstrap]}" = ok ] || continue
+    if [ "$role" = executor ] && $BINANCE_MISSING; then
+      RESULT[$role.secrets]="needs Binance keys"; note "executor: waiting for the Binance testnet key and secret"
+      continue
+    fi
     if secrets_ok "$role"; then RESULT[$role.secrets]=ok; else RESULT[$role.secrets]=FAILED; all=false; fi
     note "$role: secrets ${RESULT[$role.secrets]}"
   done

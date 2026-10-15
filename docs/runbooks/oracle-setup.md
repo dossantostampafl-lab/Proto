@@ -150,7 +150,19 @@ Binance key.
 
 ## 4. Binance testnet key
 
-1. Create the key at testnet.binance.vision and save both halves as the two secrets above.
+1. Create the key at testnet.binance.vision (API Management, HMAC). Then add both halves in the
+   Vault **console**, not in Cloud Shell: on a tablet, switching tabs to copy a key drops the
+   Cloud Shell connection. In the console, go to Identity & Security → Vault, choose compartment
+   `proto`, then `proto-vault` → Secrets → **Create secret**, twice:
+
+   | Field | First secret | Second secret |
+   |---|---|---|
+   | Name | `proto-binance-testnet-key` | `proto-binance-testnet-secret` |
+   | Encryption key | `proto-secrets` | `proto-secrets` |
+   | Secret type template | Plain-Text | Plain-Text |
+   | Secret contents | the **API Key** | the **Secret Key** |
+
+   Then run `setup.sh` again; it deploys the executor once both exist.
 2. On the live account later, for the canary, the key must be restricted to `nat_egress_ip`
    and allow spot trading only, with no withdrawals, transfers, margin or futures. The live
    canary checks this at start (`verify_trade_only`).
@@ -178,8 +190,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/dossantostampafl-lab/Proto/m
 
 1. Syncs the stack with the repository and applies it. If the plan would destroy or replace
    anything, it stops and applies nothing.
-2. Creates the missing Vault secrets (`create-secrets.sh`). It asks only for the Binance
-   testnet key and secret, on the terminal, the first time.
+2. Creates the missing Vault secrets (`create-secrets.sh`). It asks for nothing; the Binance
+   testnet key and secret are added once in the Vault console (step 4).
 3. Bootstraps the three instances over the Bastion and retries while the Bastion warms up.
 4. Checks that each instance reads its own secrets. If one cannot, it tries the policy forms of
    `iam.tf` (`secret_policy_mode`) one at a time, each in a temporary policy that it deletes
