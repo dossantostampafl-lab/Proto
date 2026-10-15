@@ -19,16 +19,18 @@ resource "oci_identity_dynamic_group" "role" {
   freeform_tags  = local.tags
 }
 
+# "secret-family", not "secret-bundles": a read by name first looks the secret up, which needs the
+# secret's metadata too. With secret-bundles alone every form returned 404 (NotAuthorizedOrNotFound).
 # How each statement names the reader and the secret. Every mode keeps the per-secret restriction
 # (an instance never reads another role's secrets); they differ only in the policy variables used.
 # setup.sh tests them against the real tenancy and keeps the first that reads, in this order.
 locals {
   secret_policy_templates = {
-    dg_vault_name  = "Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where all {target.vault.id = '{vault}', target.secret.name = '{name}'}"
-    dg_name        = "Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where target.secret.name = '{name}'"
-    dg_id          = "Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where target.secret.id = '{id}'"
-    principal_name = "Allow any-user to read secret-bundles in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.name = '{name}'}"
-    principal_id   = "Allow any-user to read secret-bundles in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.id = '{id}'}"
+    dg_vault_name  = "Allow dynamic-group {dg} to read secret-family in compartment id {comp} where all {target.vault.id = '{vault}', target.secret.name = '{name}'}"
+    dg_name        = "Allow dynamic-group {dg} to read secret-family in compartment id {comp} where target.secret.name = '{name}'"
+    dg_id          = "Allow dynamic-group {dg} to read secret-family in compartment id {comp} where target.secret.id = '{id}'"
+    principal_name = "Allow any-user to read secret-family in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.name = '{name}'}"
+    principal_id   = "Allow any-user to read secret-family in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.id = '{id}'}"
   }
   secret_policy_by_id = endswith(var.secret_policy_mode, "_id")
 }

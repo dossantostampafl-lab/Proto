@@ -168,7 +168,8 @@ def test_every_secret_policy_form_keeps_the_per_secret_restriction() -> None:
     forms = dict(re.findall(r'^\s+(\w+)\s+= "(Allow [^"]+)"', iam, re.M))
     assert set(forms) == {"dg_vault_name", "dg_name", "dg_id", "principal_name", "principal_id"}
     for mode, statement in forms.items():
-        assert "read secret-bundles in compartment id {comp}" in statement, mode
+        # secret-bundles alone returned 404 on a read by name
+        assert "read secret-family in compartment id {comp}" in statement, mode
         assert "'{name}'" in statement or "'{id}'" in statement, mode  # never all secrets
         assert "any {" not in statement, mode  # the nested form returned 404 on every read
         if mode.startswith("principal"):

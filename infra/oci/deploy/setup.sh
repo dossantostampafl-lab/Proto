@@ -159,11 +159,11 @@ policy_statement() {  # same forms as iam.tf, for one role and one secret
 import json, sys
 mode, dg, comp, vault, name, sid, inst = sys.argv[1:]
 forms = {
-    "dg_vault_name": f"Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where all {{target.vault.id = '{vault}', target.secret.name = '{name}'}}",
-    "dg_name": f"Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where target.secret.name = '{name}'",
-    "dg_id": f"Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where target.secret.id = '{sid}'",
-    "principal_name": f"Allow any-user to read secret-bundles in compartment id {comp} where all {{request.principal.id = '{inst}', target.secret.name = '{name}'}}",
-    "principal_id": f"Allow any-user to read secret-bundles in compartment id {comp} where all {{request.principal.id = '{inst}', target.secret.id = '{sid}'}}",
+    "dg_vault_name": f"Allow dynamic-group {dg} to read secret-family in compartment id {comp} where all {{target.vault.id = '{vault}', target.secret.name = '{name}'}}",
+    "dg_name": f"Allow dynamic-group {dg} to read secret-family in compartment id {comp} where target.secret.name = '{name}'",
+    "dg_id": f"Allow dynamic-group {dg} to read secret-family in compartment id {comp} where target.secret.id = '{sid}'",
+    "principal_name": f"Allow any-user to read secret-family in compartment id {comp} where all {{request.principal.id = '{inst}', target.secret.name = '{name}'}}",
+    "principal_id": f"Allow any-user to read secret-family in compartment id {comp} where all {{request.principal.id = '{inst}', target.secret.id = '{sid}'}}",
 }
 print(json.dumps([forms[mode]]))
 PY
@@ -173,7 +173,7 @@ find_policy_mode() {  # find_policy_mode <role>: prints the first form under whi
   name="${FIRST_SECRET[$role]}"; inst="$(var "${role}_instance_id")"
   sid="$(oci vault secret list --compartment-id "$COMP" --vault-id "$VAULT" --name "$name" \
     --lifecycle-state ACTIVE --query 'data[0].id' --raw-output)"
-  for mode in dg_name dg_id principal_name principal_id; do
+  for mode in dg_vault_name dg_name dg_id principal_name principal_id; do
     pid="$(oci iam policy create --compartment-id "$COMP" --name proto-setup-test \
       --description "temporary: setup.sh policy test" \
       --statements "$(policy_statement "$mode" "proto-$role" "$COMP" "$VAULT" "$name" "$sid" "$inst")" \
@@ -190,7 +190,8 @@ find_policy_mode() {  # find_policy_mode <role>: prints the first form under whi
 step "3/4 Secrets from the Vault"
 old="$(oci iam policy list --compartment-id "$COMP" --name proto-setup-test --query 'data[0].id' --raw-output 2>/dev/null)"
 [ -n "$old" ] && oci iam policy delete --policy-id "$old" --force >/dev/null 2>&1
-if ! check_secrets; then
+# A policy changed by the stack apply above can take a minute or two to reach the instances.
+if ! check_secrets && { note "waiting 2 min for IAM to propagate, then checking again"; sleep 120; ! check_secrets; }; then
   for role in "${ROLES[@]}"; do [ "${RESULT[$role.secrets]:-}" = FAILED ] && break; done
   note "testing policy forms with $role (about 90 s each)..."
   mode="$(find_policy_mode "$role")"
