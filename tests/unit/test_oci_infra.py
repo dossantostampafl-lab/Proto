@@ -52,7 +52,10 @@ def test_no_secret_value_is_in_terraform_or_committed() -> None:
         if path.is_file() and ".terraform" not in path.parts:
             text = path.read_text(errors="ignore")
             assert not re.search(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", text), path
-            assert "oci_vault_secret" not in text, path  # values would land in the state
+            # A secret resource or a bundle read would put the value in the state. Listing the
+            # secrets' metadata (data "oci_vault_secrets", ids only) does not.
+            assert 'resource "oci_vault_secret"' not in text, path
+            assert "oci_secrets_secretbundle" not in text, path
     ignored = (OCI / ".gitignore").read_text()
     assert "terraform.tfvars" in ignored and "*.tfstate" in ignored
 
@@ -149,3 +152,87 @@ def test_instances_follow_their_tag_and_the_executor_stays_on_the_testnet() -> N
     assert "scripts/fetch-secrets.sh" in bootstrap
     for port in ("443 8000", "8100"):
         assert port in bootstrap
+
+
+def test_the_bastion_can_reach_the_instances_and_nothing_enters_by_security_list() -> None:
+    network = tf("network.tf")
+    private = block(network, "oci_core_subnet", "private")
+    assert "oci_core_security_list.bastion_egress.id" in private
+    rules = block(network, "oci_core_security_list", "bastion_egress")
+    assert "egress_security_rules" in rules and "ingress_security_rules" not in rules
+    assert "ssh = 22, rdp = 3389" in rules and "destination      = var.vcn_cidr" in rules
+
+
+def test_every_secret_policy_form_keeps_the_per_secret_restriction() -> None:
+    iam = tf("iam.tf")
+    forms = dict(re.findall(r'^\s+(\w+)\s+= "(Allow [^"]+)"', iam, re.M))
+    assert set(forms) == {"dg_name", "dg_id", "principal_name", "principal_id"}
+    for mode, statement in forms.items():
+        # Oracle: GetSecretBundleByName needs SECRET_BUNDLE_READ only
+        assert "read secret-bundles in compartment id {comp}" in statement, mode
+        assert "target.vault.id" not in statement, mode  # vaults only: never matches a bundle
+        assert "'{name}'" in statement or "'{id}'" in statement, mode  # never all secrets
+        assert "any {" not in statement, mode  # the nested form returned 404 on every read
+        if mode.startswith("principal"):
+            assert "request.principal.id = '{instance}'" in statement, mode
+    assert "for s in local.secrets[each.key]" in block(iam, "oci_identity_policy", "secrets")
+    setup = (OCI / "deploy/setup.sh").read_text()
+    for mode in forms:
+        assert f'"{mode}"' in setup, f"setup.sh does not know {mode}"
+
+
+def test_setup_never_reads_a_secret_value_and_never_applies_a_destroy() -> None:
+    setup = (OCI / "deploy/setup.sh").read_text()
+    assert '\\"content-type\\"' in setup and '\\"content\\"' not in setup
+    assert "0 to destroy" in setup and "nothing applied" in setup
+    assert "oci iam policy delete" in setup  # the temporary test policy never stays
+
+
+def test_create_secrets_creates_what_an_empty_list_reports_as_missing(tmp_path: Path) -> None:
+    """The OCI CLI prints nothing for an empty list; a count check read that as 'exists'."""
+    import base64
+    import json
+    import os
+    import subprocess
+
+    store, fake = tmp_path / "store", tmp_path / "bin"
+    store.mkdir()
+    fake.mkdir()
+    (fake / "oci").write_text(
+        "#!/usr/bin/env python3\n"
+        "import base64, json, os, sys\n"
+        "store = os.environ['FAKE_STORE']; a = sys.argv[1:]\n"
+        "if a[:3] == ['vault', 'secret', 'list']:\n"
+        "    if os.path.exists(os.path.join(store, a[a.index('--name') + 1])):\n"
+        "        print('ocid1.vaultsecret.oc1..x')\n"
+        "    sys.exit(0)  # empty list: no output at all, like the real CLI\n"
+        "req = json.load(open(a[a.index('--from-json') + 1][7:]))\n"
+        "path = os.path.join(store, req['secretName'])\n"
+        "open(path, 'w').write(base64.b64decode(req['secretContentContent']).decode())\n"
+    )
+    (fake / "oci").chmod(0o755)
+    (tmp_path / "vars.json").write_text(json.dumps({"compartment_ocid": "ocid1.compartment.x"}))
+    (tmp_path / "state.json").write_text(
+        json.dumps({"outputs": {"vault_id": {"value": "v"}, "secrets_key_id": {"value": "k"}}})
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{fake}:{os.environ['PATH']}",
+        "FAKE_STORE": str(store),
+        "PROTO_VARS": str(tmp_path / "vars.json"),
+        "PROTO_TFSTATE": str(tmp_path / "state.json"),
+    }
+    script = str(OCI / "scripts/create-secrets.sh")
+    run = subprocess.run(
+        ["setsid", "bash", script], env=env, stdin=subprocess.DEVNULL, capture_output=True
+    )
+    assert run.returncode == 0, run.stderr
+    created = {p.name for p in store.iterdir()}
+    assert len(created) == 10 and "proto-permit-private-key" in created
+    assert not any(name.startswith("proto-binance") for name in created)  # typed by the operator
+    private = base64.b64decode((store / "proto-permit-private-key").read_text())
+    assert len(private) == 32
+    again = subprocess.run(
+        ["setsid", "bash", script], env=env, stdin=subprocess.DEVNULL, capture_output=True
+    )
+    assert again.returncode == 0 and b"created" not in again.stdout

@@ -67,7 +67,7 @@ cat > ~/proto-vars.json <<JSON
   "region": "sa-valparaiso-1",
   "home_region": "sa-valparaiso-1",
   "ssh_public_key": "$(cat ~/.ssh/proto.pub)",
-  "operator_cidrs": "[\"$(curl -s ifconfig.me)/32\"]",
+  "operator_cidrs": "[\"0.0.0.0/0\"]",
   "create_mt5": "false"
 }
 JSON
@@ -92,8 +92,11 @@ then add `"fault_domain": "FAULT-DOMAIN-N"` to the stack variables.
 `executor_instance_id`, `watchdog_instance_id` or `api_instance_id`. Terraform adopts it without
 replacing it, and wires its dynamic group and its Vault policy.
 
-The operator CIDR is Cloud Shell's current egress IP. If Bastion refuses a later session, update
-`operator_cidrs` in the stack's variables and apply again. `create_mt5 = false` leaves the billed
+`operator_cidrs` is `0.0.0.0/0` because Cloud Shell reaches the Bastion from inside Oracle's
+network, not from the address `ifconfig.me` shows. An allowlist of that address makes the Bastion
+close every session right after authentication. Access still needs IAM rights to create a
+session and the session's own key; from a workstation with a fixed IP, a `/32` works.
+`create_mt5 = false` leaves the billed
 Windows VM out until the XP path starts.
 
 Terraform from a workstation with `~/.oci/config` works too:
@@ -161,6 +164,31 @@ Console → Identity & Security → Bastion → `protobastion` → **Create sess
 - **Windows:** a *Port forwarding session* to `10.20.2.20`, port `3389`. Then RDP to
   `localhost:<local port>`. The initial Administrator password is on the instance page
   (Instance access → Show initial credentials). Change it at first login.
+
+## One command (after step 2)
+
+Once the stack exists, one command in Cloud Shell does the rest, the secrets of step 3 included.
+It is safe to run again at any time:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/dossantostampafl-lab/Proto/main/infra/oci/deploy/setup.sh)
+```
+
+`infra/oci/deploy/setup.sh`:
+
+1. Syncs the stack with the repository and applies it. If the plan would destroy or replace
+   anything, it stops and applies nothing.
+2. Creates the missing Vault secrets (`create-secrets.sh`). It asks only for the Binance
+   testnet key and secret, on the terminal, the first time.
+3. Bootstraps the three instances over the Bastion and retries while the Bastion warms up.
+4. Checks that each instance reads its own secrets. If one cannot, it tries the policy forms of
+   `iam.tf` (`secret_policy_mode`) one at a time, each in a temporary policy that it deletes
+   afterwards. It keeps the first form that works and applies it through the stack. Every form
+   still restricts each instance to its own secret names.
+5. Runs the deploy on each instance and prints a summary table: role, bootstrap, secrets and
+   deploy.
+
+It never prints a secret value. The log is in `~/proto-setup.log`.
 
 ## 6. Deploy from GitHub
 

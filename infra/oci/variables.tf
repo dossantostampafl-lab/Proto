@@ -26,7 +26,7 @@ variable "ssh_public_key" {
 }
 
 variable "operator_cidrs" {
-  description = "Public CIDRs the operator connects from, allowed to open Bastion sessions (SSH, RDP)."
+  description = "CIDRs allowed to connect to the Bastion. From Cloud Shell use [\"0.0.0.0/0\"]: it reaches the Bastion from inside Oracle, not from its ifconfig.me address."
   type        = list(string)
 }
 
@@ -171,4 +171,15 @@ variable "watchdog_instance_id" {
 variable "api_instance_id" {
   type    = string
   default = null
+}
+
+# Policy variables used to restrict each instance to its own secrets (iam.tf). setup.sh picks the
+# first mode that the tenancy honours; all of them keep the per-secret restriction.
+variable "secret_policy_mode" {
+  type    = string
+  default = "dg_name"
+  validation {
+    condition     = contains(["dg_name", "dg_id", "principal_name", "principal_id"], var.secret_policy_mode)
+    error_message = "secret_policy_mode: dg_name, dg_id, principal_name or principal_id."
+  }
 }

@@ -24,15 +24,14 @@ print(v.get("region", "sa-valparaiso-1"), o["bastion_id"]["value"], o["vault_id"
 PY
 )
 
-# The Bastion admits only the CIDRs in operator_cidrs; Cloud Shell's address can change.
-me="$(curl -fsS https://ifconfig.me)"
+# Cloud Shell reaches the Bastion from inside Oracle's network, not from the address ifconfig.me
+# reports, so an allowlist of that address closes every session right after authentication.
+# Access rests on IAM (who may create a session) and the session's own key, not on the source IP.
 allowed="$(oci bastion bastion get --bastion-id "$bastion" \
   --query 'data."client-cidr-block-allow-list"' --raw-output)"
 case "$allowed" in
-  *"\"$me/32\""*) ;;
-  *) echo "Cloud Shell is at $me, but the Bastion allows $allowed." >&2
-     echo "Set operator_cidrs to [\"$me/32\"] in the stack variables and apply, then retry." >&2
-     exit 1 ;;
+  *'"0.0.0.0/0"'*) ;;
+  *) echo "note: the Bastion allows only $allowed; from Cloud Shell, operator_cidrs must be [\"0.0.0.0/0\"]" >&2 ;;
 esac
 
 echo "opening a Bastion session to $role ($ip)..."
@@ -45,10 +44,21 @@ session="$(oci bastion session create-port-forwarding --bastion-id "$bastion" \
 [ "$(oci bastion session get --session-id "$session" --query 'data."lifecycle-state"' \
   --raw-output)" = ACTIVE ] || { echo "the Bastion session did not become active" >&2; exit 1; }
 
-proxy="ssh -i $key -o StrictHostKeyChecking=accept-new -W %h:%p -p 22 ${session}@host.bastion.${region}.oci.oraclecloud.com"
+opts="-i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
+proxy="ssh $opts -W %h:%p -p 22 ${session}@host.bastion.${region}.oci.oraclecloud.com"
 ssh_to() {
-  ssh -i "$key" -o StrictHostKeyChecking=accept-new -o ProxyCommand="$proxy" "opc@$ip" "$@"
+  # shellcheck disable=SC2086
+  ssh $opts -o ProxyCommand="$proxy" "opc@$ip" "$@"
 }
+
+# A new session reads ACTIVE before the Bastion accepts its key ("Permission denied (publickey)"
+# for up to a minute or two), so wait until a no-op connection gets through.
+for attempt in $(seq 12); do
+  ssh_to true 2>/dev/null && break
+  [ "$attempt" = 12 ] && { echo "still refused: retry, and check that ~/.ssh/proto.pub is the key the instance was created with" >&2; exit 1; }
+  echo "waiting for the Bastion to accept the key ($attempt/12)..."
+  sleep 15
+done
 
 case "$action" in
   bootstrap)

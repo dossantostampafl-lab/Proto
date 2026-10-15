@@ -22,9 +22,13 @@ print(v["compartment_ocid"], o["vault_id"]["value"], o["secrets_key_id"]["value"
 PY
 )
 
+# A secret exists only when the list returns its OCID. The OCI CLI prints nothing at all for an
+# empty list (not "0", not "[]"), so a count-based check read every missing secret as present.
 exists() {
-  [ "$(oci vault secret list --compartment-id "$comp" --vault-id "$vault" --name "$1" \
-    --lifecycle-state ACTIVE --query 'length(data)' --raw-output 2>/dev/null || echo 0)" != "0" ]
+  local id
+  id="$(oci vault secret list --compartment-id "$comp" --vault-id "$vault" --name "$1" \
+    --lifecycle-state ACTIVE --query 'data[0].id' --raw-output 2>/dev/null)"
+  [[ "$id" == ocid1.* ]]
 }
 
 # put <name>: reads the value on stdin. The request goes to the CLI as a 0600 JSON file in a
@@ -85,7 +89,10 @@ ensure proto-executor-database-url db_url executor
 
 for name in proto-binance-testnet-key proto-binance-testnet-secret; do
   if exists "$name"; then echo "exists  $name"; continue; fi
-  read -rsp "$name (testnet.binance.vision; Enter to skip for now): " value; echo
+  # The prompt reads the terminal, so it works even when this script is run from setup.sh.
+  if ! { exec 3</dev/tty; } 2>/dev/null; then echo "skipped $name: no terminal to type it"; continue; fi
+  read -rsp "$name (testnet.binance.vision; Enter to skip for now): " value <&3; echo
+  exec 3<&-
   if [ -z "$value" ]; then echo "skipped $name: run this script again once you have it"; continue; fi
   printf '%s' "$value" | put "$name"
   unset value
