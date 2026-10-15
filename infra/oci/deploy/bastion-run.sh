@@ -24,15 +24,14 @@ print(v.get("region", "sa-valparaiso-1"), o["bastion_id"]["value"], o["vault_id"
 PY
 )
 
-# The Bastion admits only the CIDRs in operator_cidrs; Cloud Shell's address can change.
-me="$(curl -fsS https://ifconfig.me)"
+# Cloud Shell reaches the Bastion from inside Oracle's network, not from the address ifconfig.me
+# reports, so an allowlist of that address closes every session right after authentication.
+# Access rests on IAM (who may create a session) and the session's own key, not on the source IP.
 allowed="$(oci bastion bastion get --bastion-id "$bastion" \
   --query 'data."client-cidr-block-allow-list"' --raw-output)"
 case "$allowed" in
-  *"\"$me/32\""*) ;;
-  *) echo "Cloud Shell is at $me, but the Bastion allows $allowed." >&2
-     echo "Set operator_cidrs to [\"$me/32\"] in the stack variables and apply, then retry." >&2
-     exit 1 ;;
+  *'"0.0.0.0/0"'*) ;;
+  *) echo "note: the Bastion allows only $allowed; from Cloud Shell, operator_cidrs must be [\"0.0.0.0/0\"]" >&2 ;;
 esac
 
 echo "opening a Bastion session to $role ($ip)..."

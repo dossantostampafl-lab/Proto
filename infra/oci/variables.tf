@@ -26,7 +26,7 @@ variable "ssh_public_key" {
 }
 
 variable "operator_cidrs" {
-  description = "Public CIDRs the operator connects from, allowed to open Bastion sessions (SSH, RDP)."
+  description = "CIDRs allowed to connect to the Bastion. From Cloud Shell use [\"0.0.0.0/0\"]: it reaches the Bastion from inside Oracle, not from its ifconfig.me address."
   type        = list(string)
 }
 

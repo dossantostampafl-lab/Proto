@@ -67,7 +67,7 @@ cat > ~/proto-vars.json <<JSON
   "region": "sa-valparaiso-1",
   "home_region": "sa-valparaiso-1",
   "ssh_public_key": "$(cat ~/.ssh/proto.pub)",
-  "operator_cidrs": "[\"$(curl -s ifconfig.me)/32\"]",
+  "operator_cidrs": "[\"0.0.0.0/0\"]",
   "create_mt5": "false"
 }
 JSON
@@ -92,8 +92,11 @@ then add `"fault_domain": "FAULT-DOMAIN-N"` to the stack variables.
 `executor_instance_id`, `watchdog_instance_id` or `api_instance_id`. Terraform adopts it without
 replacing it, and wires its dynamic group and its Vault policy.
 
-The operator CIDR is Cloud Shell's current egress IP. If Bastion refuses a later session, update
-`operator_cidrs` in the stack's variables and apply again. `create_mt5 = false` leaves the billed
+`operator_cidrs` is `0.0.0.0/0` because Cloud Shell reaches the Bastion from inside Oracle's
+network, not from the address `ifconfig.me` shows. An allowlist of that address makes the Bastion
+close every session right after authentication. Access still needs IAM rights to create a
+session and the session's own key; from a workstation with a fixed IP, a `/32` works.
+`create_mt5 = false` leaves the billed
 Windows VM out until the XP path starts.
 
 Terraform from a workstation with `~/.oci/config` works too:
