@@ -165,6 +165,29 @@ Console → Identity & Security → Bastion → `protobastion` → **Create sess
   `localhost:<local port>`. The initial Administrator password is on the instance page
   (Instance access → Show initial credentials). Change it at first login.
 
+## One command (after steps 2 and 3)
+
+Once the stack exists and the secrets are in the Vault, one command in Cloud Shell does the rest.
+It is safe to run again at any time:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/dossantostampafl-lab/Proto/main/infra/oci/deploy/setup.sh)
+```
+
+`infra/oci/deploy/setup.sh`:
+
+1. Syncs the stack with the repository and applies it. If the plan would destroy or replace
+   anything, it stops and applies nothing.
+2. Bootstraps the three instances over the Bastion and retries while the Bastion warms up.
+3. Checks that each instance reads its own secrets. If one cannot, it tries the policy forms of
+   `iam.tf` (`secret_policy_mode`) one at a time, each in a temporary policy that it deletes
+   afterwards. It keeps the first form that works and applies it through the stack. Every form
+   still restricts each instance to its own secret names.
+4. Runs the deploy on each instance and prints a summary table: role, bootstrap, secrets and
+   deploy.
+
+It never prints a secret value. The log is in `~/proto-setup.log`.
+
 ## 6. Deploy from GitHub
 
 The deploy is pull-based. GitHub only publishes images and holds no Oracle credential, and each

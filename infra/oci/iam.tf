@@ -19,6 +19,29 @@ resource "oci_identity_dynamic_group" "role" {
   freeform_tags  = local.tags
 }
 
+# How each statement names the reader and the secret. Every mode keeps the per-secret restriction
+# (an instance never reads another role's secrets); they differ only in the policy variables used.
+# setup.sh tests them against the real tenancy and keeps the first that reads, in this order.
+locals {
+  secret_policy_templates = {
+    dg_vault_name  = "Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where all {target.vault.id = '{vault}', target.secret.name = '{name}'}"
+    dg_name        = "Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where target.secret.name = '{name}'"
+    dg_id          = "Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where target.secret.id = '{id}'"
+    principal_name = "Allow any-user to read secret-bundles in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.name = '{name}'}"
+    principal_id   = "Allow any-user to read secret-bundles in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.id = '{id}'}"
+  }
+  secret_policy_by_id = endswith(var.secret_policy_mode, "_id")
+}
+
+# Secret OCIDs, looked up by name, only for the modes that condition on the id. The secrets are
+# created outside Terraform (create-secrets.sh), so they must exist before such an apply.
+data "oci_vault_secrets" "by_name" {
+  for_each       = local.secret_policy_by_id ? toset(flatten(values(local.secrets))) : toset([])
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.proto.id
+  name           = each.key
+}
+
 resource "oci_identity_policy" "secrets" {
   provider       = oci.home
   for_each       = local.instance_ids
@@ -26,15 +49,16 @@ resource "oci_identity_policy" "secrets" {
   name           = "${local.name}-${each.key}-secrets"
   description    = "PROTO ${each.key}: read its own secrets in the PROTO vault, nothing else"
   freeform_tags  = local.tags
-  # One statement per secret, each a flat "all" of the vault and the name. A nested
-  # all { ..., any { ... } } was accepted, but every read under it returned 404.
+  # One flat statement per secret. A nested all { vault, any { names } } was accepted, but every
+  # read under it returned 404.
   statements = [
-    for s in local.secrets[each.key] : format(
-      "Allow dynamic-group %s to read secret-bundles in compartment id %s where all {target.vault.id = '%s', target.secret.name = '%s'}",
-      oci_identity_dynamic_group.role[each.key].name,
-      var.compartment_ocid,
-      oci_kms_vault.proto.id,
-      s,
-    )
+    for s in local.secrets[each.key] : replace(replace(replace(replace(replace(replace(
+      local.secret_policy_templates[var.secret_policy_mode],
+      "{dg}", oci_identity_dynamic_group.role[each.key].name),
+      "{comp}", var.compartment_ocid),
+      "{vault}", oci_kms_vault.proto.id),
+      "{name}", s),
+      "{id}", local.secret_policy_by_id ? data.oci_vault_secrets.by_name[s].secrets[0].id : ""),
+    "{instance}", each.value)
   ]
 }

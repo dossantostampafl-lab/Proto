@@ -52,7 +52,10 @@ def test_no_secret_value_is_in_terraform_or_committed() -> None:
         if path.is_file() and ".terraform" not in path.parts:
             text = path.read_text(errors="ignore")
             assert not re.search(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", text), path
-            assert "oci_vault_secret" not in text, path  # values would land in the state
+            # A secret resource or a bundle read would put the value in the state. Listing the
+            # secrets' metadata (data "oci_vault_secrets", ids only) does not.
+            assert 'resource "oci_vault_secret"' not in text, path
+            assert "oci_secrets_secretbundle" not in text, path
     ignored = (OCI / ".gitignore").read_text()
     assert "terraform.tfvars" in ignored and "*.tfstate" in ignored
 
@@ -160,8 +163,24 @@ def test_the_bastion_can_reach_the_instances_and_nothing_enters_by_security_list
     assert "ssh = 22, rdp = 3389" in rules and "destination      = var.vcn_cidr" in rules
 
 
-def test_secret_policy_has_one_flat_statement_per_secret() -> None:
-    policy = block(tf("iam.tf"), "oci_identity_policy", "secrets")
-    assert "for s in local.secrets[each.key]" in policy
-    assert "any {%s}" not in policy  # the nested form returned 404 on every read
-    assert "target.vault.id = '%s', target.secret.name = '%s'" in policy
+def test_every_secret_policy_form_keeps_the_per_secret_restriction() -> None:
+    iam = tf("iam.tf")
+    forms = dict(re.findall(r'^\s+(\w+)\s+= "(Allow [^"]+)"', iam, re.M))
+    assert set(forms) == {"dg_vault_name", "dg_name", "dg_id", "principal_name", "principal_id"}
+    for mode, statement in forms.items():
+        assert "read secret-bundles in compartment id {comp}" in statement, mode
+        assert "'{name}'" in statement or "'{id}'" in statement, mode  # never all secrets
+        assert "any {" not in statement, mode  # the nested form returned 404 on every read
+        if mode.startswith("principal"):
+            assert "request.principal.id = '{instance}'" in statement, mode
+    assert "for s in local.secrets[each.key]" in block(iam, "oci_identity_policy", "secrets")
+    setup = (OCI / "deploy/setup.sh").read_text()
+    for mode in forms:
+        assert f'"{mode}"' in setup, f"setup.sh does not know {mode}"
+
+
+def test_setup_never_reads_a_secret_value_and_never_applies_a_destroy() -> None:
+    setup = (OCI / "deploy/setup.sh").read_text()
+    assert '\\"content-type\\"' in setup and '\\"content\\"' not in setup
+    assert "0 to destroy" in setup and "nothing applied" in setup
+    assert "oci iam policy delete" in setup  # the temporary test policy never stays
