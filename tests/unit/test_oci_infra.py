@@ -116,3 +116,36 @@ def test_permit_pair_from_cloud_shell_matches_rfc8032_and_the_api() -> None:
         public = pair.public_key(seed)
         assert public == Ed25519PrivateKey.from_private_bytes(seed).public_key().public_bytes_raw()
         assert decode_key(base64.b64encode(public).decode()) == public
+
+
+def test_deploy_workflow_publishes_images_and_never_reaches_oracle() -> None:
+    import yaml
+
+    workflow = Path(".github/workflows/deploy.yml").read_text()
+    spec = yaml.safe_load(workflow)
+    # The only secret it may use is the job's own GITHUB_TOKEN, for GHCR.
+    assert set(re.findall(r"secrets\.(\w+)", workflow)) == {"GITHUB_TOKEN"}
+    assert not re.search(r"\b(oci|ssh|bastion)\b", workflow.split("jobs:", 1)[1], re.I)
+    triggers = spec.get("on", spec.get(True))
+    assert triggers["workflow_run"] == {
+        "workflows": ["CI"],
+        "types": ["completed"],
+        "branches": ["main"],
+    }
+    assert "conclusion == 'success'" in spec["jobs"]["image"]["if"]
+    # The executor's tag moves only through the approval-gated environment.
+    executor = spec["jobs"]["executor"]
+    assert executor["environment"] == "executor" and executor["needs"] == "image"
+    assert ":executor" not in yaml.safe_dump(spec["jobs"]["image"])
+
+
+def test_instances_follow_their_tag_and_the_executor_stays_on_the_testnet() -> None:
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    assert re.search(r"executor\) tag=executor ;;", deploy)
+    assert re.search(r"api \| watchdog\) tag=stable ;;", deploy)
+    assert "-e EXECUTOR_ENVIRONMENT=TESTNET" in deploy
+    assert "LIVE" not in deploy.replace("LIVE_", "")
+    bootstrap = (OCI / "deploy/bootstrap.sh").read_text()
+    assert "scripts/fetch-secrets.sh" in bootstrap
+    for port in ("443 8000", "8100"):
+        assert port in bootstrap

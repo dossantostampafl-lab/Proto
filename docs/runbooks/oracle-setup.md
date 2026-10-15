@@ -162,47 +162,55 @@ Console → Identity & Security → Bastion → `protobastion` → **Create sess
   `localhost:<local port>`. The initial Administrator password is on the instance page
   (Instance access → Show initial credentials). Change it at first login.
 
-## 6. Deploy on each Linux instance
+## 6. Deploy from GitHub
 
-Cloud-init already installed podman, git, the OCI CLI and the `proto-secrets` unit. Once the
-secrets exist:
+The deploy is pull-based. GitHub only publishes images and holds no Oracle credential, and each
+instance pulls its own tag on a timer. **Merging to `main` with green CI is the deploy.**
 
-```bash
-sudo systemctl start proto-secrets && sudo ls -l /run/proto   # <role>.env, 0600, in tmpfs
-git clone https://github.com/dossantostampafl-lab/Proto.git /opt/proto && cd /opt/proto
-sudo podman build -t proto .
+```text
+merge to main -> CI green -> Deploy workflow -> ghcr.io/<owner>/proto:stable ----> api, watchdog
+                                              \-> approval ("executor" environment) -> :executor -> executor
 ```
 
-- **Executor:**
+- `.github/workflows/deploy.yml` builds the arm64 image on a native Arm runner. It tags the
+  image `:sha-<commit>` and `:stable`.
+- The `executor` job moves `:executor` to the same digest only after an approval. The executor
+  holds the venue credentials, so its image never changes without an operator.
+- On each instance, `proto-deploy.timer` runs `proto-deploy` every 5 minutes:
+  1. It pulls the role's tag. When the image changed, or nothing is running, it restarts the
+     service.
+  2. It checks the service's health. A failing release goes back to the last healthy image.
+- Each service reads its secrets from `/run/proto/<role>.env` (tmpfs, step 3). Postgres gets
+  its password from the database URL secret. When `DOMAIN` is set, Caddy terminates TLS on 443
+  in front of the API.
 
-  ```bash
-  sudo podman run -d --name db --restart=always -e POSTGRES_USER=executor \
-    -e POSTGRES_PASSWORD=<same as in the URL> -p 127.0.0.1:5432:5432 docker.io/library/postgres:16
-  sudo podman run -d --name executor --restart=always --network host \
-    --env-file /run/proto/executor.env -e EXECUTOR_ENVIRONMENT=TESTNET -e EXECUTOR_ACCOUNT=main \
-    -e EXECUTOR_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT proto \
-    uvicorn apps.executor.main:app --host 10.20.2.10 --port 8100
-  ```
+### One-time setup
 
-  First check the keys with `python -m services.venues.binance_smoke`, from the same env file.
+1. **GitHub, repository settings:**
+   - *Environments* → **New environment** `executor` → **Required reviewers**: yourself.
+   - After the first Deploy run, open *Packages* → `proto` → *Package settings* → **Change
+     visibility** → Public. The image holds no secret: the code is public, and secrets come
+     from the Vault at run time.
+2. **Each instance, once, from Cloud Shell.** This installs podman, the OCI CLI, the firewall
+   rules, the secret unit and the deploy timer, over the Bastion (no public SSH):
 
-- **API:**
-  1. Run the image as in the README, with `--network host`, `--env-file /run/proto/api.env`,
-     `-e OMS_EXECUTION_BACKEND=executor`, `-e EXECUTOR_URL=http://10.20.2.10:8100` and
-     `-e PUBLIC_ORIGIN=https://<your domain>`. The NSG lets port 8000 in only from the watchdog.
-  2. Run its own Postgres the same way.
-  3. Put TLS in front with a reverse proxy on 443 (for example Caddy with your domain).
-- **Watchdog:**
+   ```bash
+   cd ~/Proto && git pull
+   oci resource-manager stack get-stack-tf-state --stack-id "$STACK" --file ~/proto.tfstate
+   bash infra/oci/deploy/bastion-run.sh bootstrap executor
+   bash infra/oci/deploy/bastion-run.sh bootstrap watchdog
+   bash infra/oci/deploy/bastion-run.sh bootstrap api            # or: ... bootstrap api <your domain>
+   ```
 
-  ```bash
-  sudo podman run -d --name watchdog --restart=always --network host --env-file /run/proto/watchdog.env \
-    -e WATCHDOG_ID=oci-watchdog-1 -e WATCHDOG_API_URL=http://<api private ip>:8000 \
-    -e WATCHDOG_EXECUTOR_URL=http://10.20.2.10:8100 proto python -m apps.watchdog
-  ```
+   Running it again is safe, for example to set the domain later.
+3. **Check:** `bash infra/oci/deploy/bastion-run.sh status <role>` shows the units, the
+   containers and the last deploy log.
 
-  Alternatively, install the systemd unit in `infra/watchdog/proto-watchdog.service`.
+The executor starts with `EXECUTOR_ENVIRONMENT=TESTNET`, which is the only value its settings
+accept. No step here enables real money.
 
-After a reboot, `proto-secrets` refills `/run/proto`, and the containers restart from it.
+To deploy new secrets without a new image, run `sudo proto-deploy --force` on the instance
+(`bastion-run.sh ssh <role>`).
 
 ## 7. MT5 on the Windows VM
 
