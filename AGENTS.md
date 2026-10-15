@@ -50,3 +50,9 @@ Deposits, withdrawals, custody, fund transfers, and autonomous changes to consti
 ## Validation loop
 
 PLAN -> IMPLEMENT -> TEST -> AUDIT -> FIND DEFECTS -> FIX -> RETEST -> RE-AUDIT.
+
+## PRAGMA-CORE 2.0 (efficiency contract)
+
+`docs/pragma/PRAGMA-CORE.md` is the shared engineering-efficiency contract (context discipline, risk-proportional routing, DONE/PARTIAL/BLOCKED reporting in pt-BR). It applies on top of this guide. **This guide wins on any conflict**: the financial execution boundary, constitutional limits, git workflow and validation loop above are never relaxed by PRAGMA, and any change touching credentials, permits, limits, the executor or migrations is always treated as high risk.
+
+On-demand skills (open only when the work calls for them): `pragma-debug` (failures/incidents), `pragma-feature` (features/migrations), `pragma-audit` (audit/review), `pragma-delivery` (PR/CI/merge/deploy), `pragma-benchmark` (token cost and performance). Claude Code reads them from `.claude/skills/`, Codex from `.agents/skills/`; both copies are identical and must stay in sync. Templates live in `docs/pragma/`.
