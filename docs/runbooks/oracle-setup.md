@@ -111,20 +111,23 @@ Binance allowlist or delete the secrets.
 
 ## 3. Create the secrets
 
-Terraform never creates secret values, because they would be written to its state. Create each
-name from `terraform output secret_names` in Cloud Shell. `read -s` keeps the value out of the
-history and off the screen:
+Terraform never creates secret values, because they would be written to its state.
+`infra/oci/scripts/create-secrets.sh` creates every name in `secret_names` from Cloud Shell:
 
 ```bash
-VAULT=$(terraform output -raw vault_id); KEY=$(terraform output -raw secrets_key_id)
-COMP=<compartment_ocid>
-new_secret() {  # new_secret <name>: prompts for the value, never echoes it
-  read -rsp "$1: " v; echo
-  oci vault secret create-base64 --compartment-id "$COMP" --vault-id "$VAULT" --key-id "$KEY" \
-    --secret-name "$1" --secret-content-content "$(printf %s "$v" | base64 -w0)" >/dev/null && echo ok
-  unset v
-}
+oci resource-manager stack get-stack-tf-state --stack-id "$STACK" --file ~/proto.tfstate
+bash ~/Proto/infra/oci/scripts/create-secrets.sh
 ```
+
+- It generates the tokens, the TradingView secret, the MT5 bridge token, the permit key pair and
+  both database URLs (with a random password). It prompts for the Binance testnet key and
+  secret with `read -s`; Enter skips them until you have them.
+- No value is printed, written to the shell history or passed on a command line: each request
+  goes to the CLI as a 0600 file in a private temporary directory, deleted right after.
+- It skips names that already exist, so running it again only adds what is missing.
+- The permit pair comes from `infra/oci/scripts/ed25519_pair.py`, standard library only, because
+  Cloud Shell runs in FIPS mode and refuses Ed25519 through OpenSSL. Its output has the same
+  format as `python -m services.risk.permit_keys`.
 
 | Secret | Value |
 |---|---|
@@ -132,8 +135,8 @@ new_secret() {  # new_secret <name>: prompts for the value, never echoes it
 | `proto-executor-token` | 32+ random characters. The API and the executor share it |
 | `proto-watchdog-api-token` | 32+ random characters, different from the others |
 | `proto-watchdog-executor-token` | 32+ random characters, different from the others |
-| `proto-permit-private-key` / `proto-permit-public-key` | One Ed25519 pair: `python -m services.risk.permit_keys`. The executor gets only the public key |
-| `proto-tradingview-secret` | The secret in your TradingView alert body |
+| `proto-permit-private-key` / `proto-permit-public-key` | One Ed25519 pair. The executor gets only the public key |
+| `proto-tradingview-secret` | Generated. Read it from the Vault console when you write the TradingView alert body |
 | `proto-api-database-url` | `postgresql+asyncpg://proto:<password>@127.0.0.1:5432/proto` |
 | `proto-executor-database-url` | `postgresql+asyncpg://executor:<password>@127.0.0.1:5432/executor` |
 | `proto-binance-testnet-key` / `-secret` | From testnet.binance.vision (step 4) |

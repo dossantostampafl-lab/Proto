@@ -82,3 +82,37 @@ def test_fetched_secrets_match_the_iam_policy_and_the_settings() -> None:
             assert secret in allowed[role], f"{role} fetches {secret} but IAM does not allow it"
             if not var.startswith("PROTO_CRED_"):
                 assert var in fields[role], f"{role}: {var} is not a setting"
+
+
+def test_create_secrets_covers_every_name_and_never_puts_a_value_in_argv() -> None:
+    vault = tf("vault.tf")
+    names = set(re.findall(r'"(proto-[a-z0-9-]+)"', vault.split("secrets = {", 1)[1]))
+    script = (OCI / "scripts/create-secrets.sh").read_text()
+    for name in names:
+        assert name in script, f"create-secrets.sh never creates {name}"
+    # The value travels in a 0600 --from-json file, never as a command-line flag.
+    assert "--from-json" in script and "--secret-content-content" not in script
+
+
+def test_permit_pair_from_cloud_shell_matches_rfc8032_and_the_api() -> None:
+    import base64
+    import importlib.util
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from services.risk.permit_keys import decode_key
+
+    spec = importlib.util.spec_from_file_location("ed25519_pair", OCI / "scripts/ed25519_pair.py")
+    assert spec and spec.loader
+    pair = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pair)
+
+    seed = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+    assert pair.public_key(seed).hex() == (
+        "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+    )  # RFC 8032, 7.1, test 1
+    for i in range(8):
+        seed = bytes([i]) * 32
+        public = pair.public_key(seed)
+        assert public == Ed25519PrivateKey.from_private_bytes(seed).public_key().public_bytes_raw()
+        assert decode_key(base64.b64encode(public).decode()) == public
