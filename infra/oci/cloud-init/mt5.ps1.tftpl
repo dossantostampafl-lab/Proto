@@ -1,0 +1,8 @@
+#ps1_sysnative
+# PROTO MT5 Windows VM. Opens the MT5 bridge port to the executor only; RDP stays reachable
+# through the Bastion (the NSG allows it only from inside the private subnet). The MT5
+# terminal itself is installed by the operator from XP's signed installer
+# (docs/runbooks/oracle-setup.md); the account password never leaves this VM.
+New-NetFirewallRule -DisplayName "PROTO MT5 bridge (executor only)" `
+  -Direction Inbound -Protocol TCP -LocalPort ${bridge_port} `
+  -RemoteAddress ${executor_ip} -Action Allow

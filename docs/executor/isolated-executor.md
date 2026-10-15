@@ -79,6 +79,9 @@ RISK_PERMIT_PRIVATE_KEY=<Ed25519 seed matching EXECUTOR_PERMIT_PUBLIC_KEY>
 
 ## Running it on Oracle Cloud
 
+The whole layout (network, Vault, IAM, instances) is Terraform in `infra/oci/`. Follow
+`docs/runbooks/oracle-setup.md`. The commands below are what runs on the executor instance.
+
 The executor uses the same image as the API, with a different command. Run it on its own instance
 in the private subnet, with no public IP. Egress goes through the NAT gateway
 (`docs/adr/venues-and-executor-hosting.md`).

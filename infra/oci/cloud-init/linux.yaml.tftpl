@@ -1,0 +1,47 @@
+#cloud-config
+# PROTO ${role} instance (Oracle Linux 9). Bootstrap only: OS updates, podman, the OCI CLI for
+# Vault reads and the secret-fetch unit. The application is deployed by the operator
+# (docs/runbooks/oracle-setup.md), so no image, token or credential is baked in here.
+package_update: true
+package_upgrade: true
+packages:
+  - podman
+  - git
+  - firewalld
+  - oraclelinux-developer-release-el9
+
+write_files:
+  - path: /usr/local/sbin/proto-fetch-secrets
+    permissions: "0750"
+    owner: root:root
+    encoding: b64
+    content: ${fetch_script_b64}
+  - path: /etc/systemd/system/proto-secrets.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=PROTO ${role}: secrets from OCI Vault into /run/proto (tmpfs)
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/proto-fetch-secrets ${role} ${vault_id}
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/proto/role
+    permissions: "0644"
+    content: |
+      ${role}
+
+runcmd:
+  - dnf -y install python39-oci-cli
+  - systemctl enable --now firewalld
+%{ for port in open_ports ~}
+  - firewall-cmd --permanent --add-port=${port}/tcp
+%{ endfor ~}
+  - firewall-cmd --reload
+  - systemctl daemon-reload
+  - systemctl enable proto-secrets.service
