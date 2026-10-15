@@ -105,6 +105,31 @@ resource "oci_core_security_list" "empty" {
   freeform_tags  = local.tags
 }
 
+# The Bastion's private endpoint sits in the private subnet with no NSG, so only the subnet's
+# security list governs its traffic. An empty list blocks its egress and every session closes
+# right after authentication. Egress only, to SSH and RDP inside the VCN: inbound stays NSG-only.
+resource "oci_core_security_list" "bastion_egress" {
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.proto.id
+  display_name   = "${local.name}-bastion-egress"
+  freeform_tags  = local.tags
+
+  dynamic "egress_security_rules" {
+    for_each = { ssh = 22, rdp = 3389 }
+    content {
+      protocol         = "6"
+      destination      = var.vcn_cidr
+      destination_type = "CIDR_BLOCK"
+      stateless        = false
+      description      = "Bastion ${egress_security_rules.key} to the instances"
+      tcp_options {
+        min = egress_security_rules.value
+        max = egress_security_rules.value
+      }
+    }
+  }
+}
+
 resource "oci_core_subnet" "public" {
   compartment_id    = var.compartment_ocid
   vcn_id            = oci_core_vcn.proto.id
@@ -123,7 +148,7 @@ resource "oci_core_subnet" "private" {
   display_name               = "${local.name}-private"
   dns_label                  = "priv"
   route_table_id             = oci_core_route_table.private.id
-  security_list_ids          = [oci_core_security_list.empty.id]
+  security_list_ids          = [oci_core_security_list.bastion_egress.id]
   prohibit_public_ip_on_vnic = true
   freeform_tags              = local.tags
 }

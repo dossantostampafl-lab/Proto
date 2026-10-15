@@ -149,3 +149,12 @@ def test_instances_follow_their_tag_and_the_executor_stays_on_the_testnet() -> N
     assert "scripts/fetch-secrets.sh" in bootstrap
     for port in ("443 8000", "8100"):
         assert port in bootstrap
+
+
+def test_the_bastion_can_reach_the_instances_and_nothing_enters_by_security_list() -> None:
+    network = tf("network.tf")
+    private = block(network, "oci_core_subnet", "private")
+    assert "oci_core_security_list.bastion_egress.id" in private
+    rules = block(network, "oci_core_security_list", "bastion_egress")
+    assert "egress_security_rules" in rules and "ingress_security_rules" not in rules
+    assert "ssh = 22, rdp = 3389" in rules and "destination      = var.vcn_cidr" in rules
