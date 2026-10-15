@@ -236,3 +236,8 @@ def test_create_secrets_creates_what_an_empty_list_reports_as_missing(tmp_path: 
         ["setsid", "bash", script], env=env, stdin=subprocess.DEVNULL, capture_output=True
     )
     assert again.returncode == 0 and b"created" not in again.stdout
+    # setup.sh never prompts: the Binance halves are reported missing, not asked for.
+    quiet = subprocess.run(
+        ["bash", script], env={**env, "PROTO_NO_PROMPT": "1"}, capture_output=True
+    )
+    assert quiet.returncode == 0 and b"missing proto-binance-testnet-key" in quiet.stdout
