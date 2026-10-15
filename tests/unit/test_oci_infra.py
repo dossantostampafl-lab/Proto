@@ -166,10 +166,11 @@ def test_the_bastion_can_reach_the_instances_and_nothing_enters_by_security_list
 def test_every_secret_policy_form_keeps_the_per_secret_restriction() -> None:
     iam = tf("iam.tf")
     forms = dict(re.findall(r'^\s+(\w+)\s+= "(Allow [^"]+)"', iam, re.M))
-    assert set(forms) == {"dg_vault_name", "dg_name", "dg_id", "principal_name", "principal_id"}
+    assert set(forms) == {"dg_name", "dg_id", "principal_name", "principal_id"}
     for mode, statement in forms.items():
-        # secret-bundles alone returned 404 on a read by name
-        assert "read secret-family in compartment id {comp}" in statement, mode
+        # Oracle: GetSecretBundleByName needs SECRET_BUNDLE_READ only
+        assert "read secret-bundles in compartment id {comp}" in statement, mode
+        assert "target.vault.id" not in statement, mode  # vaults only: never matches a bundle
         assert "'{name}'" in statement or "'{id}'" in statement, mode  # never all secrets
         assert "any {" not in statement, mode  # the nested form returned 404 on every read
         if mode.startswith("principal"):

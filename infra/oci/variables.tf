@@ -177,9 +177,9 @@ variable "api_instance_id" {
 # first mode that the tenancy honours; all of them keep the per-secret restriction.
 variable "secret_policy_mode" {
   type    = string
-  default = "dg_vault_name"
+  default = "dg_name"
   validation {
-    condition     = contains(["dg_vault_name", "dg_name", "dg_id", "principal_name", "principal_id"], var.secret_policy_mode)
-    error_message = "secret_policy_mode: dg_vault_name, dg_name, dg_id, principal_name or principal_id."
+    condition     = contains(["dg_name", "dg_id", "principal_name", "principal_id"], var.secret_policy_mode)
+    error_message = "secret_policy_mode: dg_name, dg_id, principal_name or principal_id."
   }
 }

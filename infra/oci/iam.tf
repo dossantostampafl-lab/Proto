@@ -19,18 +19,19 @@ resource "oci_identity_dynamic_group" "role" {
   freeform_tags  = local.tags
 }
 
-# "secret-family", not "secret-bundles": a read by name first looks the secret up, which needs the
-# secret's metadata too. With secret-bundles alone every form returned 404 (NotAuthorizedOrNotFound).
+# Per Oracle's policy reference (Vault details): GetSecretBundleByName needs only
+# SECRET_BUNDLE_READ ("read secret-bundles"), and the variables that restrict access to secret
+# bundles are target.secret.name and target.secret.id. target.vault.id applies to vaults only, so
+# a condition on it never matches a secret bundle.
 # How each statement names the reader and the secret. Every mode keeps the per-secret restriction
 # (an instance never reads another role's secrets); they differ only in the policy variables used.
 # setup.sh tests them against the real tenancy and keeps the first that reads, in this order.
 locals {
   secret_policy_templates = {
-    dg_vault_name  = "Allow dynamic-group {dg} to read secret-family in compartment id {comp} where all {target.vault.id = '{vault}', target.secret.name = '{name}'}"
-    dg_name        = "Allow dynamic-group {dg} to read secret-family in compartment id {comp} where target.secret.name = '{name}'"
-    dg_id          = "Allow dynamic-group {dg} to read secret-family in compartment id {comp} where target.secret.id = '{id}'"
-    principal_name = "Allow any-user to read secret-family in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.name = '{name}'}"
-    principal_id   = "Allow any-user to read secret-family in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.id = '{id}'}"
+    dg_name        = "Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where target.secret.name = '{name}'"
+    dg_id          = "Allow dynamic-group {dg} to read secret-bundles in compartment id {comp} where target.secret.id = '{id}'"
+    principal_name = "Allow any-user to read secret-bundles in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.name = '{name}'}"
+    principal_id   = "Allow any-user to read secret-bundles in compartment id {comp} where all {request.principal.id = '{instance}', target.secret.id = '{id}'}"
   }
   secret_policy_by_id = endswith(var.secret_policy_mode, "_id")
 }
@@ -51,8 +52,7 @@ resource "oci_identity_policy" "secrets" {
   name           = "${local.name}-${each.key}-secrets"
   description    = "PROTO ${each.key}: read its own secrets in the PROTO vault, nothing else"
   freeform_tags  = local.tags
-  # One flat statement per secret. A nested all { vault, any { names } } was accepted, but every
-  # read under it returned 404.
+  # One flat statement per secret, restricted to that secret.
   statements = [
     for s in local.secrets[each.key] : replace(replace(replace(replace(replace(replace(
       local.secret_policy_templates[var.secret_policy_mode],
