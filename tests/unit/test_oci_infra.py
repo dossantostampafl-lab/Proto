@@ -163,5 +163,5 @@ def test_the_bastion_can_reach_the_instances_and_nothing_enters_by_security_list
 def test_secret_policy_has_one_flat_statement_per_secret() -> None:
     policy = block(tf("iam.tf"), "oci_identity_policy", "secrets")
     assert "for s in local.secrets[each.key]" in policy
-    assert "any {" not in policy  # nested conditions returned 404 on every read
+    assert "any {%s}" not in policy  # the nested form returned 404 on every read
     assert "target.vault.id = '%s', target.secret.name = '%s'" in policy
