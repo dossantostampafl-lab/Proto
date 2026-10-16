@@ -256,3 +256,13 @@ def test_the_deploy_unit_leaves_the_containers_running_and_failures_show_their_c
     # setup.sh shows only the script's and systemd's lines, never the raw container output.
     setup = (OCI / "deploy/setup.sh").read_text()
     assert "journalctl -u proto-deploy -t proto-deploy -t systemd" in setup
+
+
+def test_the_database_does_not_depend_on_nat_rules_a_firewall_reload_wipes() -> None:
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    db = deploy.split("ensure_db() {", 1)[1].split("\n}\n", 1)[0]
+    assert "-p 127.0.0.1:5432" not in db  # podman's NAT rules vanish on firewall-cmd --reload
+    assert "--network host" in db and "listen_addresses=127.0.0.1" in db
+    assert "pg_isready -q -h 127.0.0.1 -p 5432" in db
+    # An existing database on the old published port is recreated (its volume is kept).
+    assert "{{.HostConfig.NetworkMode}}" in db and '-v "${name}:/var/lib/postgresql/data"' in db

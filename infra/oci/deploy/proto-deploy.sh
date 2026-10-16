@@ -49,16 +49,23 @@ ensure_db() {
   user="${BASH_REMATCH[1]}" password="${BASH_REMATCH[2]}" db="${BASH_REMATCH[3]}"
   (umask 077 && printf 'POSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=%s\n' \
     "$user" "$password" "$db" >"$dbenv")
-  if [ "$(podman container inspect --format '{{.State.Running}}' "proto-${role}-db" 2>/dev/null)" != true ]; then
-    podman rm -f "proto-${role}-db" >/dev/null 2>&1 || true
-    podman run -d --name "proto-${role}-db" --restart=always --env-file "$dbenv" \
-      -p 127.0.0.1:5432:5432 -v "proto-${role}-db:/var/lib/postgresql/data" \
-      docker.io/library/postgres:16 >/dev/null
-    for _ in $(seq 30); do
-      podman exec "proto-${role}-db" pg_isready -q -U "$user" && break
-      sleep 2
-    done
+  # Postgres shares the host network and listens on loopback only. A published port (-p) depends
+  # on podman's NAT rules, which every firewall-cmd --reload (bootstrap.sh) wipes: the app then got
+  # "connection refused" on 127.0.0.1:5432 while the database itself was up.
+  local name="proto-${role}-db"
+  if [ "$(podman container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" != true ] \
+    || [ "$(podman container inspect --format '{{.HostConfig.NetworkMode}}' "$name" 2>/dev/null)" != host ]; then
+    podman rm -f "$name" >/dev/null 2>&1 || true
+    podman run -d --name "$name" --restart=always --network host --env-file "$dbenv" \
+      -v "${name}:/var/lib/postgresql/data" \
+      docker.io/library/postgres:16 -c listen_addresses=127.0.0.1 -c port=5432 >/dev/null
   fi
+  for _ in $(seq 30); do
+    podman exec "$name" pg_isready -q -h 127.0.0.1 -p 5432 -U "$user" && return 0
+    sleep 2
+  done
+  log "the database did not accept connections on 127.0.0.1:5432"
+  exit 1
 }
 
 start() {  # start <image id>
