@@ -161,14 +161,27 @@ def reset_oms_state() -> None:
     _oms_settings_id = _executor_settings_id = None
 
 
-async def _totals() -> dict[str, Decimal]:
-    """Ledger total per asset, from the in-process paper ledger or the executor."""
+async def _totals() -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+    """Ledger total and opening balance per asset, from the paper ledger or the executor.
+
+    The opening balance is what the venue already held before PROTO traded (the testnet
+    faucet's BTC, deposits). An executor that does not report it yields no opening, so the
+    whole balance counts as PROTO's own: the stricter reading.
+    """
 
     if executor_mode():
         body = await executor_client().ledger()
-        return {asset: Decimal(row["total"]) for asset, row in body["balances"].items()}
+        rows = body["balances"]
+        return (
+            {asset: Decimal(row["total"]) for asset, row in rows.items()},
+            {asset: Decimal(row.get("opening", "0")) for asset, row in rows.items()},
+        )
     _, ledger, _ = await components()
-    return {asset: balance.total for asset, balance in (await ledger.balances()).items()}
+    balances = await ledger.balances()
+    return (
+        {asset: balance.total for asset, balance in balances.items()},
+        {asset: balance.opening for asset, balance in balances.items()},
+    )
 
 
 async def account_state(quote_asset: str) -> AccountState:
@@ -183,7 +196,7 @@ async def account_state(quote_asset: str) -> AccountState:
 
     checkpoints = _checkpoint_store()
     try:
-        balances = await _totals()
+        balances, openings = await _totals()
     except (ExecutorUnavailable, ExecutorRefused) as exc:
         logger.error("account state unavailable: %s", exc)
         saved = await checkpoints.get(quote_asset)
@@ -202,7 +215,14 @@ async def account_state(quote_asset: str) -> AccountState:
     for instrument_id, instrument in _INSTRUMENTS.items():
         if instrument.quote_asset != quote_asset:
             continue
-        quantity = balances.get(instrument.base_asset, Decimal("0"))
+        # PROTO's own position: what it bought, not what the venue already held. Opening
+        # holdings are outside the book (they would swamp the 10k reference capital and swing
+        # the daily loss with prices PROTO never traded).
+        quantity = max(
+            balances.get(instrument.base_asset, Decimal("0"))
+            - openings.get(instrument.base_asset, Decimal("0")),
+            Decimal("0"),
+        )
         positions[instrument_id] = quantity
         if quantity == 0:
             continue

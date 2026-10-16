@@ -48,6 +48,7 @@ class AssetBalance:
     asset: str
     total: Decimal
     reserved: Decimal
+    opening: Decimal = Decimal("0")  # part of total already at the venue (faucet, deposits)
 
     @property
     def available(self) -> Decimal:
@@ -58,19 +59,23 @@ class AssetBalance:
             "total": str(self.total),
             "reserved": str(self.reserved),
             "available": str(self.available),
+            "opening": str(self.opening),
         }
 
 
 def summarize(entries: Iterable[LedgerEntry]) -> dict[str, AssetBalance]:
     total: dict[str, Decimal] = defaultdict(Decimal)
     reserved: dict[str, Decimal] = defaultdict(Decimal)
+    opening: dict[str, Decimal] = defaultdict(Decimal)
     for entry in entries:
         if entry.kind in _TOTAL_KINDS:
             total[entry.asset] += entry.amount
+            if entry.kind is LedgerEntryKind.OPENING_BALANCE:
+                opening[entry.asset] += entry.amount
         else:
             reserved[entry.asset] -= entry.amount
     assets = sorted(set(total) | set(reserved))
-    return {a: AssetBalance(a, total[a], reserved[a]) for a in assets}
+    return {a: AssetBalance(a, total[a], reserved[a], opening[a]) for a in assets}
 
 
 def _guard(balances: dict[str, AssetBalance], batch: Sequence[LedgerEntry]) -> None:
