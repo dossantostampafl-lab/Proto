@@ -160,6 +160,51 @@ def test_agent_signals_carry_less_weight() -> None:
 def test_fusion_policy_validates_its_bounds() -> None:
     with pytest.raises(ValueError):
         FusionPolicy(min_score=0)
+    with pytest.raises(ValueError):
+        FusionPolicy(exit_min_score=0)
+    with pytest.raises(ValueError):
+        FusionPolicy(min_score=0.5, exit_min_score=0.6)  # an exit may not be stricter
+
+
+def test_a_weak_opposite_cross_closes_but_never_opens() -> None:
+    """Spot selling only closes a holding, so it needs a reason; buying needs conviction."""
+
+    weak_short = fuse(
+        [signal(SignalDirection.SHORT, strength=0.3)], instrument_id=BTC_ID, now=NOW
+    )
+    weak_long = fuse([signal(SignalDirection.LONG, strength=0.3)], instrument_id=BTC_ID, now=NOW)
+    assert weak_short.direction is SignalDirection.SHORT and weak_short.reason == "consensus short"
+    assert weak_long.direction is SignalDirection.FLAT and weak_long.reason == "below min_score"
+
+
+def test_a_very_weak_cross_does_not_even_exit() -> None:
+    faint = fuse([signal(SignalDirection.SHORT, strength=0.1)], instrument_id=BTC_ID, now=NOW)
+    assert faint.direction is SignalDirection.FLAT
+
+
+def test_a_short_decision_cannot_open_a_position_on_spot() -> None:
+    """The lower exit bar is safe because sizing still refuses a short without holdings."""
+
+    decision = fuse([signal(SignalDirection.SHORT, strength=0.3)], instrument_id=BTC_ID, now=NOW)
+    candidate = build_candidate(
+        decision,
+        instrument=BTC,
+        quote=QUOTE,
+        equity=Decimal("10000"),
+        position_quantity=Decimal("0"),
+        now=NOW,
+    )
+    assert candidate.intent is None and candidate.abstain_reason == "spot venue cannot open a short"
+    held = build_candidate(
+        decision,
+        instrument=BTC,
+        quote=QUOTE,
+        equity=Decimal("10000"),
+        position_quantity=Decimal("0.5"),
+        now=NOW,
+    )
+    assert held.intent is not None and held.intent.side == "SELL"
+    assert held.intent.quantity <= Decimal("0.5")  # reduce-only: never more than it holds
 
 
 # --- sizing -------------------------------------------------------------------

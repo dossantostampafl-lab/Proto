@@ -43,6 +43,10 @@ DEFAULT_SOURCE_WEIGHTS: Mapping[SignalSource, float] = {
 class FusionPolicy:
     window: timedelta = timedelta(minutes=5)
     min_score: float = 0.6
+    # Selling on spot only closes a holding (a short cannot be opened), so an exit needs a reason,
+    # not the conviction an entry does. With the same bar for both, a position opened on a strong
+    # cross almost never closed: weaker opposite crosses were discarded and nothing else exits.
+    exit_min_score: float = 0.2
     min_signals: int = 1
     # Opposing signals at least this strong make the result FLAT ("conflict").
     conflict_strength: float = 0.5
@@ -53,6 +57,8 @@ class FusionPolicy:
     def __post_init__(self) -> None:
         if not 0 < self.min_score <= 1 or self.min_signals < 1:
             raise ValueError("min_score must be in (0, 1] and min_signals >= 1")
+        if not 0 < self.exit_min_score <= self.min_score:
+            raise ValueError("exit_min_score must be in (0, min_score]")
         if self.window <= timedelta(0):
             raise ValueError("window must be positive")
 
@@ -123,7 +129,7 @@ def fuse(
     )
     if score >= policy.min_score:
         return FusionDecision(instrument_id, SignalDirection.LONG, score, ids, "consensus long")
-    if score <= -policy.min_score:
+    if score <= -policy.exit_min_score:
         return FusionDecision(instrument_id, SignalDirection.SHORT, score, ids, "consensus short")
     return FusionDecision(instrument_id, SignalDirection.FLAT, score, ids, "below min_score")
 

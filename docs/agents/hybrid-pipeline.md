@@ -16,7 +16,7 @@ TradingView / PROTO signals ─> fusion ─> sized candidate ─> reviewer ─> 
   Signals stamped in the future are ignored.
 - The weighted score is the sum of `direction × strength × weight` divided by the total weight.
   Weights are TradingView 1.0, PROTO strategies 1.0 and PROTO agents 0.5.
-- `LONG` needs a score of at least 0.6 and `SHORT` at most −0.6. Anything in between is `FLAT`.
+- `LONG` needs a score of at least 0.6. `SHORT` needs at most −0.2 (`exit_min_score`): on spot a sell only closes a holding (sizing refuses a short without one), so an exit needs a reason, not the conviction of an entry. With one 0.6 bar for both, a position opened on a strong cross almost never closed (backtest: no completed trades in two weeks). Anything in between is `FLAT`.
 - Opposing signals that both have strength ≥ 0.5 are a conflict, and the result is `FLAT`.
 
 ## Sizing (spot only)
