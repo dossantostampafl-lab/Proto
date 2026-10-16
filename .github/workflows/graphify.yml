@@ -11,8 +11,8 @@ jobs:
   code-graph:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Install Graphify
@@ -26,7 +26,7 @@ jobs:
           test -s graphify-out/graph.json
           test -s graphify-out/GRAPH_REPORT.md
       - name: Upload Graphify knowledge graph
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: graphify-code-knowledge-graph
           path: |
