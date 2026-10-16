@@ -99,7 +99,7 @@ values = [l.split("=", 1)[1].strip() for f in sys.argv[1:] if os.path.exists(f)
           for l in open(f) if "=" in l]
 for line in sys.stdin:
     for v in values:
-        if len(v) >= 8:
+        if len(v) >= 16:  # tokens, keys and passwords; not the database user or name
             line = line.replace(v, "***")
     sys.stdout.write("  | " + line)
 ' "$secrets" "/run/proto/${role}-db.env" || true

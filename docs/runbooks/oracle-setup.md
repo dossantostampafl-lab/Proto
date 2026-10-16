@@ -167,6 +167,12 @@ Binance key.
    and allow spot trading only, with no withdrawals, transfers, margin or futures. The live
    canary checks this at start (`verify_trade_only`).
 
+
+If the executor stops with `binance -2014: API-key format invalid`, the value in the Vault is not
+an API key: pasted with extra text, key and secret swapped, or created with the Base64 template
+(the Vault then decodes it into noise). Open each secret, **Create secret version**, template
+**Plain-Text**, paste only the key (or only the secret), and run `setup.sh` again.
+
 ## 5. Reach the instances (Bastion)
 
 Console → Identity & Security → Bastion → `protobastion` → **Create session**:
@@ -221,8 +227,9 @@ merge to main -> CI green -> Deploy workflow -> ghcr.io/<owner>/proto:stable ---
      service.
   2. It checks the service's health. A failing release goes back to the last healthy image.
 - Each service reads its secrets from `/run/proto/<role>.env` (tmpfs, step 3). Postgres gets
-  its password from the database URL secret. When `DOMAIN` is set, Caddy terminates TLS on 443
-  in front of the API.
+  its password from the database URL secret. Caddy terminates TLS on 443 in front of the API,
+  for the `domain` stack variable or, without one, for `<api-public-ip-with-dashes>.sslip.io`
+  (`setup.sh` prints the dashboard address at the end).
 
 ### One-time setup
 
