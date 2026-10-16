@@ -182,6 +182,24 @@ async def _evaluate(
     return decision, risk, order
 
 
+def buffer_signal(signal: Signal) -> None:
+    """Hold a signal for fusion without starting an evaluation (the closed-loop drill)."""
+
+    _signals.append(signal)
+
+
+def forget_signal(signal: Signal) -> None:
+    """Drop a drill signal once evaluated, so it never sways a later decision."""
+
+    for held in list(_signals):
+        if held.signal_id == signal.signal_id:
+            _signals.remove(held)
+
+
+async def evaluate(instrument_id: str) -> tuple[AgentDecision, RiskDecision | None, dict | None]:
+    return await _evaluate(instrument_id)
+
+
 def on_signal_accepted(signal: Signal) -> None:
     """Called by the signal surface after a signal was durably journaled."""
 

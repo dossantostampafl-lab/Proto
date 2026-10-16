@@ -25,6 +25,7 @@ from .agent_surface import router as agent_router
 from .app_state import persistence_engine
 from .core_routes import router as core_router
 from .creation_surface import router as creation_router
+from .e2e_drill import router as e2e_drill_router
 from .equity_market_surface import router as equity_market_router
 from .event_state import JournalUnavailable, operational_journal, record_operational_event
 from .event_surface import router as event_router
@@ -47,6 +48,7 @@ from .settings import settings
 from .shadow_control import router as shadow_control_router
 from .signal_surface import TRADINGVIEW_WEBHOOK_PATH
 from .signal_surface import router as signal_router
+from .strategy_surface import router as strategy_router
 from .universe_surface import router as universe_router
 from .watchdog_surface import PREFIX as WATCHDOG_PREFIX
 from .watchdog_surface import router as watchdog_router
@@ -87,6 +89,8 @@ for router in (
     paper_control_router,
     paper_autopilot_router,
     paper_autonomy_router,
+    strategy_router,
+    e2e_drill_router,
     shadow_control_router,
     orchestration_router,
     universe_router,

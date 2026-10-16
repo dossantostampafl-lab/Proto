@@ -459,7 +459,12 @@ def paper_automation_status() -> dict[str, object]:
 
 @router.post("/start")
 async def paper_automation_start(config: PaperAutopilotConfig) -> dict[str, object]:
-    return await paper_autopilot.start(config)
+    # Retired: autonomy now runs through signals -> agents -> Risk Engine permit -> OMS, so a
+    # second loop that trades outside the permit chain must not start.
+    raise HTTPException(
+        status_code=410,
+        detail="the paper autopilot is retired: autonomy runs through the agent pipeline",
+    )
 
 
 @router.post("/stop")

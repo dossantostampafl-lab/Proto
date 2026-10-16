@@ -44,17 +44,20 @@ for (const source of ["live", "research", "paper"]) {
 
 // Every operator command of the previous terminal is still reachable.
 for (const endpoint of [
-  "/paper/start", "/paper/stop", "/paper/automation/start", "/paper/automation/stop", "/v1/simulate",
+  "/paper/start", "/paper/stop", "/v1/simulate",
   "/simulation/reset", "/killswitch/trigger", "/killswitch/reset", "/replay/start", "/replay/pause",
   "/replay/resume", "/replay/step", "/replay/restart", "/replay/seek", "/replay/speed", "/replay/reset",
   "/shadow/start", "/shadow/stop",
 ]) assert.ok(code.includes(`"${endpoint}"`), `operator command missing: ${endpoint}`);
 
+// The paper autopilot is retired: autonomy runs through the agent pipeline and its permits.
+assert.ok(!code.includes('"/paper/automation/start"'), "the retired paper autopilot must not be startable from the UI");
+
 // Every read surface is wired to its canonical endpoint.
 for (const endpoint of [
   "/health", "/system/status", "/live/status", "/live/market-data", "/live/history/", "/live/analytics/",
   "/market-lifecycle", "/models/calibration", "/v1/portfolio", "/pnl/attribution", "/hawkes/", "/analytics/greeks/",
-  "/paper/status", "/paper/automation/status", "/replay/status", "/universe", "/orchestration/status",
+  "/paper/status", "/v1/strategy/status", "/v1/drills/e2e/latest", "/replay/status", "/universe", "/orchestration/status",
   "/orchestration/decision-memory/status", "/shadow/status", "/creation/status", "/deployment/info", "/ws/market-data",
 ]) assert.ok(code.includes(endpoint), `read surface missing: ${endpoint}`);
 

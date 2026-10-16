@@ -71,8 +71,14 @@ def _tradingview() -> TradingViewIngestor:
     return _ingestor
 
 
+_LOOPBACK = frozenset({"127.0.0.1", "::1"})
+
+
 def _client_ip(request: Request) -> str:
-    if settings.tradingview_trust_forwarded_for:
+    # Behind the local reverse proxy (Caddy on the same host) every request comes from
+    # loopback; the address the proxy saw is then the last X-Forwarded-For hop.
+    peer = request.client.host if request.client else ""
+    if settings.tradingview_trust_forwarded_for or peer in _LOOPBACK:
         forwarded = request.headers.get("X-Forwarded-For", "")
         hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
         if hops:
@@ -133,6 +139,26 @@ async def tradingview_webhook(request: Request) -> dict[str, object]:
         "signal_id": str(result.signal.signal_id),
         **_BOUNDARY,
     }
+
+
+async def accept_internal_signal(signal: Signal, *, event_type: str, source: str) -> bool:
+    """Journal a signal produced inside PROTO and hand it to the agents, once.
+
+    Same contract as an accepted TradingView alert: not durable means not accepted.
+    Returns False for a signal already journaled (a replay after restart).
+    """
+
+    recorded = await record_operational_event(
+        event_type=event_type,
+        source=source,
+        payload={"signal": signal.model_dump(mode="json"), **_BOUNDARY},
+        idempotency_key=f"{source}:{signal.signal_id}",
+    )
+    if not recorded.created:
+        return False
+    _recent.append(signal)
+    on_signal_accepted(signal)
+    return True
 
 
 @router.get("/recent")

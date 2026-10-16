@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Analytics, Autopilot, Paper, Portfolio, Position } from "../api";
+import type { Analytics, Paper, Portfolio, Position } from "../api";
 import { SYMBOLS } from "../api";
 import { usePoll } from "../hooks";
 import type { Shared } from "../main";
@@ -36,20 +36,20 @@ function Positions({ positions }: { positions: Position[] }) {
   );
 }
 
+type StrategyStatus = { running: boolean; strategy_id: string; market_source: string; signals: number };
+type DrillReport = { verdict: string; finished_at?: string; steps?: { step: string; ok: boolean }[] };
+
 function NumberField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return <label className="field"><span>{label}</span><input value={value} inputMode="decimal" onChange={e => onChange(e.target.value)} /></label>;
 }
 
 export function Trade({ market, markets, selected, select }: Shared) {
   const paper = usePoll<Paper>("/paper/status").data;
-  const autopilot = usePoll<Autopilot>("/paper/automation/status").data;
+  const strategy = usePoll<StrategyStatus>("/v1/strategy/status").data;
+  const drill = usePoll<DrillReport>("/v1/drills/e2e/latest").data;
   const portfolio = usePoll<Portfolio>("/v1/portfolio").data;
   const analytics = usePoll<Analytics>(`/live/analytics/${selected}`).data;
   const [qty, setQty] = useState("0.001");
-  const [trigger, setTrigger] = useState("0.65");
-  const [cooldown, setCooldown] = useState("20");
-  const [spread, setSpread] = useState("20");
-  const [stopLoss, setStopLoss] = useState("0.02");
 
   const frame = market.frames[selected];
   const research = markets.find(m => m.symbol === selected);
@@ -98,25 +98,20 @@ export function Trade({ market, markets, selected, select }: Shared) {
         {!canOrder && <p className="hint">{engineOn ? "Needs a live quote and a research market for this symbol." : "Start the paper engine to place orders."}</p>}
       </Panel>
 
-      <Panel title="Autopilot" source="paper">
-        <div className="grid3">
-          <NumberField label="Imbalance trigger" value={trigger} onChange={setTrigger} />
-          <NumberField label="Cooldown (s)" value={cooldown} onChange={setCooldown} />
-          <NumberField label="Max spread (bp)" value={spread} onChange={setSpread} />
-          <NumberField label="Stop-loss fraction" value={stopLoss} onChange={setStopLoss} />
-          <NumberField label="Quantity" value={qty} onChange={setQty} />
-        </div>
-        <div className="row">
-          <Button label="START AUTOPILOT" path="/paper/automation/start" kind="primary" disabled={!engineOn}
-            body={{ symbol: selected, imbalance_trigger: Number(trigger), cooldown_seconds: Number(cooldown), quantity, max_spread_bps: Number(spread), stop_loss_fraction: Number(stopLoss) }}>
-            Start / update
-          </Button>
-          <Button label="STOP AUTOPILOT" path="/paper/automation/stop" disabled={!autopilot?.running}>Stop</Button>
-        </div>
-        <p className="hint">
-          {autopilot?.last_reason ?? "—"} · cycles {autopilot?.counters?.cycles ?? 0} · signals {autopilot?.counters?.signals ?? 0}
-          {" "}· accepted {autopilot?.counters?.accepted ?? 0} · rejected {autopilot?.counters?.rejected ?? 0}
-        </p>
+      <Panel title="Autonomy" source="testnet">
+        <ul className="floor-controls">
+          <li><span>Own strategy</span><b className={strategy?.running ? "up" : "muted"}>{strategy == null ? "—" : strategy.running ? `on · ${strategy.strategy_id}` : "off"}</b></li>
+          <li><span>Market source</span><b>{strategy?.market_source ?? "—"}</b></li>
+          <li><span>Strategy signals</span><b>{strategy?.signals ?? "—"}</b></li>
+          <li><span>Closed test</span><b className={drill?.verdict === "PASSED" ? "up" : drill?.verdict === "FAILED" ? "down" : "muted"}>{drill?.verdict ?? "—"}</b></li>
+          {drill?.finished_at && <li><span>Last run</span><b>{drill.finished_at.slice(0, 19).replace("T", " ")}</b></li>}
+        </ul>
+        {drill?.steps && (
+          <ol className="fl-steps">
+            {drill.steps.map(s => <li key={s.step} className={s.ok ? "up" : "down"}>{s.ok ? "✓" : "✗"} {s.step}</li>)}
+          </ol>
+        )}
+        <p className="hint">Signals from TradingView and the own strategy go through the agents, a Risk Engine permit and the executor on the Binance testnet. No real money.</p>
       </Panel>
 
       <Panel title="Positions" source="paper" className="wide">
