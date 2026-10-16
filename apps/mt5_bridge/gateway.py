@@ -65,17 +65,31 @@ class Mt5Gateway(Protocol):
 
 
 class TerminalGateway:
-    """The real terminal. Logs in on construction; credentials never leave this process."""
+    """The real terminal. Credentials never leave this process.
 
-    def __init__(self, *, login: int, password: str, server: str, path: str | None = None) -> None:
+    With a password it logs in on construction. Without one it attaches to a terminal that is
+    already logged in (saved credentials) and checks that it is the expected account and server:
+    the password then never reaches the bridge at all.
+    """
+
+    def __init__(
+        self, *, login: int, password: str | None, server: str, path: str | None = None
+    ) -> None:
         import MetaTrader5 as mt5  # Windows only
 
         self._mt5 = mt5
         kwargs: dict[str, Any] = {"login": login, "password": password, "server": server}
+        if not password:
+            kwargs = {}
         if path:
             kwargs["path"] = path
         if not mt5.initialize(**kwargs):
             raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
+        if not password:
+            account = mt5.account_info()
+            if account is None or int(account.login) != login or str(account.server) != server:
+                mt5.shutdown()
+                raise RuntimeError("the terminal is not logged in to the expected account")
 
     @staticmethod
     def _dict(value: Any) -> dict[str, Any] | None:

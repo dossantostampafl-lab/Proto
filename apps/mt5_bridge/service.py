@@ -290,7 +290,7 @@ def main() -> None:  # pragma: no cover - runs on the Windows VM
 
     terminal = g.TerminalGateway(
         login=int(os.environ["MT5_LOGIN"]),
-        password=os.environ["MT5_PASSWORD"],
+        password=os.environ.get("MT5_PASSWORD") or None,  # unset: attach to the logged-in terminal
         server=os.environ["MT5_SERVER"],
         path=os.environ.get("MT5_PATH"),
     )
