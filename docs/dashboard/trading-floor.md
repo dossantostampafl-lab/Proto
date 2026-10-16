@@ -85,6 +85,38 @@ from the journaled event and never inferred:
 
 An event that carries no reason shows no **why** list.
 
+## Desks you can open
+
+Every desk of the photo is a real button, not part of the picture. Hover or focus shows its
+outline and a status dot in the tone of its last action (`ok`, `warn`, `alert`, `working`).
+Click, Enter or Space opens the desk in a drawer; Escape or **Close** shuts it and returns the focus
+to the desk. The open desk is kept in the URL hash, so a desk can be linked: `#floor/risk`,
+`#floor/oms`, `#floor/fusion`, `#floor/reviewer`, `#floor/tradingview`, `#floor/reconciliation`
+(**Copy link** in the drawer). The same six desks are also cards under the photo, which is the
+way in on a phone and when the photo cannot load.
+
+The drawer is a modal dialog: the focus moves into it and stays inside until it closes. Wide
+screens open it as a side panel, narrow ones as a sheet from the bottom. Its panels poll only while
+it is open and the tab is visible, and every panel carries its freshness and the data mode: **LIVE ·
+updated hh:mm:ss**, **STALE · last good read** (the last value is old), or **UNAVAILABLE** (no
+value, with the HTTP status). A missing value is `—`; nothing is estimated.
+
+| Desk | Read-only data (existing endpoints) |
+|---|---|
+| TradingView | `/v1/signals/recent`: recent signals by source, strategy, instrument, direction and strength; alerts accepted since the page opened. Never the webhook secret or raw payloads. |
+| Fusion | `/v1/agents/status` (outcome counters), `/v1/agents/decisions/recent` (score, reason, abstention, candidate), `/v1/strategy/status` (warm-up bars, ticks, signals). |
+| AI Reviewer | `/v1/agents/status` (mode, model), the reviews inside `/v1/agents/decisions/recent` (verdict, size factor, rationale). It can only shrink or block. |
+| Risk Engine | `/v1/risk/status` (kill switches, halted venues and strategies, lockdown, constitutional limits, quote age, permit TTL), `/v1/risk/decisions/recent` (permits, rejections, daily loss and drawdown checks), `/v1/watchdog/status` (heartbeat, coverage, halts, every check). |
+| OMS / Executor | `/v1/oms/orders` (status, fills, fees), `/v1/oms/ledger` (account, equity and exposure per quote currency, main balances, the XP block when present), the halted venues of the floor state. |
+| Reconciliation | `/v1/drills/e2e/latest` (verdict and every step of the last closed test), the executor reconciliation checks of the watchdog. |
+
+Each drawer also lists the desk's own recent actions with their **why**.
+
+**Operator actions** reuse the operator token of the System view. Without it they are disabled and
+say why. With it: cancel or resolve an order (OMS), run the closed test and reconcile now
+(Reconciliation). A desk has no way to release a halt or a lockdown, nor to change a limit; the
+contract check fails if one is added.
+
 ## Phones
 
 On narrow screens the scene pans sideways and opens centred on the desks. Below it, a card per

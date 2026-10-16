@@ -242,7 +242,48 @@ type SceneProps = {
   actions: FloorAction[];
   latest: Partial<Record<StationId, FloorAction>>;
   active: (s: StationId) => boolean;
+  /** Opens a desk. Without it the photo is look-only. */
+  onSelect?: (id: StationId) => void;
+  selected?: StationId | null;
 };
+
+/** The clickable area of a desk: its three monitors, the operator and the floating label. */
+function deskBox(id: StationId) {
+  const d = DESKS[id];
+  const xs: number[] = [], ys: number[] = [];
+  d.monitors.forEach(q => q.forEach(([x, y]) => { xs.push(x); ys.push(y); }));
+  d.occluder.forEach(([cx, cy, rx, ry]) => { xs.push(cx - rx, cx + rx); ys.push(cy - ry, cy + ry); });
+  xs.push(d.plate[0] - 78 * d.plateScale, d.plate[0] + 78 * d.plateScale);
+  ys.push(d.plate[1] - 38 * d.plateScale, d.plate[1]);
+  const pad = 6;
+  let x = Math.min(...xs) - pad, y = Math.min(...ys) - pad;
+  let w = Math.max(...xs) - Math.min(...xs) + 2 * pad, h = Math.max(...ys) - Math.min(...ys) + 2 * pad;
+  // A small desk still gets a target a finger can hit.
+  if (w < 96) { x -= (96 - w) / 2; w = 96; }
+  if (h < 56) { y -= (56 - h) / 2; h = 56; }
+  return { x, y, w, h };
+}
+
+/** A desk as a real button over the photo: focusable, highlighted on hover and focus, status dot in the tone of its last action. */
+function DeskHotspot({ id, label, action, busy, selected, onSelect }: {
+  id: StationId; label: string; action: FloorAction | null | undefined; busy: boolean; selected: boolean; onSelect: (id: StationId) => void;
+}) {
+  const { x, y, w, h } = deskBox(id);
+  const color = TONE_COLOR[action ? action.tone : "idle"];
+  const headline = action?.headline ?? "waiting for work";
+  return (
+    <g className={`fl-hit${selected ? " selected" : ""}${busy ? " busy" : ""}`} role="button" tabIndex={0} aria-pressed={selected}
+      aria-label={`Open the ${label} desk. Last action: ${headline}`} data-desk={id}
+      onClick={() => onSelect(id)}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(id); } }}>
+      <rect className="fl-hit-box" x={x} y={y} width={w} height={h} rx={7} fill="transparent" />
+      <circle className="fl-hit-halo" cx={x + w - 11} cy={y + 11} r={9} fill={color} opacity={0.22} />
+      <circle className="fl-hit-dot" cx={x + w - 11} cy={y + 11} r={4.2} fill={color} />
+      <text className="fl-hit-cta" x={x + w / 2} y={y + h - 6} textAnchor="middle">{selected ? "OPEN" : "OPEN DESK"}</text>
+      <title>{`${label}: ${headline}`}</title>
+    </g>
+  );
+}
 
 // The floor is the photo room: a photograph with blank screens, every live value drawn over it.
 // If the photo cannot be loaded, the vector room is drawn instead.
@@ -251,14 +292,14 @@ export function Scene(props: SceneProps) {
 }
 
 function PhotoScene(props: SceneProps) {
-  const { market, state, actions, latest, active } = props;
+  const { market, state, actions, latest, active, onSelect, selected } = props;
   const [photo, setPhoto] = useState(true);
   if (!photo) return <VectorScene {...props} />;
   const summary = STATIONS.map(s => `${s.label}: ${latest[s.id]?.headline ?? "idle"}`).join("; ");
   // Paint back to front so the nearer desks' labels sit over the farther ones.
   const order: StationId[] = ["reconciliation", "fusion", "risk", "tradingview", "oms", "reviewer"];
   return (
-    <svg className="fl-scene" viewBox={`0 0 ${VW} ${VH}`} role="img" aria-label={`Trading floor seen from behind the central desk. ${summary}`}>
+    <svg className="fl-scene" viewBox={`0 0 ${VW} ${VH}`} role={onSelect ? "group" : "img"} aria-label={`Trading floor seen from behind the central desk. ${summary}`}>
       <defs>
         <filter id="fl-soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9" /></filter>
         <linearGradient id="fl-screen" x1="0" x2="0" y1="0" y2="1">
@@ -279,6 +320,10 @@ function PhotoScene(props: SceneProps) {
         );
       })}
       <rect width={VW} height={VH} fill="url(#fl-vignette)" pointerEvents="none" />
+      {onSelect && order.map(id => (
+        <DeskHotspot key={id} id={id} label={STATIONS.find(st => st.id === id)!.label} action={latest[id] ?? state?.stations?.[id]}
+          busy={active(id)} selected={selected === id} onSelect={onSelect} />
+      ))}
     </svg>
   );
 }
