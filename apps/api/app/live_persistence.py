@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from math import isfinite
 
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     Float,
     Index,
@@ -151,7 +152,8 @@ class LiveMarketTickRecord(LiveBase):
     venue: Mapped[str] = mapped_column(String(64), index=True)
     symbol: Mapped[str] = mapped_column(String(16), index=True)
     connection_generation: Mapped[int] = mapped_column(Integer, index=True)
-    sequence: Mapped[int] = mapped_column(Integer)
+    # Binance sequences are epoch milliseconds (~1.8e12): past a 32-bit INTEGER.
+    sequence: Mapped[int] = mapped_column(BigInteger)
     source_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     persisted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
