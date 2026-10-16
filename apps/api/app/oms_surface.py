@@ -45,6 +45,7 @@ from services.risk import AccountState, KillScope
 from .app_state import persistence_engine
 from .event_state import JournalUnavailable, record_operational_event
 from .executor_client import ExecutorClient, ExecutorRefused, ExecutorUnavailable
+from .instrument_registry import active_instruments
 from .market_quotes import live_quote
 from .settings import settings
 
@@ -54,6 +55,8 @@ router = APIRouter(prefix="/v1/oms", tags=["oms"])
 
 ACCOUNT_ID = "paper-binance-spot"
 EXECUTOR_ACCOUNT_ID = "executor-binance-spot"
+XP_ACCOUNT_ID = "executor-xp-b3"
+XP_VENUE = VenueId.XP_B3
 VENUE = VenueId.BINANCE_SPOT
 _INSTRUMENTS = {k: v for k, v in PAPER_INSTRUMENTS.items() if v.venue is VENUE}
 _QUOTE_ASSETS = sorted({i.quote_asset for i in _INSTRUMENTS.values()})
@@ -62,11 +65,12 @@ _BOUNDARY = {"financial_connectivity": False, "real_money_execution": False}
 _oms: OrderManager | None = None
 _ledger: InMemoryLedger | SqlLedger | None = None
 _adapter: PaperVenueAdapter | None = None
-_checkpoints: InMemoryCheckpoints | SqlCheckpoints | None = None
-_executor: ExecutorClient | None = None
+_checkpoints: dict[VenueId, InMemoryCheckpoints | SqlCheckpoints] = {}
+_executors: dict[VenueId, ExecutorClient] = {}
 _executor_settings_id: int | None = None
 _oms_settings_id: int | None = None
-_last_openings: dict[str, Decimal] | None = None  # opening holdings seen by the last good read
+# Opening holdings seen by the last good read of each venue's executor.
+_last_openings: dict[VenueId, dict[str, Decimal]] = {}
 _start_lock = asyncio.Lock()
 
 
@@ -87,26 +91,58 @@ def executor_mode() -> bool:
     return settings.oms_execution_backend == "executor"
 
 
-def executor_client() -> ExecutorClient:
-    global _executor, _executor_settings_id
-    if _executor is None or _executor_settings_id != id(settings):
-        if not settings.executor_url or not settings.executor_api_token:
-            raise ExecutorUnavailable("executor backend is not configured")
-        _executor = ExecutorClient(settings.executor_url, settings.executor_api_token)
+def xp_enabled() -> bool:
+    return settings.xp_routing_enabled
+
+
+def executor_client(venue: VenueId = VENUE) -> ExecutorClient:
+    """The isolated executor of one venue. Binance by default; XP_B3 only when configured."""
+
+    global _executor_settings_id
+    if _executor_settings_id != id(settings):
+        _executors.clear()
         _executor_settings_id = id(settings)
-    return _executor
+    client = _executors.get(venue)
+    if client is None:
+        if venue is XP_VENUE:
+            url, token = settings.xp_executor_url, settings.xp_executor_api_token
+        else:
+            url, token = settings.executor_url, settings.executor_api_token
+        if not url or not token:
+            raise ExecutorUnavailable("executor backend is not configured")
+        client = _executors[venue] = ExecutorClient(url, token)
+    return client
 
 
-def _checkpoint_store() -> InMemoryCheckpoints | SqlCheckpoints:
-    global _checkpoints
-    if _checkpoints is None:
-        account = EXECUTOR_ACCOUNT_ID if executor_mode() else ACCOUNT_ID
-        _checkpoints = (
+def _call_client(venue: VenueId) -> ExecutorClient:
+    """Binance goes through ``executor_client()`` exactly as before; XP_B3 names its venue."""
+
+    return executor_client() if venue is VENUE else executor_client(venue)
+
+
+def _checkpoint_store(venue: VenueId = VENUE) -> InMemoryCheckpoints | SqlCheckpoints:
+    store = _checkpoints.get(venue)
+    if store is None:
+        if venue is XP_VENUE:
+            account = XP_ACCOUNT_ID
+        else:
+            account = EXECUTOR_ACCOUNT_ID if executor_mode() else ACCOUNT_ID
+        store = _checkpoints[venue] = (
             SqlCheckpoints(persistence_engine, account_id=account)
             if persistence_engine is not None
             else InMemoryCheckpoints()
         )
-    return _checkpoints
+    return store
+
+
+def venue_for_quote(quote_asset: str) -> VenueId:
+    """BRL is XP's currency once XP routing is on; every other quote asset stays on Binance."""
+
+    return XP_VENUE if xp_enabled() and quote_asset == "BRL" else VENUE
+
+
+def _instruments_of(venue: VenueId):
+    return {k: v for k, v in active_instruments().items() if v.venue is venue}
 
 
 async def components() -> tuple[OrderManager, InMemoryLedger | SqlLedger, PaperVenueAdapter]:
@@ -156,14 +192,15 @@ async def components() -> tuple[OrderManager, InMemoryLedger | SqlLedger, PaperV
 
 
 def reset_oms_state() -> None:
-    global _oms, _ledger, _adapter, _checkpoints, _oms_settings_id
-    global _executor, _executor_settings_id, _last_openings
-    _last_openings = None
-    _oms = _ledger = _adapter = _checkpoints = _executor = None
+    global _oms, _ledger, _adapter, _oms_settings_id, _executor_settings_id
+    _last_openings.clear()
+    _checkpoints.clear()
+    _executors.clear()
+    _oms = _ledger = _adapter = None
     _oms_settings_id = _executor_settings_id = None
 
 
-async def _totals() -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+async def _totals(venue: VenueId = VENUE) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
     """Ledger total and opening balance per asset, from the paper ledger or the executor.
 
     The opening balance is what the venue already held before PROTO traded (the testnet
@@ -172,12 +209,14 @@ async def _totals() -> tuple[dict[str, Decimal], dict[str, Decimal]]:
     """
 
     if executor_mode():
-        body = await executor_client().ledger()
+        body = await _call_client(venue).ledger()
         rows = body["balances"]
         return (
             {asset: Decimal(row["total"]) for asset, row in rows.items()},
             {asset: Decimal(row.get("opening", "0")) for asset, row in rows.items()},
         )
+    if venue is not VENUE:
+        raise ExecutorUnavailable(f"{venue.value} runs on its own executor only")
     _, ledger, _ = await components()
     balances = await ledger.balances()
     return (
@@ -192,7 +231,9 @@ def _book_key(quote_asset: str) -> str:
     return f"{quote_asset}:own"
 
 
-def _checkpoint_key(quote_asset: str, openings: dict[str, Decimal]) -> str:
+def _checkpoint_key(
+    quote_asset: str, openings: dict[str, Decimal], venue: VenueId = VENUE
+) -> str:
     """Where this quote currency's start-of-day and peak equity are kept.
 
     Equity used to include the venue's opening holdings (the testnet faucet's 1 BTC), so values
@@ -204,13 +245,13 @@ def _checkpoint_key(quote_asset: str, openings: dict[str, Decimal]) -> str:
 
     affected = any(
         openings.get(instrument.base_asset, Decimal("0")) > 0
-        for instrument in _INSTRUMENTS.values()
+        for instrument in _instruments_of(venue).values()
         if instrument.quote_asset == quote_asset
     )
     return _book_key(quote_asset) if affected else quote_asset
 
 
-async def _outage_checkpoint(checkpoints, quote_asset: str):
+async def _outage_checkpoint(checkpoints, quote_asset: str, venue: VenueId = VENUE):
     """The checkpoint to hold equity at while the executor cannot be read.
 
     Same basis rule as a normal read, using the opening holdings seen last (they are a snapshot
@@ -218,8 +259,9 @@ async def _outage_checkpoint(checkpoints, quote_asset: str):
     so take the more conservative of both keys: the lower start of day and the higher peak.
     """
 
-    if _last_openings is not None:
-        return await checkpoints.get(_checkpoint_key(quote_asset, _last_openings))
+    seen = _last_openings.get(venue)
+    if seen is not None:
+        return await checkpoints.get(_checkpoint_key(quote_asset, seen, venue))
     rows = [
         row
         for row in (
@@ -243,13 +285,13 @@ async def account_state(quote_asset: str) -> AccountState:
     executor blocks new risk the same way.
     """
 
-    global _last_openings
-    checkpoints = _checkpoint_store()
+    venue = venue_for_quote(quote_asset)
+    checkpoints = _checkpoint_store(venue)
     try:
-        balances, openings = await _totals()
+        balances, openings = await _totals(venue)
     except (ExecutorUnavailable, ExecutorRefused) as exc:
         logger.error("account state unavailable: %s", exc)
-        saved = await _outage_checkpoint(checkpoints, quote_asset)
+        saved = await _outage_checkpoint(checkpoints, quote_asset, venue)
         baseline = saved[1] if saved else REFERENCE_CAPITAL
         return AccountState(
             equity=baseline,
@@ -258,12 +300,12 @@ async def account_state(quote_asset: str) -> AccountState:
             gross_exposure=Decimal("Infinity"),
             positions={},
         )
-    _last_openings = openings
+    _last_openings[venue] = openings
     cash = balances.get(quote_asset, Decimal("0"))
     positions: dict[str, Decimal] = {}
     exposure = Decimal("0")
     marked = True
-    for instrument_id, instrument in _INSTRUMENTS.items():
+    for instrument_id, instrument in _instruments_of(venue).items():
         if instrument.quote_asset != quote_asset:
             continue
         # PROTO's own position: what it bought, not what the venue already held. Opening
@@ -284,7 +326,7 @@ async def account_state(quote_asset: str) -> AccountState:
         exposure += quantity * (quote.bid + quote.ask) / 2
 
     today = datetime.now(UTC).date()
-    key = _checkpoint_key(quote_asset, openings)
+    key = _checkpoint_key(quote_asset, openings, venue)
     saved = await checkpoints.get(key)
     day, start, peak = saved or (today, cash + exposure, cash + exposure)
     if not marked:
@@ -311,36 +353,40 @@ async def account_state(quote_asset: str) -> AccountState:
 
 
 def quote_asset_of(intent: TradeIntent) -> str:
-    instrument = PAPER_INSTRUMENTS.get(intent.instrument_id)
+    instrument = active_instruments().get(intent.instrument_id)
     return instrument.quote_asset if instrument else "BRL"
 
 
-async def _halt_venue(divergences: list[dict]) -> None:
+async def _halt_venue(divergences: list[dict], venue: VenueId = VENUE) -> None:
+    """Kill the diverged venue only: a Binance divergence never stops XP, nor the reverse."""
+
     from .risk_surface import governor
 
-    governor().trigger_kill(KillScope.VENUE, VENUE.value)
-    await _record("RECONCILIATION_DIVERGENCE", {"venue": VENUE.value, "divergences": divergences})
+    governor().trigger_kill(KillScope.VENUE, venue.value)
+    await _record("RECONCILIATION_DIVERGENCE", {"venue": venue.value, "divergences": divergences})
     from .promotion_surface import violation
 
-    await violation(venue=VENUE.value, kind="RECONCILIATION_DIVERGENCE", detail="ledger != venue")
+    await violation(venue=venue.value, kind="RECONCILIATION_DIVERGENCE", detail="ledger != venue")
 
 
-async def reconcile() -> dict[str, object]:
-    """Compare ledger totals with the venue; halt the venue on divergence."""
+async def reconcile(venue: VenueId = VENUE) -> dict[str, object]:
+    """Compare ledger totals with the venue; halt that venue on divergence."""
 
     if executor_mode():
-        result = await executor_client().reconcile()
+        result = await _call_client(venue).reconcile()
         divergences = list(result.get("divergences", []))
         if not result.get("consistent", False):
-            await _halt_venue(divergences)
+            await _halt_venue(divergences, venue)
         return {
-            "venue": VENUE.value,
+            "venue": venue.value,
             "consistent": bool(result.get("consistent")),
             "divergences": divergences,
             "venue_halted": not result.get("consistent", False),
             "execution_backend": "executor",
             **_BOUNDARY,
         }
+    if venue is not VENUE:
+        raise ExecutorUnavailable(f"{venue.value} runs on its own executor only")
     _, ledger, adapter = await components()
     found = reconcile_balances(await ledger.balances(), await adapter.balances())
     if found:
@@ -355,10 +401,17 @@ async def reconcile() -> dict[str, object]:
 
 
 async def _dispatch(intent: TradeIntent, permit: RiskPermit) -> dict | None:
-    """Hand a permitted intent to the isolated executor."""
+    """Hand a permitted intent to the isolated executor of its venue."""
 
+    venue = XP_VENUE if intent.venue is XP_VENUE else VENUE
+    if venue is XP_VENUE and not xp_enabled():
+        await _record(
+            "ORDER_REFUSED",
+            {"intent_id": str(intent.intent_id), "reason": "xp_routing_not_configured"},
+        )
+        return None
     try:
-        body = await executor_client().submit(intent, permit)
+        body = await _call_client(venue).submit(intent, permit)
     except ExecutorRefused as exc:
         await _record(
             "ORDER_REFUSED",
@@ -374,7 +427,7 @@ async def _dispatch(intent: TradeIntent, permit: RiskPermit) -> dict | None:
     order = body["order"]
     await _record(f"ORDER_{order['status']}", order)
     if body.get("venue_halted"):
-        await _halt_venue([])
+        await _halt_venue([], venue)
     return order
 
 
@@ -383,6 +436,8 @@ async def execute(intent: TradeIntent, permit: RiskPermit) -> dict | None:
 
     if executor_mode():
         return await _dispatch(intent, permit)
+    if intent.venue is not VENUE:  # the in-process paper venue is Binance-only
+        return None
     if not settings.oms_paper_execution_enabled:
         return None
     oms, _, _ = await components()
@@ -395,6 +450,18 @@ async def execute(intent: TradeIntent, permit: RiskPermit) -> dict | None:
     return order.to_dict()
 
 
+def _venue_param(venue: str) -> VenueId:
+    try:
+        chosen = VenueId(venue.upper())
+    except ValueError as exc:
+        raise HTTPException(422, "unknown venue") from exc
+    if chosen not in (VENUE, XP_VENUE):
+        raise HTTPException(422, "venue must be BINANCE_SPOT or XP_B3")
+    if chosen is XP_VENUE and not xp_enabled():
+        raise HTTPException(409, "XP routing is not configured")
+    return chosen
+
+
 async def _from_executor(call) -> dict:
     try:
         return await call
@@ -405,10 +472,16 @@ async def _from_executor(call) -> dict:
 
 
 @router.get("/orders")
-async def list_orders(limit: int = 50) -> dict[str, object]:
+async def list_orders(limit: int = 50, venue: str = "BINANCE_SPOT") -> dict[str, object]:
+    chosen = _venue_param(venue)
     if executor_mode():
-        body = await _from_executor(executor_client().orders(limit))
-        return {"orders": body["orders"], "execution_backend": "executor", **_BOUNDARY}
+        body = await _from_executor(_call_client(chosen).orders(limit))
+        return {
+            "orders": body["orders"],
+            "venue": chosen.value,
+            "execution_backend": "executor",
+            **_BOUNDARY,
+        }
     oms, _, _ = await components()
     orders = oms.orders[-max(1, min(limit, 500)) :]
     return {"orders": [o.to_dict() for o in reversed(orders)], **_BOUNDARY}
@@ -433,7 +506,7 @@ async def ledger_view() -> dict[str, object]:
             "peak_equity": str(state.peak_equity),
             "gross_exposure": str(state.gross_exposure),
         }
-    return {
+    view: dict[str, object] = {
         "account_id": account_id,
         "venue": VENUE.value,
         "mode": mode,
@@ -441,17 +514,33 @@ async def ledger_view() -> dict[str, object]:
         "accounts": accounts,
         **_BOUNDARY,
     }
+    if executor_mode() and xp_enabled():
+        try:
+            xp = await executor_client(XP_VENUE).ledger()
+            view["xp_b3"] = {
+                "account_id": xp.get("account_id", XP_ACCOUNT_ID),
+                "venue": XP_VENUE.value,
+                "mode": "TESTNET",
+                "balances": dict(xp["balances"]),
+                "venue_halted": xp.get("venue_halted"),
+            }
+        except (ExecutorUnavailable, ExecutorRefused):
+            view["xp_b3"] = {"venue": XP_VENUE.value, "unavailable": True}
+    return view
 
 
 @router.post("/reconcile")
 async def reconcile_now() -> dict[str, object]:
     if executor_mode():
-        return await _from_executor(reconcile())
+        result = await _from_executor(reconcile())
+        if xp_enabled():
+            result = {**result, "xp_b3": await _from_executor(reconcile(XP_VENUE))}
+        return result
     return await reconcile()
 
 
 @router.post("/executor/halt/release")
-async def release_executor_halt() -> dict[str, object]:
+async def release_executor_halt(venue: str = "BINANCE_SPOT") -> dict[str, object]:
     """Operator action: release the executor's halt (divergence or watchdog).
 
     The executor refuses while its ledger and the venue still disagree. The watchdog halts it
@@ -460,17 +549,20 @@ async def release_executor_halt() -> dict[str, object]:
 
     if not executor_mode():
         raise HTTPException(409, "no executor backend is configured")
-    body = await _from_executor(executor_client().release_halt())
+    chosen = _venue_param(venue)
+    body = await _from_executor(_call_client(chosen).release_halt())
     await _record(
-        "EXECUTOR_HALT_RELEASED", {"by": "operator", "consistent": body.get("consistent")}
+        "EXECUTOR_HALT_RELEASED",
+        {"by": "operator", "venue": chosen.value, "consistent": body.get("consistent")},
     )
     return {**body, **_BOUNDARY}
 
 
 @router.post("/orders/{client_order_id}/resolve")
-async def resolve_order(client_order_id: str) -> dict[str, object]:
+async def resolve_order(client_order_id: str, venue: str = "BINANCE_SPOT") -> dict[str, object]:
+    chosen = _venue_param(venue)
     if executor_mode():
-        body = await _from_executor(executor_client().order_action(client_order_id, "resolve"))
+        body = await _from_executor(_call_client(chosen).order_action(client_order_id, "resolve"))
         return {"order": body["order"], **_BOUNDARY}
     oms, _, _ = await components()
     if oms.get(client_order_id) is None:
@@ -480,9 +572,10 @@ async def resolve_order(client_order_id: str) -> dict[str, object]:
 
 
 @router.post("/orders/{client_order_id}/cancel")
-async def cancel_order(client_order_id: str) -> dict[str, object]:
+async def cancel_order(client_order_id: str, venue: str = "BINANCE_SPOT") -> dict[str, object]:
+    chosen = _venue_param(venue)
     if executor_mode():
-        body = await _from_executor(executor_client().order_action(client_order_id, "cancel"))
+        body = await _from_executor(_call_client(chosen).order_action(client_order_id, "cancel"))
         return {"order": body["order"], **_BOUNDARY}
     oms, _, _ = await components()
     if oms.get(client_order_id) is None:

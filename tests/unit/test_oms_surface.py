@@ -285,7 +285,7 @@ async def test_unreachable_executor_falls_back_to_the_saved_baseline(monkeypatch
     today = datetime.now(UTC).date()
     await oms_surface._checkpoint_store().put("USDT", (today, Decimal("10500"), Decimal("10600")))
 
-    async def unavailable():
+    async def unavailable(venue=None):
         raise oms_surface.ExecutorUnavailable("down")
 
     monkeypatch.setattr(oms_surface, "_totals", unavailable)
@@ -295,7 +295,7 @@ async def test_unreachable_executor_falls_back_to_the_saved_baseline(monkeypatch
 
 
 async def _outage(monkeypatch) -> None:
-    async def unavailable():
+    async def unavailable(venue=None):
         raise oms_surface.ExecutorUnavailable("down")
 
     monkeypatch.setattr(oms_surface, "_totals", unavailable)

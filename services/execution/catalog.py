@@ -43,3 +43,37 @@ PAPER_INSTRUMENTS: dict[str, TradableInstrument] = {
         _binance_spot("SOL", "USDT", tick="0.01", lot="0.001", min_notional="5"),
     )
 }
+
+
+def _b3_fractional(symbol: str, *, asset_class: AssetClass) -> TradableInstrument:
+    """B3 fractional-market symbol: a lot of one share, tick R$0.01.
+
+    The executor loads the real grids from the terminal and a mismatch rejects the order; these
+    values only size proposals. The venue is XP through MetaTrader 5.
+    """
+
+    return TradableInstrument(
+        instrument_id=f"XP_B3:{symbol}",
+        venue=VenueId.XP_B3,
+        asset_class=asset_class,
+        base_asset=symbol,
+        quote_asset="BRL",
+        tick_size=Decimal("0.01"),
+        lot_size=Decimal("1"),
+        min_quantity=Decimal("1"),
+        min_notional=Decimal("0.01"),
+        session_type=SessionType.EXCHANGE_SESSION,
+        timezone="America/Sao_Paulo",
+    )
+
+
+# Not part of PAPER_INSTRUMENTS: the drills, the strategy and the paper venue iterate that
+# catalog and must keep seeing only Binance. The API adds these only when XP routing is on.
+B3_INSTRUMENTS: dict[str, TradableInstrument] = {
+    item.instrument_id: item
+    for item in (
+        _b3_fractional("PETR4F", asset_class=AssetClass.EQUITY),
+        _b3_fractional("VALE3F", asset_class=AssetClass.EQUITY),
+        _b3_fractional("BOVA11F", asset_class=AssetClass.ETF),
+    )
+}

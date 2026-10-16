@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     oms_execution_backend: str = "paper"
     executor_url: str | None = None
     executor_api_token: str | None = None
+    # XP (B3) through MT5: a second executor, one per venue. Unset leaves XP routing off and the
+    # API byte-for-byte as it was.
+    xp_executor_url: str | None = None
+    xp_executor_api_token: str | None = None
     operator_api_token: str | None = None
     # Phase 6b: the independent watchdog's token. It can only halt and report a heartbeat.
     watchdog_api_token: str | None = None
@@ -183,6 +187,29 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def enforce_xp_executor(self) -> Settings:
+        if not (self.xp_executor_url or self.xp_executor_api_token):
+            return self
+        if self.oms_execution_backend != "executor":
+            raise ValueError("XP_EXECUTOR_URL needs OMS_EXECUTION_BACKEND=executor")
+        if not self.xp_executor_url:
+            raise ValueError("XP_EXECUTOR_URL is required with XP_EXECUTOR_API_TOKEN")
+        token = self.xp_executor_api_token or ""
+        if len(token) < _MIN_PRODUCTION_SECRET_LENGTH:
+            raise ValueError("XP_EXECUTOR_API_TOKEN must be at least 32 characters")
+        if token in {self.executor_api_token, self.operator_api_token, self.watchdog_api_token}:
+            raise ValueError("XP_EXECUTOR_API_TOKEN must differ from the other API tokens")
+        return self
+
+    @property
+    def xp_routing_enabled(self) -> bool:
+        return bool(
+            self.oms_execution_backend == "executor"
+            and self.xp_executor_url
+            and self.xp_executor_api_token
+        )
+
     @field_validator("live_market_source")
     @classmethod
     def enforce_live_market_source(cls, value: str) -> str:
@@ -208,6 +235,7 @@ class Settings(BaseSettings):
         "tradingview_webhook_secret",
         "risk_permit_signing_key",
         "executor_api_token",
+        "xp_executor_api_token",
         "risk_permit_private_key",
         "watchdog_api_token",
     )
