@@ -1,0 +1,4 @@
+# Windows VM only (the MT5 Python API exists only on Windows).
+MetaTrader5>=5.0.45
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
