@@ -244,6 +244,126 @@ async def test_executor_mode_reads_the_opening_balance_when_reported(
     assert state.positions["BINANCE_SPOT:BTCUSDT"] == expected_position
 
 
+async def test_checkpoints_saved_with_the_faucet_btc_do_not_read_as_a_loss(monkeypatch) -> None:
+    """Start/peak saved with the faucet BTC in equity (~91k) must not trip the 1% / 5% locks."""
+
+    configure(monkeypatch)
+    _, ledger, _ = await oms_surface.components()
+    await ledger.post([_opening_btc("1")])
+    today = datetime.now(UTC).date()
+    await oms_surface._checkpoint_store().put("USDT", (today, Decimal("91000"), Decimal("91000")))
+    state = await oms_surface.account_state("USDT")
+    assert state.equity == Decimal("10000")
+    assert state.start_of_day_equity == Decimal("10000")
+    assert state.peak_equity == Decimal("10000")
+    # The rebase is a move to the own-book key: later reads keep that baseline, drawdown included.
+    assert await oms_surface._checkpoint_store().get(oms_surface._book_key("USDT")) == (
+        today,
+        Decimal("10000"),
+        Decimal("10000"),
+    )
+
+
+async def test_accounts_without_opening_holdings_keep_their_saved_checkpoint(monkeypatch) -> None:
+    """The basis did not change: a loss already on the books must stay, with no re-baseline."""
+
+    configure(monkeypatch)
+    await oms_surface.components()
+    today = datetime.now(UTC).date()
+    store = oms_surface._checkpoint_store()
+    await store.put("USDT", (today, Decimal("10500"), Decimal("10600")))
+    state = await oms_surface.account_state("USDT")
+    assert state.equity == Decimal("10000")
+    assert state.start_of_day_equity == Decimal("10500")
+    assert state.peak_equity == Decimal("10600")
+    assert await store.get(oms_surface._book_key("USDT")) is None
+
+
+async def test_unreachable_executor_falls_back_to_the_saved_baseline(monkeypatch) -> None:
+    configure(monkeypatch)
+    await oms_surface.components()
+    today = datetime.now(UTC).date()
+    await oms_surface._checkpoint_store().put("USDT", (today, Decimal("10500"), Decimal("10600")))
+
+    async def unavailable():
+        raise oms_surface.ExecutorUnavailable("down")
+
+    monkeypatch.setattr(oms_surface, "_totals", unavailable)
+    state = await oms_surface.account_state("USDT")
+    assert state.gross_exposure == Decimal("Infinity")
+    assert state.equity == Decimal("10500")
+
+
+async def _outage(monkeypatch) -> None:
+    async def unavailable():
+        raise oms_surface.ExecutorUnavailable("down")
+
+    monkeypatch.setattr(oms_surface, "_totals", unavailable)
+
+
+async def test_outage_uses_the_same_basis_rule_for_an_account_without_opening_holdings(
+    monkeypatch,
+) -> None:
+    """A stale <quote>:own row must not hide a loss kept on the plain checkpoint."""
+
+    configure(monkeypatch)
+    await oms_surface.components()
+    today = datetime.now(UTC).date()
+    store = oms_surface._checkpoint_store()
+    await store.put("USDT", (today, Decimal("10500"), Decimal("10600")))
+    await store.put(oms_surface._book_key("USDT"), (today, Decimal("9000"), Decimal("9500")))
+    await oms_surface.account_state("USDT")  # a good read records that nothing was held at open
+    await _outage(monkeypatch)
+    state = await oms_surface.account_state("USDT")
+    assert state.gross_exposure == Decimal("Infinity")
+    assert state.equity == Decimal("10500")
+    assert state.peak_equity == Decimal("10600")
+
+
+async def test_outage_uses_the_own_book_for_an_account_with_opening_holdings(monkeypatch) -> None:
+    configure(monkeypatch)
+    _, ledger, _ = await oms_surface.components()
+    await ledger.post([_opening_btc("1")])
+    today = datetime.now(UTC).date()
+    store = oms_surface._checkpoint_store()
+    await store.put("USDT", (today, Decimal("91000"), Decimal("91000")))
+    await oms_surface.account_state("USDT")  # rebases onto <quote>:own and records the opening
+    await _outage(monkeypatch)
+    state = await oms_surface.account_state("USDT")
+    assert state.equity == Decimal("10000")
+    assert state.peak_equity == Decimal("10000")
+
+
+async def test_cold_start_outage_takes_the_more_conservative_checkpoint(monkeypatch) -> None:
+    """With the basis unknown: lower start of day, higher peak, never the flattering pair."""
+
+    configure(monkeypatch)
+    await oms_surface.components()
+    today = datetime.now(UTC).date()
+    store = oms_surface._checkpoint_store()
+    await store.put("USDT", (today, Decimal("10500"), Decimal("10600")))
+    await store.put(oms_surface._book_key("USDT"), (today, Decimal("10000"), Decimal("10100")))
+    await _outage(monkeypatch)
+    state = await oms_surface.account_state("USDT")
+    assert state.equity == Decimal("10000")
+    assert state.peak_equity == Decimal("10600")
+
+
+def _opening_btc(amount: str):
+    from services.execution import LedgerEntry, LedgerEntryKind, VenueId
+
+    return LedgerEntry(
+        entry_id=entry_id("test", "opening", "btc"),
+        account_id=oms_surface.ACCOUNT_ID,
+        venue=VenueId.BINANCE_SPOT,
+        asset="BTC",
+        amount=Decimal(amount),
+        kind=LedgerEntryKind.OPENING_BALANCE,
+        reference_id="test",
+        recorded_at=datetime.now(UTC),
+    )
+
+
 def test_operator_routes_require_the_token(monkeypatch) -> None:
     configure(monkeypatch)
     client = TestClient(main.app)
@@ -291,21 +411,20 @@ async def test_equity_checkpoints_survive_a_restart(monkeypatch, tmp_path) -> No
         # An earlier high and an earlier start of day were recorded before the restart.
         checkpoints = SqlCheckpoints(engine, account_id=oms_surface.ACCOUNT_ID)
         today = datetime.now(UTC).date()
-        await checkpoints.put("USDT", (today, Decimal("10080"), Decimal("10600")))
+        key = "USDT"
+        await checkpoints.put(key, (today, Decimal("10080"), Decimal("10600")))
         oms_surface.reset_oms_state()
         restarted = await oms_surface.account_state("USDT")
         assert restarted.start_of_day_equity == Decimal("10080")
         assert restarted.peak_equity == Decimal("10600")
 
         # A new UTC day resets the start of day but never the peak.
-        await checkpoints.put(
-            "USDT", (today - timedelta(days=1), Decimal("9000"), Decimal("10600"))
-        )
+        await checkpoints.put(key, (today - timedelta(days=1), Decimal("9000"), Decimal("10600")))
         oms_surface.reset_oms_state()
         next_day = await oms_surface.account_state("USDT")
         assert next_day.start_of_day_equity == Decimal("10000")
         assert next_day.peak_equity == Decimal("10600")
-        assert await checkpoints.get("USDT") == (today, Decimal("10000"), Decimal("10600"))
+        assert await checkpoints.get(key) == (today, Decimal("10000"), Decimal("10600"))
     finally:
         await engine.dispose()
 

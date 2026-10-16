@@ -66,6 +66,7 @@ _checkpoints: InMemoryCheckpoints | SqlCheckpoints | None = None
 _executor: ExecutorClient | None = None
 _executor_settings_id: int | None = None
 _oms_settings_id: int | None = None
+_last_openings: dict[str, Decimal] | None = None  # opening holdings seen by the last good read
 _start_lock = asyncio.Lock()
 
 
@@ -156,7 +157,8 @@ async def components() -> tuple[OrderManager, InMemoryLedger | SqlLedger, PaperV
 
 def reset_oms_state() -> None:
     global _oms, _ledger, _adapter, _checkpoints, _oms_settings_id
-    global _executor, _executor_settings_id
+    global _executor, _executor_settings_id, _last_openings
+    _last_openings = None
     _oms = _ledger = _adapter = _checkpoints = _executor = None
     _oms_settings_id = _executor_settings_id = None
 
@@ -184,6 +186,53 @@ async def _totals() -> tuple[dict[str, Decimal], dict[str, Decimal]]:
     )
 
 
+def _book_key(quote_asset: str) -> str:
+    """Checkpoint key for the own-book accounting basis (see ``_checkpoint_key``)."""
+
+    return f"{quote_asset}:own"
+
+
+def _checkpoint_key(quote_asset: str, openings: dict[str, Decimal]) -> str:
+    """Where this quote currency's start-of-day and peak equity are kept.
+
+    Equity used to include the venue's opening holdings (the testnet faucet's 1 BTC), so values
+    saved on that basis would read the switch to the own book as a ~89% loss and trip the
+    daily-loss and drawdown lockdowns. Only a quote currency with such holdings moves to the
+    ``<quote>:own`` key and starts from its own baseline once. Every other account keeps its
+    saved checkpoint: its basis did not change, and a loss already on the books must stay there.
+    """
+
+    affected = any(
+        openings.get(instrument.base_asset, Decimal("0")) > 0
+        for instrument in _INSTRUMENTS.values()
+        if instrument.quote_asset == quote_asset
+    )
+    return _book_key(quote_asset) if affected else quote_asset
+
+
+async def _outage_checkpoint(checkpoints, quote_asset: str):
+    """The checkpoint to hold equity at while the executor cannot be read.
+
+    Same basis rule as a normal read, using the opening holdings seen last (they are a snapshot
+    and never change). With none seen yet (a cold start during the outage) the basis is unknown,
+    so take the more conservative of both keys: the lower start of day and the higher peak.
+    """
+
+    if _last_openings is not None:
+        return await checkpoints.get(_checkpoint_key(quote_asset, _last_openings))
+    rows = [
+        row
+        for row in (
+            await checkpoints.get(_book_key(quote_asset)),
+            await checkpoints.get(quote_asset),
+        )
+        if row
+    ]
+    if not rows:
+        return None
+    return rows[0][0], min(row[1] for row in rows), max(row[2] for row in rows)
+
+
 async def account_state(quote_asset: str) -> AccountState:
     """Conservative account view in one quote currency, marked at live mid prices.
 
@@ -194,12 +243,13 @@ async def account_state(quote_asset: str) -> AccountState:
     executor blocks new risk the same way.
     """
 
+    global _last_openings
     checkpoints = _checkpoint_store()
     try:
         balances, openings = await _totals()
     except (ExecutorUnavailable, ExecutorRefused) as exc:
         logger.error("account state unavailable: %s", exc)
-        saved = await checkpoints.get(quote_asset)
+        saved = await _outage_checkpoint(checkpoints, quote_asset)
         baseline = saved[1] if saved else REFERENCE_CAPITAL
         return AccountState(
             equity=baseline,
@@ -208,6 +258,7 @@ async def account_state(quote_asset: str) -> AccountState:
             gross_exposure=Decimal("Infinity"),
             positions={},
         )
+    _last_openings = openings
     cash = balances.get(quote_asset, Decimal("0"))
     positions: dict[str, Decimal] = {}
     exposure = Decimal("0")
@@ -233,7 +284,8 @@ async def account_state(quote_asset: str) -> AccountState:
         exposure += quantity * (quote.bid + quote.ask) / 2
 
     today = datetime.now(UTC).date()
-    saved = await checkpoints.get(quote_asset)
+    key = _checkpoint_key(quote_asset, openings)
+    saved = await checkpoints.get(key)
     day, start, peak = saved or (today, cash + exposure, cash + exposure)
     if not marked:
         return AccountState(
@@ -248,7 +300,7 @@ async def account_state(quote_asset: str) -> AccountState:
         day, start = today, equity
     checkpoint = (day, start, max(peak, equity))
     if checkpoint != saved:
-        await checkpoints.put(quote_asset, checkpoint)
+        await checkpoints.put(key, checkpoint)
     return AccountState(
         equity=equity,
         start_of_day_equity=start,

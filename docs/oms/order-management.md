@@ -85,6 +85,12 @@ reconciles after every paper order and on `POST /v1/oms/reconcile`.
   reference capital and swing the daily loss with prices PROTO never traded. Only what PROTO bought
   counts as exposure, and only that can be sold. The executor reports `opening` per asset in
   `/v1/ledger`; an executor that does not report it keeps the stricter reading (all of it counts).
+  Only a quote currency whose base assets have opening holdings changes basis: its start-of-day
+  and peak equity move to `<quote>:own` and start from the current equity once, because values saved
+  with the faucet BTC inside equity would read as an ~89% loss. Every other account keeps its saved
+  checkpoint, so a loss already on the books is never wiped. While the executor cannot be read, the
+  same rule applies using the opening holdings seen last; with none seen (cold start) the lower
+  start of day and the higher peak of the two keys are used.
 - **Start-of-day equity** resets on each UTC day; **peak equity** is tracked continuously. Together
   they drive the 1% daily-loss and 5% drawdown lockdowns. Both are checkpointed per quote currency
   in `oms_equity_checkpoints`, so a restart can neither reset the daily-loss baseline nor forget
