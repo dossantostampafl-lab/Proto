@@ -20,7 +20,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from services.execution import ReleaseStage, TradeIntent
-from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import (
     MAX_DAILY_LOSS,
     MAX_DRAWDOWN,
@@ -44,6 +43,7 @@ from services.risk.permit_keys import decode_key
 
 from .app_state import runtime
 from .event_state import JournalUnavailable, record_operational_event
+from .instrument_registry import active_instruments
 from .market_quotes import live_quote
 from .models import KillSwitchState
 from .settings import settings
@@ -74,7 +74,7 @@ def _build() -> tuple[RiskGovernor, PermitLedger]:
             key = configured.encode() if configured else os.urandom(32)
             signer = PermitSigner(key, ttl=ttl)
         engine = RiskEngine(
-            instruments=PAPER_INSTRUMENTS,
+            instruments=active_instruments(),
             signer=signer,
             policy=RiskPolicy(
                 stop_distance=Decimal(str(settings.risk_stop_distance)),
