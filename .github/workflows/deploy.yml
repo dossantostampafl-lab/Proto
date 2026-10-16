@@ -17,10 +17,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: deploy
-  cancel-in-progress: false
-
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/proto
 
@@ -31,6 +27,11 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04-arm  # the instances are Ampere A1 (arm64)
+    # Images publish one at a time. This lock is per job, so an executor approval still
+    # waiting never holds back the next :stable image.
+    concurrency:
+      group: deploy-image
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -66,6 +67,10 @@ jobs:
     needs: image
     runs-on: ubuntu-latest
     environment: executor
+    # Only the newest image waits for approval: a newer run cancels an older pending one.
+    concurrency:
+      group: deploy-executor
+      cancel-in-progress: true
     permissions:
       packages: write
     steps:
