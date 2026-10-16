@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, WS_BASE } from "../api";
 import type { Shared } from "../main";
 import { Button, Panel, Tag } from "../ui";
+import { DeskDrawer, useDeskSelection } from "./floorDesks";
 
 import { type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone, type WatchdogSummary } from "./floorScene";
 
@@ -56,7 +57,11 @@ function Watchdog({ watchdog }: { watchdog: WatchdogSummary | undefined }) {
   );
 }
 
-function DeskCards({ latest, active }: { latest: Partial<Record<StationId, FloorAction>>; active: (s: StationId) => boolean }) {
+/** One card per desk: the same live headline in readable type, and a button that opens the desk. */
+function DeskCards({ latest, active, selected, onSelect }: {
+  latest: Partial<Record<StationId, FloorAction>>; active: (s: StationId) => boolean;
+  selected: StationId | null; onSelect: (id: StationId) => void;
+}) {
   return (
     <ul className="fl-desks" aria-label="Agent desks">
       {STATIONS.map(s => {
@@ -64,9 +69,11 @@ function DeskCards({ latest, active }: { latest: Partial<Record<StationId, Floor
         const color = TONE_COLOR[a?.tone ?? "idle"];
         return (
           <li key={s.id} className={active(s.id) ? "busy" : ""} style={{ borderColor: color }}>
-            <b style={{ color }}>{s.label}</b>
-            <span>{a?.headline ?? "waiting for work"}</span>
-            <small>{a ? `${a.at.slice(11, 19)}${a.symbol ? ` · ${a.symbol}` : ""}` : s.role}</small>
+            <button type="button" aria-pressed={selected === s.id} aria-label={`Open the ${s.label} desk`} onClick={() => onSelect(s.id)}>
+              <b style={{ color }}>{s.label}</b>
+              <span>{a?.headline ?? "waiting for work"}</span>
+              <small>{a ? `${a.at.slice(11, 19)}${a.symbol ? ` · ${a.symbol}` : ""}` : s.role}</small>
+            </button>
           </li>
         );
       })}
@@ -150,6 +157,8 @@ const TONE_LABEL: Record<Tone, string> = { ok: "ok", warn: "attention", alert: "
 
 export function Floor({ market }: Shared) {
   const floor = useFloor();
+  const { selected, select } = useDeskSelection();
+  const closeDesk = useCallback(() => select(null), [select]);
   const pan = useRef<HTMLDivElement>(null);
   // On narrow screens the scene pans; start centred on the desks, not on the window wall.
   useEffect(() => {
@@ -171,8 +180,9 @@ export function Floor({ market }: Shared) {
           {!floor.stateFresh && <span className="floor-stale">floor state {state == null ? "unavailable" : "last known"}</span>}
         </span>}
       >
-        <div className="fl-pan" ref={pan}><Scene market={market} state={state} actions={floor.actions} latest={floor.latest} active={floor.active} /></div>
-        <DeskCards latest={floor.latest} active={floor.active} />
+        <div className="fl-pan" ref={pan}><Scene market={market} state={state} actions={floor.actions} latest={floor.latest} active={floor.active} onSelect={select} selected={selected} /></div>
+        <p className="fl-hint">Click or press Enter on a desk to open it: live data, its recent actions and, with the operator token, its actions.</p>
+        <DeskCards latest={floor.latest} active={floor.active} selected={selected} onSelect={select} />
       </Panel>
 
       <div className="floor-side">
@@ -220,6 +230,7 @@ export function Floor({ market }: Shared) {
           ) : <p className="empty">No agent activity yet. Alerts from TradingView start the chain.</p>}
         </Panel>
       </div>
+      {selected && <DeskDrawer key={selected} id={selected} state={state} actions={floor.actions} latest={floor.latest} onClose={closeDesk} />}
     </div>
   );
 }
