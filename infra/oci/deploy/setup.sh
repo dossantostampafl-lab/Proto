@@ -110,6 +110,12 @@ stack_apply || die "the stack could not be synced"
 BASTION="$(out bastion_id)"; VAULT="$(out vault_id)"
 EXECUTOR_IP="$(out private_ips executor)"; API_IP="$(out private_ips api)"
 DOMAIN="$(var domain)"
+# No domain of your own: sslip.io resolves <a-b-c-d>.sslip.io to a.b.c.d, so Caddy can still get a
+# real certificate for the API's public IP and serve the dashboard over HTTPS on 443.
+if [ -z "$DOMAIN" ]; then
+  API_PUBLIC="$(out api_public_ip)"
+  [[ "$API_PUBLIC" =~ ^[0-9]+(\.[0-9]+){3}$ ]] && DOMAIN="${API_PUBLIC//./-}.sslip.io"
+fi
 
 # --- 2. Secrets in the Vault -------------------------------------------------------------------
 step "2/5 Secrets in the Vault (created once, values never shown)"
@@ -264,4 +270,5 @@ printf '  %-9s %-10s %-10s %s\n' role bootstrap secrets deploy
 for role in "${ROLES[@]}"; do
   printf '  %-9s %-10s %-10s %s\n' "$role" "${RESULT[$role.bootstrap]:--}" "${RESULT[$role.secrets]:--}" "${RESULT[$role.deploy]:--}"
 done
+[ -n "$DOMAIN" ] && note "dashboard: https://$DOMAIN (the certificate can take a minute after the first deploy)"
 note "full log: $LOG"

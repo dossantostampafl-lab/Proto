@@ -266,3 +266,13 @@ def test_the_database_does_not_depend_on_nat_rules_a_firewall_reload_wipes() -> 
     assert "pg_isready -q -h 127.0.0.1 -p 5432" in db
     # An existing database on the old published port is recreated (its volume is kept).
     assert "{{.HostConfig.NetworkMode}}" in db and '-v "${name}:/var/lib/postgresql/data"' in db
+
+
+def test_without_a_domain_the_dashboard_still_gets_https_on_the_api_public_ip() -> None:
+    setup = (OCI / "deploy/setup.sh").read_text()
+    assert 'API_PUBLIC="$(out api_public_ip)"' in setup
+    assert 'DOMAIN="${API_PUBLIC//./-}.sslip.io"' in setup
+    # Only a dotted IPv4 becomes a name; a missing output (None) leaves DOMAIN empty.
+    assert "^[0-9]+(\\.[0-9]+){3}$" in setup
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    assert "len(v) >= 16" in deploy  # the database user ("executor") is not a secret
