@@ -188,6 +188,62 @@ async def test_account_state_marks_positions_and_blocks_without_marks(monkeypatc
     assert unmarked.equity == unmarked.start_of_day_equity
 
 
+async def test_opening_holdings_are_outside_the_proto_book(monkeypatch) -> None:
+    """The testnet faucet's 1 BTC must not count as PROTO exposure against 10k of capital."""
+
+    configure(monkeypatch)
+    _, ledger, _ = await oms_surface.components()
+
+    from services.execution import LedgerEntry, LedgerEntryKind, VenueId
+
+    def entry(kind: LedgerEntryKind, amount: str) -> LedgerEntry:
+        return LedgerEntry(
+            entry_id=entry_id("test", kind.value, "btc"),
+            account_id=oms_surface.ACCOUNT_ID,
+            venue=VenueId.BINANCE_SPOT,
+            asset="BTC",
+            amount=Decimal(amount),
+            kind=kind,
+            reference_id="test",
+            recorded_at=datetime.now(UTC),
+        )
+
+    await ledger.post([entry(LedgerEntryKind.OPENING_BALANCE, "1")])
+    assert (await ledger.balances())["BTC"].opening == Decimal("1")
+    opening_only = await oms_surface.account_state("USDT")
+    assert opening_only.positions["BINANCE_SPOT:BTCUSDT"] == 0
+    assert opening_only.gross_exposure == 0
+    assert opening_only.equity == Decimal("10000")
+
+    await ledger.post([entry(LedgerEntryKind.TRADE, "0.01")])
+    traded = await oms_surface.account_state("USDT")
+    assert traded.positions["BINANCE_SPOT:BTCUSDT"] == Decimal("0.01")
+    assert traded.gross_exposure == Decimal("620.0010")
+
+
+@pytest.mark.parametrize(
+    ("btc_row", "expected_position"),
+    [
+        ({"total": "1.01", "opening": "1"}, Decimal("0.01")),
+        # An executor that does not report the opening balance keeps the stricter reading.
+        ({"total": "1.01"}, Decimal("1.01")),
+    ],
+)
+async def test_executor_mode_reads_the_opening_balance_when_reported(
+    monkeypatch, btc_row, expected_position
+) -> None:
+    configure(monkeypatch)
+
+    class FakeExecutor:
+        async def ledger(self) -> dict:
+            return {"balances": {"USDT": {"total": "10000"}, "BTC": btc_row}}
+
+    monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
+    monkeypatch.setattr(oms_surface, "executor_client", lambda: FakeExecutor())
+    state = await oms_surface.account_state("USDT")
+    assert state.positions["BINANCE_SPOT:BTCUSDT"] == expected_position
+
+
 def test_operator_routes_require_the_token(monkeypatch) -> None:
     configure(monkeypatch)
     client = TestClient(main.app)

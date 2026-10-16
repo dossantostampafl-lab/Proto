@@ -80,6 +80,11 @@ reconciles after every paper order and on `POST /v1/oms/reconcile`.
 `account_state(quote_asset)` builds the Risk Engine's view from the ledger.
 
 - **Equity** is quote cash plus positions marked at the live mid price.
+- **Positions are PROTO's own:** total minus the `OPENING_BALANCE`. Holdings the venue already had
+  (the Binance testnet faucet gives 1 BTC) are outside the book: they would swamp the R$10,000
+  reference capital and swing the daily loss with prices PROTO never traded. Only what PROTO bought
+  counts as exposure, and only that can be sold. The executor reports `opening` per asset in
+  `/v1/ledger`; an executor that does not report it keeps the stricter reading (all of it counts).
 - **Start-of-day equity** resets on each UTC day; **peak equity** is tracked continuously. Together
   they drive the 1% daily-loss and 5% drawdown lockdowns. Both are checkpointed per quote currency
   in `oms_equity_checkpoints`, so a restart can neither reset the daily-loss baseline nor forget
