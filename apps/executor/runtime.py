@@ -25,6 +25,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from services.execution import ReleaseStage, RiskPermit, TradeIntent, VenueId
+from services.execution.venue import VenueAdapter
 from services.oms import (
     ManagedOrder,
     OrderManager,
@@ -39,13 +40,13 @@ from services.risk import Ed25519PermitVerifier, PermitLedger, PermitSigner, Per
 from services.risk.permit_keys import decode_key
 from services.venues.binance import BinanceSpotAdapter, load_instruments
 from services.venues.credentials import load_credentials
+from services.venues.xp_mt5 import XpMt5Adapter, bridge_client
 
 from .settings import ExecutorSettings
 
 logger = logging.getLogger("proto.executor")
 
-VENUE = VenueId.BINANCE_SPOT
-AdapterFactory = Callable[[ExecutorSettings], Awaitable[BinanceSpotAdapter]]
+AdapterFactory = Callable[[ExecutorSettings], Awaitable[BinanceSpotAdapter | XpMt5Adapter]]
 
 
 class ExecutorHalted(RuntimeError):
@@ -53,7 +54,7 @@ class ExecutorHalted(RuntimeError):
 
 
 async def binance_adapter(settings: ExecutorSettings) -> BinanceSpotAdapter:
-    credentials = load_credentials(VENUE, settings.environment, settings.account)
+    credentials = load_credentials(VenueId.BINANCE_SPOT, settings.environment, settings.account)
     client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
     instruments = await load_instruments(
         settings.symbol_list, environment=settings.environment, client=client
@@ -62,6 +63,22 @@ async def binance_adapter(settings: ExecutorSettings) -> BinanceSpotAdapter:
         await client.aclose()
         raise RuntimeError("no tradable instruments loaded from exchangeInfo")
     return BinanceSpotAdapter(credentials, instruments=instruments, client=client)
+
+
+async def xp_adapter(settings: ExecutorSettings) -> XpMt5Adapter:
+    """The MT5 bridge on the Windows host: the account's password never leaves that host."""
+
+    assert settings.bridge_url is not None and settings.bridge_token is not None
+    client = bridge_client(settings.bridge_url, settings.bridge_token.get_secret_value())
+    try:
+        return await XpMt5Adapter.connect(client, symbols=settings.symbol_list)
+    except BaseException:
+        await client.aclose()
+        raise
+
+
+def default_adapter_factory(settings: ExecutorSettings) -> AdapterFactory:
+    return xp_adapter if settings.venue is VenueId.XP_B3 else binance_adapter
 
 
 def _utc_now() -> datetime:
@@ -73,15 +90,16 @@ class Executor:
         self,
         settings: ExecutorSettings,
         *,
-        adapter_factory: AdapterFactory = binance_adapter,
+        adapter_factory: AdapterFactory | None = None,
         engine: AsyncEngine | None = None,
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
         self.settings = settings
-        self._adapter_factory = adapter_factory
+        self.venue = settings.venue
+        self._adapter_factory = adapter_factory or default_adapter_factory(settings)
         self._engine = engine
         self._clock = clock
-        self.adapter: BinanceSpotAdapter | None = None
+        self.adapter: VenueAdapter | None = None
         self.ledger: SqlLedger | None = None
         self.oms: OrderManager | None = None
         self.halted: str | None = None
@@ -104,12 +122,14 @@ class Executor:
         async with engine.begin() as connection:
             await connection.run_sync(ledger_metadata.create_all)
         account_id = self.settings.account_id
-        ledger = SqlLedger(engine, account_id=account_id, venue=VENUE)
+        ledger = SqlLedger(engine, account_id=account_id, venue=self.venue)
         if not await ledger.balances():
             # First start: the ledger opens from what the account already holds.
             snapshot = await adapter.balances()
             await ledger.post(
-                opening_balances(snapshot, account_id=account_id, venue=VENUE, now=self._clock())
+                opening_balances(
+                    snapshot, account_id=account_id, venue=self.venue, now=self._clock()
+                )
             )
             self._event("LEDGER_OPENED", {"assets": sorted(snapshot)})
         signer: PermitVerifier
@@ -171,8 +191,8 @@ class Executor:
             return existing
         if self.halted is not None:
             raise ExecutorHalted(self.halted)
-        if intent.venue is not VENUE:
-            raise ValueError(f"this executor only trades {VENUE.value}")
+        if intent.venue is not self.venue:
+            raise ValueError(f"this executor only trades {self.venue.value}")
         if intent.stage not in (ReleaseStage.PAPER, ReleaseStage.SHADOW):
             # CANARY and LIVE move real money: never on a testnet executor.
             raise ValueError(f"{intent.stage.value} intents need a certified live executor")
@@ -206,7 +226,7 @@ class Executor:
                 )
                 logger.error("executor halted: %s", [d.to_dict() for d in divergences])
             return {
-                "venue": VENUE.value,
+                "venue": self.venue.value,
                 "consistent": not divergences,
                 "divergences": [d.to_dict() for d in divergences],
                 "venue_halted": self.halted is not None,

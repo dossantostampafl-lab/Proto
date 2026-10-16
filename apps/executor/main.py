@@ -150,6 +150,18 @@ def create_app(executor: Executor | None = None) -> FastAPI:
             **_boundary(executor_),
         }
 
+    @app.get("/v1/quotes")
+    async def quotes(executor_: Authorized, names: str = ""):
+        """Venue quotes for the public API's sizing and Risk Engine (XP_B3: from the terminal)."""
+
+        feed = getattr(executor_.adapter, "quotes", None)
+        if feed is None:
+            raise HTTPException(404, f"{executor_.venue.value} has no quote feed here")
+        symbols = [n.strip().upper() for n in names.split(",") if n.strip()]
+        if not symbols:
+            raise HTTPException(422, "names is required")
+        return {"quotes": await feed(symbols), **_boundary(executor_)}
+
     @app.post("/v1/reconcile")
     async def reconcile(executor_: Authorized):
         return {**await executor_.reconcile(), **_boundary(executor_)}
