@@ -165,6 +165,22 @@ def test_a_limit_order_rests_then_fills_with_fees_and_a_resubmit_places_nothing(
     )
 
 
+def test_the_terminal_comment_stays_within_the_limit_the_xp_terminal_accepts(tmp_path) -> None:
+    """The XP terminal refuses comments over 29 characters; real OMS ids have 32."""
+
+    terminal = FakeTerminal()
+    adapter = connect(wire(terminal, tmp_path))
+    client_order_id = "PX" + "ca456ff233f68a625a389a153c5aff"
+    assert len(client_order_id) == 32
+    placed = asyncio.run(adapter.submit(order(client_order_id)))
+    assert placed.status is OrderStatus.ACKNOWLEDGED
+    assert len(terminal.sent[0]["comment"]) <= 29
+    # The label is cosmetic: identity is the full id kept by the bridge.
+    again = asyncio.run(adapter.submit(order(client_order_id)))
+    assert again.venue_order_id == placed.venue_order_id and len(terminal.sent) == 1
+    assert asyncio.run(adapter.query(client_order_id)).venue_order_id == placed.venue_order_id
+
+
 def test_cancel_removes_the_pending_order_and_unknown_ids_are_not_found(tmp_path) -> None:
     terminal = FakeTerminal()
     adapter = connect(wire(terminal, tmp_path))
