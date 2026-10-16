@@ -31,6 +31,10 @@ from . import gateway as g
 _CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,36}$")
 _SYMBOL = re.compile(r"^[A-Z0-9]{3,12}$")
 MAGIC = 20261016  # tags PROTO's orders in the terminal
+# The XP terminal refuses an order whose comment is longer than 29 characters (measured with
+# order_check: 29 passes, 30 and 31 fail with (-2, 'Invalid "comment" argument')). The comment is
+# only a label: the order id is kept in the bridge's own store.
+COMMENT_MAX = 29
 
 
 class OrderRequest(BaseModel):
@@ -226,7 +230,7 @@ def create_app(terminal: g.Mt5Gateway, *, token: str, store_path: Path) -> FastA
             "symbol": request.symbol,
             "volume": float(request.quantity),
             "magic": MAGIC,
-            "comment": request.client_order_id[:31],
+            "comment": request.client_order_id[:COMMENT_MAX],
         }
         if request.order_type == "LIMIT":
             mt5_request.update(
