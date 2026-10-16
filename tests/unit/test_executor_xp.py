@@ -232,6 +232,11 @@ def test_quotes_route_serves_the_terminal_quotes_and_requires_names(tmp_path) ->
         assert Decimal(quotes["quotes"]["PETR4F"]["bid"]) == Decimal("38.10")
         assert quotes["real_money_execution"] is False
         assert client.get("/v1/quotes", headers=AUTH).status_code == 422
+        # Least privilege: only symbols the executor was configured for, and a bounded list.
+        outside = client.get("/v1/quotes", params={"names": "PETR4F,ABEV3"}, headers=AUTH)
+        assert outside.status_code == 422 and "ABEV3" in outside.json()["detail"]
+        many = ",".join(f"S{i}" for i in range(21))
+        assert client.get("/v1/quotes", params={"names": many}, headers=AUTH).status_code == 422
         ledger = client.get("/v1/ledger", headers=AUTH).json()
         assert ledger["account_id"] == "xp-b3-testnet-main"
 

@@ -25,6 +25,7 @@ from .settings import ExecutorSettings
 
 _bearer = HTTPBearer(auto_error=False)
 Bearer = Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]
+MAX_QUOTE_NAMES = 20
 
 
 class ExecuteRequest(BaseModel):
@@ -160,6 +161,12 @@ def create_app(executor: Executor | None = None) -> FastAPI:
         symbols = [n.strip().upper() for n in names.split(",") if n.strip()]
         if not symbols:
             raise HTTPException(422, "names is required")
+        if len(symbols) > MAX_QUOTE_NAMES:
+            raise HTTPException(422, f"at most {MAX_QUOTE_NAMES} names per request")
+        configured = set(executor_.settings.symbol_list)
+        unknown = sorted(set(symbols) - configured)
+        if unknown:  # least privilege: only the symbols this executor was configured for
+            raise HTTPException(422, f"not configured on this executor: {', '.join(unknown)}")
         return {"quotes": await feed(symbols), **_boundary(executor_)}
 
     @app.post("/v1/reconcile")
