@@ -276,3 +276,18 @@ def test_without_a_domain_the_dashboard_still_gets_https_on_the_api_public_ip() 
     assert "^[0-9]+(\\.[0-9]+){3}$" in setup
     deploy = (OCI / "deploy/proto-deploy.sh").read_text()
     assert "len(v) >= 16" in deploy  # the database user ("executor") is not a secret
+
+
+def test_a_pending_executor_approval_never_blocks_the_next_stable_image() -> None:
+    import yaml
+
+    spec = yaml.safe_load(Path(".github/workflows/deploy.yml").read_text())
+    # A workflow-level lock held the next run behind an approval that was still waiting.
+    assert "concurrency" not in spec
+    assert spec["jobs"]["image"]["concurrency"] == {
+        "group": "deploy-image",
+        "cancel-in-progress": False,
+    }
+    executor = spec["jobs"]["executor"]
+    assert executor["concurrency"] == {"group": "deploy-executor", "cancel-in-progress": True}
+    assert executor["environment"] == "executor"
