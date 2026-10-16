@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from services.execution.constitution import MAX_DAILY_LOSS, MAX_DRAWDOWN
+from services.execution.constitution import MAX_DAILY_LOSS, MAX_DRAWDOWN, REFERENCE_CAPITAL
 
 
 @dataclass(frozen=True)
@@ -123,13 +123,14 @@ class Checks:
                 if start > 0:
                     check(
                         f"daily_loss_{asset}",
-                        equity / start - 1 <= -lim.max_daily_loss,
+                        (equity - start) / min(start, REFERENCE_CAPITAL)
+                        <= -lim.max_daily_loss,
                         reason=f"daily_loss:{asset}",
                     )
                 if peak > 0:
                     check(
                         f"drawdown_{asset}",
-                        equity / peak - 1 <= -lim.max_drawdown,
+                        (equity - peak) / min(peak, REFERENCE_CAPITAL) <= -lim.max_drawdown,
                         reason=f"drawdown:{asset}",
                     )
             pipeline = floor.get("pipeline") or {}

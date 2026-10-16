@@ -22,6 +22,7 @@ from services.execution.constitution import (
     MAX_DRAWDOWN,
     MAX_GROSS_LEVERAGE,
     MAX_RISK_PER_POSITION,
+    REFERENCE_CAPITAL,
     conservative_equity,
 )
 from services.execution.venue import Quote
@@ -112,12 +113,22 @@ def session_open(instrument: TradableInstrument, now: datetime) -> bool:
 
 
 def account_breach(account: AccountState) -> tuple[LockdownReason | None, Decimal, Decimal]:
-    """Daily loss and drawdown as fractions; unknown baselines count as breached."""
+    """Daily loss and drawdown as fractions; unknown baselines count as breached.
+
+    A loss is measured against the equity it started from, but never against more than the
+    reference capital: on an account holding far more than R$ 10,000 (the XP demo holds R$ 1M)
+    1% is R$ 100, not 1% of the balance. For an account at or under the reference capital nothing
+    changes; above it the limit is only ever tighter.
+    """
 
     sod = account.start_of_day_equity
-    daily_loss = (sod - account.equity) / sod if sod > 0 else Decimal("1")
+    daily_loss = (
+        (sod - account.equity) / min(sod, REFERENCE_CAPITAL) if sod > 0 else Decimal("1")
+    )
     peak = account.peak_equity
-    drawdown = (peak - account.equity) / peak if peak > 0 else Decimal("1")
+    drawdown = (
+        (peak - account.equity) / min(peak, REFERENCE_CAPITAL) if peak > 0 else Decimal("1")
+    )
     if daily_loss >= MAX_DAILY_LOSS:
         return LockdownReason.DAILY_LOSS, daily_loss, drawdown
     if drawdown >= MAX_DRAWDOWN:
