@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 
@@ -31,6 +32,8 @@ from services.market_data import (
 )
 
 from .live_database import LiveBase
+
+logger = logging.getLogger(__name__)
 
 _HISTORY_CURSOR_VERSION = 2
 _MAX_HISTORY_CURSOR_CHARS = 512
@@ -200,6 +203,7 @@ class AsyncSqlLiveTickJournal:
         self._pruned_rows = 0
         self._writes_since_prune = 0
         self._last_write_error: str | None = None
+        self._last_write_error_cause: str | None = None
         self._last_read_error: str | None = None
         self._last_maintenance_error: str | None = None
         self._last_write_success_at: datetime | None = None
@@ -262,11 +266,25 @@ class AsyncSqlLiveTickJournal:
                 await session.rollback()
                 self._write_failures += 1
                 self._last_write_error = type(error).__name__
+                # Driver exception class only (e.g. UndefinedTableError): the public status
+                # must not carry SQL text, parameters or connection details.
+                self._last_write_error_cause = type(
+                    getattr(error, "orig", None) or error.__cause__ or error
+                ).__name__
+                if self._write_failures == 1 or self._write_failures % 1000 == 0:
+                    logger.error(
+                        "live tick journal write failed (%d so far): %s / %s",
+                        self._write_failures,
+                        self._last_write_error,
+                        self._last_write_error_cause,
+                        exc_info=True,
+                    )
                 raise LiveTickJournalError("failed to persist live market tick") from error
 
         self._writes_inserted += 1
         self._writes_since_prune += 1
         self._last_write_error = None
+        self._last_write_error_cause = None
         self._last_write_success_at = persisted_at
         if self._writes_since_prune >= self.prune_every_writes:
             self._writes_since_prune = 0
@@ -405,6 +423,7 @@ class AsyncSqlLiveTickJournal:
             "retention_seconds": self.retention_seconds,
             "prune_every_writes": self.prune_every_writes,
             "last_write_error": self._last_write_error,
+            "last_write_error_cause": self._last_write_error_cause,
             "last_read_error": self._last_read_error,
             "last_maintenance_error": self._last_maintenance_error,
             "last_write_success_at": (
