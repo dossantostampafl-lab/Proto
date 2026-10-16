@@ -489,10 +489,18 @@ async def list_orders(limit: int = 50, venue: str = "BINANCE_SPOT") -> dict[str,
 
 @router.get("/ledger")
 async def ledger_view() -> dict[str, object]:
+    binance_unavailable = False
     if executor_mode():
-        body = await _from_executor(executor_client().ledger())
-        balances_view = body["balances"]
-        account_id, mode = body.get("account_id", EXECUTOR_ACCOUNT_ID), "TESTNET"
+        try:
+            body = await _from_executor(executor_client().ledger())
+            balances_view = body["balances"]
+            account_id, mode = body.get("account_id", EXECUTOR_ACCOUNT_ID), "TESTNET"
+        except HTTPException:
+            if not xp_enabled():  # unchanged without XP: one executor, one failure
+                raise
+            # With two venues one being down must not hide the other.
+            binance_unavailable = True
+            balances_view, account_id, mode = {}, EXECUTOR_ACCOUNT_ID, "TESTNET"
     else:
         _, ledger, _ = await components()
         balances_view = {a: b.to_dict() for a, b in (await ledger.balances()).items()}
@@ -514,6 +522,8 @@ async def ledger_view() -> dict[str, object]:
         "accounts": accounts,
         **_BOUNDARY,
     }
+    if binance_unavailable:
+        view["unavailable"] = True
     if executor_mode() and xp_enabled():
         try:
             xp = await executor_client(XP_VENUE).ledger()
@@ -532,10 +542,22 @@ async def ledger_view() -> dict[str, object]:
 @router.post("/reconcile")
 async def reconcile_now() -> dict[str, object]:
     if executor_mode():
-        result = await _from_executor(reconcile())
-        if xp_enabled():
-            result = {**result, "xp_b3": await _from_executor(reconcile(XP_VENUE))}
-        return result
+        if not xp_enabled():
+            return await _from_executor(reconcile())
+        # Each venue answers on its own: a Binance outage must not hide XP's reconciliation.
+        results: dict[str, object] = {}
+        for venue in (VENUE, XP_VENUE):
+            try:
+                results[venue.value] = await _from_executor(reconcile(venue))
+            except HTTPException as exc:
+                results[venue.value] = {
+                    "venue": venue.value,
+                    "consistent": False,
+                    "unavailable": True,
+                    "detail": exc.detail,
+                    **_BOUNDARY,
+                }
+        return {**results[VENUE.value], "xp_b3": results[XP_VENUE.value]}
     return await reconcile()
 
 

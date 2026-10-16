@@ -22,6 +22,7 @@ from apps.api.app import (
     signal_surface,
 )
 from apps.api.app import settings as settings_module
+from apps.api.app.executor_client import ExecutorUnavailable
 from apps.api.app.settings import Settings
 from services.execution import OrderType, TimeInForce, TradeIntent, VenueId
 from services.execution.catalog import B3_INSTRUMENTS, PAPER_INSTRUMENTS
@@ -79,8 +80,10 @@ def _reset():
 class FakeClient:
     """Stands in for one venue's ExecutorClient and records what reached it."""
 
-    def __init__(self, name: str, *, balances=None, consistent=True, halted=False) -> None:
-        self.name, self.consistent, self.halted = name, consistent, halted
+    def __init__(
+        self, name: str, *, balances=None, consistent=True, halted=False, down=False
+    ) -> None:
+        self.name, self.consistent, self.halted, self.down = name, consistent, halted, down
         self.balances = balances or {}
         self.calls: list[tuple] = []
         self.quote_body: dict = {}
@@ -92,10 +95,14 @@ class FakeClient:
 
     async def ledger(self):
         self.calls.append(("ledger",))
+        if self.down:
+            raise ExecutorUnavailable("down")
         return {"account_id": f"acct-{self.name}", "balances": self.balances}
 
     async def reconcile(self):
         self.calls.append(("reconcile",))
+        if self.down:
+            raise ExecutorUnavailable("down")
         divergences = [] if self.consistent else [{"asset": "BRL"}]
         return {"consistent": self.consistent, "divergences": divergences}
 
@@ -447,3 +454,27 @@ def test_the_agents_and_the_risk_engine_know_b3_only_when_xp_is_on(monkeypatch) 
     status = client.get("/v1/agents/status").json()
     assert PETR in status["instruments"]
     assert PETR in risk_surface.governor().engine._instruments
+
+
+def test_one_venue_being_down_does_not_hide_the_other_when_xp_is_on(monkeypatch) -> None:
+    configure(monkeypatch, **XP_ON)
+    xp = FakeClient("xp", balances={"BRL": {"total": "1000000", "opening": "1000000"}})
+    wire(monkeypatch, FakeClient("binance", down=True), xp)
+    client = TestClient(main.app)
+    view = client.get("/v1/oms/ledger")
+    assert view.status_code == 200
+    body = view.json()
+    assert body["unavailable"] is True and body["xp_b3"]["account_id"] == "acct-xp"
+    rec = client.post("/v1/oms/reconcile", headers=HEADERS)
+    assert rec.status_code == 200
+    body = rec.json()
+    assert body["unavailable"] is True and body["consistent"] is False
+    assert body["xp_b3"]["consistent"] is True and "unavailable" not in body["xp_b3"]
+
+
+def test_without_xp_a_down_executor_is_still_a_503(monkeypatch) -> None:
+    configure(monkeypatch, **XP_OFF)
+    wire(monkeypatch, FakeClient("binance", down=True), FakeClient("xp"))
+    client = TestClient(main.app)
+    assert client.get("/v1/oms/ledger").status_code == 503
+    assert client.post("/v1/oms/reconcile", headers=HEADERS).status_code == 503
