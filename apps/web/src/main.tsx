@@ -34,6 +34,20 @@ function useClock() {
   return now.toISOString().slice(11, 19);
 }
 
+/** A reconcile answers per venue: show whether each one is consistent. Reads the response, writes nothing. */
+function consistency(data: unknown): string {
+  if (typeof data !== "object" || data === null) return "";
+  const body = data as Record<string, unknown>;
+  const one = (name: string, v: unknown) => {
+    if (typeof v !== "object" || v === null) return null;
+    const r = v as Record<string, unknown>;
+    if (r.unavailable === true) return `${name} unavailable`;
+    return typeof r.consistent === "boolean" ? `${name} ${r.consistent ? "consistent" : "DIVERGED"}${r.venue_halted === true ? " · halted" : ""}` : null;
+  };
+  const parts = [one(String(body.venue ?? "primary venue"), body), one("XP_B3", body.xp_b3)].filter((x): x is string => x !== null);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
 function App() {
   const [view, setView] = useState<View>("Floor");
   const [selected, select] = useState<Sym>("BTC");
@@ -50,7 +64,7 @@ function App() {
   const run = useCallback(async (label: string, path: string, body?: unknown) => {
     setBusy(label);
     const result = await post(path, body);
-    const detail = result.ok ? `HTTP ${result.status}` : result.status === 401
+    const detail = result.ok ? `HTTP ${result.status}${consistency(result.data)}` : result.status === 401
       ? "Operator token required — set it in System."
       : `${result.status || "network"} · ${result.error}`;
     setLog(old => [{ at: new Date().toISOString(), label, ok: result.ok, detail }, ...old].slice(0, 40));

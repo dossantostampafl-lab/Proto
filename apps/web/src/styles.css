@@ -502,8 +502,12 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 /* ---------- interactive desks ---------- */
 .fl-hit { cursor: pointer; outline: none; }
 .fl-hit-box { stroke: transparent; stroke-width: 2; transition: stroke 120ms, fill 120ms; }
-.fl-hit:hover .fl-hit-box, .fl-hit:focus-visible .fl-hit-box { stroke: var(--accent); fill: rgba(185, 194, 203, 0.1); }
+.fl-hit-ring { stroke: transparent; stroke-width: 0; }
+.fl-hit:hover .fl-hit-box { stroke: var(--accent); fill: rgba(185, 194, 203, 0.1); }
 .fl-hit.selected .fl-hit-box { stroke: var(--up); stroke-width: 2.4; fill: rgba(88, 195, 154, 0.08); }
+/* keyboard focus: a dark ring under a light one, so it holds 3:1 over any part of the photo */
+.fl-hit:focus-visible .fl-hit-ring, .fl-hit.selected:focus-visible .fl-hit-ring { stroke: #05070a; stroke-width: 7px; }
+.fl-hit:focus-visible .fl-hit-box, .fl-hit.selected:focus-visible .fl-hit-box { stroke: #ffffff; stroke-width: 3px; fill: rgba(255, 255, 255, 0.1); }
 .fl-hit-cta { font: 600 9px var(--mono); letter-spacing: 0.12em; fill: #eef2f5; opacity: 0; paint-order: stroke; stroke: rgba(8, 10, 12, 0.85); stroke-width: 3px; transition: opacity 120ms; }
 .fl-hit:hover .fl-hit-cta, .fl-hit:focus-visible .fl-hit-cta, .fl-hit.selected .fl-hit-cta { opacity: 1; }
 .fl-hit.busy .fl-hit-halo { animation: fl-pool 1.5s ease-in-out infinite; }
@@ -513,7 +517,6 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fl-desks li button { all: unset; box-sizing: border-box; display: grid; gap: 3px; width: 100%; padding: 8px 10px; cursor: pointer; min-height: 44px; }
 .fl-desks li button:hover { background: rgba(185, 194, 203, 0.07); }
 .fl-desks li button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.fl-desks li button[aria-pressed="true"] { background: rgba(88, 195, 154, 0.1); }
 .fl-desks li span { overflow-wrap: anywhere; }
 
 .fl-drawer-wrap { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end; }
@@ -534,13 +537,13 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fl-sec { display: grid; gap: 8px; }
 .fl-sec > header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .fl-sec h3 { margin: 0; font: 600 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: #c3cad0; }
-.fl-fresh { font: 600 9px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.fl-fresh { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
 .fl-fresh.live { color: var(--up); }
 .fl-fresh.stale { color: var(--warn); }
 .fl-fresh.unavailable { color: var(--down); }
 .fl-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
 .fl-rows li { display: flex; justify-content: space-between; gap: 12px; font: 400 12px var(--mono); }
-.fl-rows li span { color: var(--muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.fl-rows li span { color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
 .fl-rows li b { text-align: right; overflow-wrap: anywhere; font-weight: 600; }
 .fl-rows .up, .fl-list .up { color: var(--up); }
 .fl-rows .down, .fl-list .down { color: var(--down); }
@@ -552,7 +555,7 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fl-list > li > span { grid-column: 1 / -1; overflow-wrap: anywhere; }
 .fl-list > li > small { grid-column: 1 / -1; color: #aab4bd; overflow-wrap: anywhere; }
 .fl-list > li > details { grid-column: 1 / -1; }
-.fl-list > li > details summary { cursor: pointer; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+.fl-list > li > details summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
 .fl-actions { grid-column: 1 / -1; display: flex; gap: 6px; }
 .fl-actions .btn, .fl-sec .row .btn { padding: 5px 10px; min-height: 30px; font-size: 11px; }
 .fl-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -561,7 +564,7 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fl-bars li div i { display: block; height: 100%; background: var(--accent); }
 .fl-bars li small { grid-column: 2; color: var(--muted); }
 .fl-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; }
-.fl-checks li { padding: 2px 6px; border: 1px solid var(--line); font: 400 10px var(--mono); }
+.fl-checks li { padding: 2px 6px; border: 1px solid var(--line); font: 400 11px var(--mono); }
 .fl-checks li.ok { color: var(--up); border-color: rgba(88, 195, 154, 0.35); }
 .fl-checks li.bad { color: var(--down); border-color: var(--down); }
 .fl-steps-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
@@ -576,3 +579,43 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
   @keyframes fl-slide { from { transform: translateY(24px); opacity: 0; } }
 }
 @media (max-width: 520px) { .fl-desks { grid-template-columns: minmax(0, 1fr); } }
+
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.fl-status { padding: 0 16px; }
+.fl-status:has(.fl-outcome) { padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.fl-outcome { display: block; font: 600 12px var(--mono); overflow-wrap: anywhere; }
+.fl-outcome.ok { color: var(--up); }
+.fl-outcome.bad { color: var(--down); }
+.fl-fail { margin: 0 0 10px; padding: 10px; border: 1px solid var(--down); color: var(--down); font: 600 12px var(--mono); }
+.fl-tone { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: #c3cad0; }
+.fl-drawer-body:focus-visible { outline: 3px solid #ffffff; outline-offset: -3px; box-shadow: inset 0 0 0 5px #05070a; }
+.fl-drawer button:focus-visible, .fl-desks li button:focus-visible { outline: 3px solid #ffffff; outline-offset: 1px; box-shadow: 0 0 0 5px #05070a; }
+/* aria-disabled keeps the button focusable (it can say why); it reads as disabled with contrast >= 4.5:1 */
+.btn[aria-disabled="true"] { opacity: 1; color: #aab4bd; border-style: dashed; border-color: rgba(174, 182, 190, 0.45); background: transparent; cursor: not-allowed; }
+.btn[aria-disabled="true"]:hover { background: transparent; box-shadow: none; color: #aab4bd; }
+.btn[aria-busy="true"] { cursor: progress; }
+@media (max-width: 900px) {
+  .fl-drawer { max-height: 92dvh; }
+  .fl-drawer > header { padding: 8px 12px 6px; gap: 4px; }
+  .fl-drawer h2 { font-size: 13px; }
+  .fl-drawer header p { display: none; }
+  .fl-drawer-body { padding: 8px 12px 18px; }
+  .fl-status { padding: 0 12px; }
+}
+@media (max-height: 520px) { .fl-drawer > header p { display: none; } }
+
+.fl-xp { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 8px 12px; border: 1px solid var(--line-strong); border-left-width: 4px; background: var(--panel-solid); font: 400 12px var(--mono); }
+.fl-xp b { font: 700 12px var(--display); letter-spacing: 0.1em; }
+.fl-xp-env { color: var(--muted); font-size: 11px; letter-spacing: 0.06em; }
+.fl-xp-state { padding: 1px 8px; border: 1px solid currentColor; font: 700 11px var(--mono); letter-spacing: 0.1em; }
+.fl-xp-why { flex: 1 1 260px; overflow-wrap: anywhere; }
+.fl-xp.live { border-left-color: var(--up); }
+.fl-xp.live .fl-xp-state { color: var(--up); }
+.fl-xp.halted, .fl-xp.unavailable { border-left-color: var(--down); }
+.fl-xp.halted .fl-xp-state, .fl-xp.unavailable .fl-xp-state { color: var(--down); }
+.fl-xp.not-configured, .fl-xp.unknown { border-left-color: var(--warn); }
+.fl-xp.not-configured .fl-xp-state, .fl-xp.unknown .fl-xp-state { color: var(--warn); }
+.fl-b3 { display: inline-block; margin-left: 4px; padding: 0 5px; border: 1px solid var(--accent); color: var(--accent); font: 700 11px var(--mono); letter-spacing: 0.08em; }
+.fl-venue { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid currentColor; }
+.fl-venue.xp { background: rgba(234, 102, 107, 0.15); font-weight: 700; }
+.fl-sub { margin: 6px 0 0; font: 600 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: #c3cad0; }

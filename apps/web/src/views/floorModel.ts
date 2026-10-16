@@ -42,6 +42,19 @@ export const isHalted = (state: FloorState | null) =>
   Boolean(state?.controls.global_kill) || (state?.controls.runtime_kill_switch ?? "ARMED") !== "ARMED";
 
 export const TONE_COLOR: Record<Tone | "idle", string> = { ok: "#58c39a", warn: "#d8a55b", alert: "#ea666b", working: "#b9c2cb", idle: "#80888f" };
+/** The tone in words: a colour alone is never the only signal. */
+export const TONE_LABEL: Record<Tone | "idle", string> = { ok: "ok", warn: "attention", alert: "alert", working: "working", idle: "idle" };
+
+/** hh:mm:ss of a valid timestamp, "—" otherwise (never a slice of an unchecked string). */
+export const hms = (value: unknown): string => {
+  const at = typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(at) ? new Date(at).toISOString().slice(11, 19) : "—";
+};
+/** "hh:mm:ss UTC", or a bare "—" when there is no valid time. */
+export const clockUtc = (value: unknown): string => {
+  const text = hms(value);
+  return text === "—" ? text : `${text} UTC`;
+};
 
 /** Every step of the authority chain has a desk; both scenes place these by id. */
 export const STATIONS: { id: StationId; label: string; role: string }[] = [

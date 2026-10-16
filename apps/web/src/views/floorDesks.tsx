@@ -1,87 +1,90 @@
-// The desks of the trading floor, opened one at a time in a drawer. Every value comes from an
-// existing read-only API surface and is labelled with its freshness (live / stale / unavailable)
-// and its data mode; a missing value is "—", never an estimate. The drawer polls only while it is
-// open and the tab is visible. Operator actions reuse the operator token of the System view and
-// are disabled, with the reason, without it. Nothing here can release a halt or raise a limit.
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
-import { get, operatorToken } from "../api";
+// The desks of the trading floor, opened one at a time in a drawer, and the XP / B3 lane strip.
+// Every value comes from an existing read-only API surface (see deskData.ts for the narrowing), is
+// labelled with its freshness (live / stale / unavailable) and the data mode, and a value that is not
+// measured (a frozen checkpoint) is never printed as if it were. The drawer polls only while it is open
+// and the tab is visible. Operator actions reuse the System view's token and are inert, with the reason,
+// without it. Nothing here can release a halt or raise a limit. XP is a DEMO account: never real money.
+import { Component, createContext, type ErrorInfo, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { operatorToken } from "../api";
 import { Tag, useCommand } from "../ui";
-import { type FloorAction, type FloorState, STATIONS, type StationId, type Tone, TONE_COLOR } from "./floorModel";
+import {
+  amt, assertNever, b3Session, type B3Session, dataOf, type Decision, deriveXpLane, fin, fmt2, type Feed, type FeedState, isB3, type Ledger,
+  orDash, type Order, parseAgentStatus, parseDecisions, parseDrill, parseLedger, parseOrders, parseRisk, parseRiskDecisions, parseSignals,
+  parseStrategy, parseWatchdog, pctOf, positive, short, subDecimal, useDeskFeed, type XpLane, type XpLaneState,
+} from "./deskData";
+import { clockUtc, type FloorAction, type FloorState, STATIONS, type StationId, TONE_COLOR, TONE_LABEL, type Tone } from "./floorModel";
+
+export { finiteDecimal, fmt2, pctOf } from "./deskData";
 
 // ---------- selection kept in the URL hash: #floor/<desk> ----------
 const HASH = /^#floor\/([a-z]+)$/;
+const FLOOR_HASH = /^#floor\//;
 export const deskFromHash = (hash: string): StationId | null => {
   const id = HASH.exec(hash)?.[1];
   return STATIONS.find(s => s.id === id)?.id ?? null;
 };
+const urlFor = (id: StationId | null) => `${window.location.pathname}${window.location.search}${id ? `#floor/${id}` : ""}`;
 
+/** Opening a desk pushes a history entry (Back closes it); an unknown #floor/… hash is cleared. */
 export function useDeskSelection() {
   const [selected, setSelected] = useState<StationId | null>(() => deskFromHash(window.location.hash));
   useEffect(() => {
+    if (FLOOR_HASH.test(window.location.hash) && !deskFromHash(window.location.hash)) {
+      try { window.history.replaceState(null, "", urlFor(null)); } catch { /* history blocked */ }
+    }
     const sync = () => setSelected(deskFromHash(window.location.hash));
     window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
+    window.addEventListener("popstate", sync);
+    return () => { window.removeEventListener("hashchange", sync); window.removeEventListener("popstate", sync); };
   }, []);
   const select = useCallback((id: StationId | null) => {
+    try {
+      const ours = Boolean((window.history.state as { floorDesk?: boolean } | null)?.floorDesk);
+      if (id) {
+        if (ours) window.history.replaceState({ floorDesk: true }, "", urlFor(id));
+        else if (!deskFromHash(window.location.hash)) window.history.pushState({ floorDesk: true }, "", urlFor(id));
+        else window.history.replaceState(window.history.state, "", urlFor(id));
+      } else if (ours) window.history.back(); // pop our own entry so Back stays natural
+      else if (FLOOR_HASH.test(window.location.hash)) window.history.replaceState(null, "", urlFor(null)); // only ever #floor/…
+    } catch { /* history blocked: the drawer still works */ }
     setSelected(id);
-    const url = `${window.location.pathname}${window.location.search}${id ? `#floor/${id}` : ""}`;
-    try { window.history.replaceState(null, "", url); } catch { /* history blocked: the drawer still works */ }
   }, []);
   return { selected, select };
 }
 
-// ---------- polling that stops with the drawer and with a hidden tab ----------
-const POLL_MS = 4000;
-type Feed<T> = { data: T | null; status: number | null; at: number | null; ms: number; refresh: () => void };
+// ---------- what the drawer tells a screen reader, and freshness ----------
+type DeskCtx = { announce: (text: string) => void; registerAction: (label: string) => void };
+const Desk = createContext<DeskCtx>({ announce: () => undefined, registerAction: () => undefined });
 
-function useDeskFeed<T>(path: string, ms = POLL_MS): Feed<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [status, setStatus] = useState<number | null>(null);
-  const [at, setAt] = useState<number | null>(null);
-  const [tick, setTick] = useState(0);
+/** LIVE only while the latest read succeeded and is recent; STALE keeps the last good value and says why. */
+function Freshness({ name, state, override }: { name: string; state: FeedState<unknown>; override?: string | null }) {
+  const { announce } = useContext(Desk);
+  const effective = override ? "unmeasured" : state.kind;
+  const before = useRef<string | null>(null);
   useEffect(() => {
-    let live = true;
-    const load = async () => {
-      if (document.visibilityState === "hidden") return;
-      const result = await get<T>(path);
-      if (!live) return;
-      setStatus(result.status);
-      if (result.ok) { setData(result.data); setAt(Date.now()); }
-    };
-    void load();
-    const id = window.setInterval(() => void load(), ms);
-    const visible = () => { if (document.visibilityState === "visible") void load(); };
-    document.addEventListener("visibilitychange", visible);
-    return () => { live = false; window.clearInterval(id); document.removeEventListener("visibilitychange", visible); };
-  }, [path, ms, tick]);
-  const refresh = useCallback(() => setTick(t => t + 1), []);
-  return { data, status, at, ms, refresh };
-}
-
-const clock = (value: string | number | null | undefined) => {
-  if (value == null) return "—";
-  const text = typeof value === "number" ? new Date(value).toISOString() : value;
-  return text.slice(11, 19);
-};
-
-/** LIVE while reads succeed, STALE when the last good value is old, UNAVAILABLE when there is none. */
-function Freshness({ feed }: { feed: Feed<unknown> }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 2000); return () => window.clearInterval(id); }, []);
-  const { data, status, at, ms } = feed;
-  if (data == null) {
-    return <span className="fl-fresh unavailable">{status == null ? "LOADING…" : `UNAVAILABLE · ${status ? `HTTP ${status}` : "network"}`}</span>;
+    const was = before.current;
+    before.current = effective;
+    if (was === null || was === effective) return;
+    if ((was === "loading" || was === "paused") && effective === "live") return; // the first answer is not news
+    announce(`${name}: ${effective === "live" ? "live again" : effective}`);
+  }, [effective, name, announce]);
+  if (override) return <span className="fl-fresh unavailable">UNAVAILABLE · {override}</span>;
+  switch (state.kind) {
+    case "off": return null;
+    case "loading": return <span className="fl-fresh">LOADING…</span>;
+    case "paused": return <span className="fl-fresh stale">PAUSED · tab hidden</span>;
+    case "unavailable": return <span className="fl-fresh unavailable">UNAVAILABLE · {state.reason}</span>;
+    case "live": return <span className="fl-fresh live">LIVE · updated {clockUtc(state.at)}</span>;
+    case "stale": return <span className="fl-fresh stale">STALE · last good read {clockUtc(state.at)}{state.failed ? ` · latest read failed: ${state.failed}` : ""}</span>;
+    default: return assertNever(state);
   }
-  const old = at != null && now - at > ms * 3;
-  return old
-    ? <span className="fl-fresh stale">STALE · last good read {clock(at)} UTC</span>
-    : <span className="fl-fresh live">LIVE · updated {clock(at)} UTC</span>;
 }
 
-function Section({ title, feed, children }: { title: string; feed?: Feed<unknown>; children: ReactNode }) {
+function Section({ title, state, override, children }: { title: string; state?: FeedState<unknown>; override?: string | null; children: ReactNode }) {
   return (
     <section className="fl-sec">
-      <header><h3>{title}</h3>{feed && <Freshness feed={feed} />}</header>
+      <header><h3>{title}</h3>{state && <Freshness name={title} state={state} override={override} />}</header>
       {children}
     </section>
   );
@@ -91,80 +94,115 @@ const Row = ({ label, children, cls = "" }: { label: string; children: ReactNode
   <li><span>{label}</span><b className={cls}>{children}</b></li>
 );
 const Rows = ({ children }: { children: ReactNode }) => <ul className="fl-rows">{children}</ul>;
-/** A decimal string without its trailing zeros ("1.000000000000000000" -> "1", "0E-18" -> "0"). */
-const amt = (v: string | null | undefined) => {
-  if (v == null || v === "") return "—";
-  if (Number(v) === 0) return "0";
-  return /^-?\d+\.\d+$/.test(v) ? v.replace(/0+$/, "").replace(/\.$/, "") : v;
-};
-/** A drill step detail as text: empty lists read "none" and null reads "—", never a bare label. */
-const stepValue = (v: unknown) => (v == null ? "—" : Array.isArray(v) ? (v.length ? v.join(", ") : "none") : String(v));
-const none = (v: unknown) => (v == null || v === "" ? "—" : String(v));
-const short = (id: string | undefined) => (id ? id.replace(/^[A-Z_0-9]+:/, "") : "—");
 const NoData = ({ children }: { children: ReactNode }) => <p className="empty">{children}</p>;
+const Missing = ({ what }: { what: string }) => <NoData>{what} unavailable.</NoData>;
+const flag = (v: boolean | null, yes: string, no: string) => (v === null ? "—" : v ? yes : no);
+const B3Tag = () => <span className="fl-b3" title="XP / B3 demo account">B3</span>;
 
-// ---------- wire types (only what the panels read) ----------
-type Signal = { signal_id: string; source: string; strategy_id: string; instrument_id: string; direction: string; strength: number; timeframe: string; observed_at: string };
-type Decision = {
-  decision_id: string; decided_at: string; instrument_id: string; outcome: string; abstain_reason: string | null;
-  fusion?: { direction?: string; score?: number; reason?: string };
-  candidate?: { side?: string; quantity?: string; limit_price?: string; order_type?: string } | null;
-  sizing?: Record<string, string>;
-  review?: { verdict?: string; size_factor?: number; rationale?: string; reviewer?: string };
-};
-type AgentStatus = { enabled: boolean; reviewer: string; model: string | null; stage: string; buffered_signals: number; decisions: number; outcomes: Record<string, number>; journal_failures: number };
-type StrategyStatus = { enabled: boolean; running: boolean; strategy_id: string; market_source: string; books: Record<string, { bars: number; needs_bars: number; last_signal_at: string | null }>; ticks: number; signals: number };
-type RiskStatus = {
-  constitution: Record<string, string>; policy: Record<string, string | number>;
-  controls: { global_kill?: boolean; killed_venues?: string[]; killed_strategies?: string[]; lockdown?: string | null; runtime_kill_switch?: string };
-};
-type RiskDecision = { intent_id: string; instrument_id: string; strategy_id: string; approved: boolean; rejections: string[]; checks: Record<string, string>; breach: string | null };
-type Watchdog = { active: boolean; last_beat: string | null; coverage_hours: number; required_hours: number; beats: number; last_report: { trips: string[]; checks: Record<string, string>; api_halted: boolean; executor_halted: boolean } | null; recent_trips: { at: string; reasons: string[] }[] };
-type Order = { client_order_id: string; instrument_id: string; side: string; quantity: string; limit_price: string | null; status: string; filled_quantity: string; average_price: string | null; fee: string; reason: string | null };
-type Ledger = {
-  account_id: string; venue: string; mode: string;
-  balances: Record<string, { total: string; reserved: string; available: string }>;
-  accounts: Record<string, { equity: string; gross_exposure: string }>;
-  unavailable?: boolean;
-  xp_b3?: { account_id?: string; balances?: Record<string, { total: string }>; venue_halted?: boolean | null; unavailable?: boolean };
-};
-type Drill = { verdict: string; instrument_id?: string; started_at?: string; finished_at?: string; venue_environment?: string; steps?: Record<string, unknown>[]; digest?: string };
+// ---------- the XP / B3 lane ----------
+export type XpState = { lane: XpLane; instruments: string[] | null; killedVenues: string[] | null; ledger: Feed<Ledger> };
+const LANE_LABEL: Record<XpLaneState, string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
+
+/** XP routing as the API reports it: agent status (instruments), risk status (halted venues) and, only when routing is on, the ledger. */
+export function useXpLane(): XpState {
+  const agents = useDeskFeed("/v1/agents/status", parseAgentStatus, 10000);
+  const risk = useDeskFeed("/v1/risk/status", parseRisk, 10000);
+  const instruments = dataOf(agents.state)?.instruments ?? null;
+  const listed = instruments?.some(i => i.startsWith("XP_B3:")) ?? false;
+  const ledger = useDeskFeed(listed ? "/v1/oms/ledger" : null, parseLedger, 15000);
+  const killedVenues = dataOf(risk.state)?.controls.venues ?? null;
+  const failed = ledger.state.kind === "unavailable" || (ledger.state.kind === "stale" && ledger.state.failed !== null);
+  const lane = deriveXpLane({ instruments, ledger: dataOf(ledger.state), ledgerFailed: failed, killedVenues });
+  return { lane, instruments, killedVenues, ledger };
+}
+
+function useSession(): B3Session {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => { if (document.visibilityState === "visible") setNow(Date.now()); }, 30000);
+    return () => window.clearInterval(id);
+  }, []);
+  return b3Session(now);
+}
+const sessionText = (s: B3Session) => `${s.open ? "OPEN" : "CLOSED"} · ${s.weekday} ${s.local} in São Paulo`;
+
+/** A small status strip: what the XP / B3 lane is right now, in words, with no number that was not measured. */
+export function XpStrip({ xp }: { xp: XpState }) {
+  const { lane } = xp;
+  const session = useSession();
+  const brl = lane.ledger?.xp?.balances.find(b => b.asset === "BRL");
+  const [said, setSaid] = useState("");
+  const before = useRef<XpLaneState | null>(null);
+  useEffect(() => {
+    // the first answer (from "unknown") is not news; a later change is
+    if (before.current !== null && before.current !== "unknown" && before.current !== lane.state) setSaid(`XP / B3 lane: ${LANE_LABEL[lane.state]}`);
+    before.current = lane.state;
+  }, [lane.state]);
+  return (
+    <section className={`fl-xp ${lane.state}`} aria-label="XP / B3 lane">
+      <b>XP / B3</b>
+      <span className="fl-xp-env">DEMO ACCOUNT · TESTNET · NO REAL MONEY</span>
+      <span className={`fl-xp-state ${lane.state}`}>{LANE_LABEL[lane.state]}</span>
+      <span className="fl-xp-why">{lane.reason}</span>
+      {lane.state !== "not-configured" && lane.state !== "unknown" && <span>B3 session {sessionText(session)} (no holiday calendar)</span>}
+      {lane.state === "live" && brl && <span>BRL {fmt2(brl.total)} (XP ledger)</span>}
+      <span className="sr-only" role="status">{said}</span>
+    </section>
+  );
+}
 
 // ---------- operator actions ----------
-function Action({ label, path, body, refresh, kind = "", children }: { label: string; path: string; body?: unknown; refresh: () => void; kind?: "" | "primary"; children: ReactNode }) {
+const TOKEN_HINT = "fl-token-hint";
+const TokenHint = () => (operatorToken() ? null : <p className="hint" id={TOKEN_HINT}>Actions need the operator token: set it in the System view.</p>);
+const ORDER_ID = /^[A-Za-z0-9_-]{1,36}$/;
+
+/** Inert without the token (aria-disabled, still focusable, says why); a risky one needs a second click within 4 s. */
+function Action({ label, path, verb, target, refresh, confirm = false }: { label: string; path: string; verb: string; target?: string; refresh: () => void; confirm?: boolean }) {
   const { busy, run } = useCommand();
+  const { announce, registerAction } = useContext(Desk);
   const token = Boolean(operatorToken());
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const id = window.setTimeout(() => setArmed(false), 4000);
+    return () => window.clearTimeout(id);
+  }, [armed]);
+  const onClick = () => {
+    if (!token || busy !== null) return;
+    if (confirm && !armed) { setArmed(true); announce(`Press again within 4 seconds to ${verb.toLowerCase()}${target ? ` order ${target}` : ""}.`); return; }
+    setArmed(false);
+    registerAction(label);
+    void run(label, path).then(refresh);
+  };
+  const name = `${armed ? "Confirm " : ""}${verb}${target ? ` order ${target}` : ""}`;
   return (
-    <button type="button" className={`btn ${kind}`} disabled={!token || busy !== null}
-      title={token ? undefined : "Set the operator token in the System view to enable"}
-      onClick={() => void run(label, path, body).then(refresh)}>
-      {busy === label ? "…" : children}
+    <button type="button" className="btn" aria-label={armed ? `Confirm ${verb.toLowerCase()}${target ? ` order ${target}` : ""}` : name}
+      aria-disabled={token ? undefined : true} aria-busy={busy === label} aria-describedby={token ? undefined : TOKEN_HINT} onClick={onClick}>
+      {armed ? `Confirm ${verb}` : verb}
     </button>
   );
 }
-const TokenHint = () => (operatorToken() ? null : <p className="hint">Actions need the operator token: set it in the System view.</p>);
-const ORDER_ID = /^[A-Za-z0-9_-]{1,36}$/;
 
 // ---------- the desks ----------
 function TradingViewDesk({ actions }: { actions: FloorAction[] }) {
-  const signals = useDeskFeed<{ signals: Signal[] }>("/v1/signals/recent");
-  const list = signals.data?.signals ?? [];
+  const feed = useDeskFeed("/v1/signals/recent", parseSignals);
+  const list = dataOf(feed.state);
   const accepted = actions.filter(a => a.event_type === "TRADINGVIEW_SIGNAL_ACCEPTED").length;
-  const bySource = list.reduce<Record<string, number>>((m, s) => ({ ...m, [s.source]: (m[s.source] ?? 0) + 1 }), {});
+  const bySource = (list ?? []).reduce<Record<string, number>>((m, s) => ({ ...m, [s.source ?? "unknown"]: (m[s.source ?? "unknown"] ?? 0) + 1 }), {});
   return (
-    <Section title="Recent signals" feed={signals}>
+    <Section title="Recent signals" state={feed.state}>
       <Rows>
-        <Row label="In the buffer">{signals.data ? list.length : "—"}</Row>
+        <Row label="In the buffer">{list ? list.length : "—"}</Row>
         <Row label="By source">{Object.keys(bySource).length ? Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join(" · ") : "—"}</Row>
-        <Row label="TradingView alerts accepted since this page opened">{accepted}</Row>
+        <Row label={`TradingView alerts in the last ${actions.length} floor actions`}>{accepted}</Row>
       </Rows>
-      {signals.data && !list.length && <NoData>No signal received yet. A TradingView alert or the own strategy starts the chain.</NoData>}
+      {list && !list.length && <NoData>No signal received yet. A TradingView alert or the own strategy starts the chain.</NoData>}
       <ol className="fl-list">
-        {list.slice(0, 8).map(s => (
-          <li key={s.signal_id}>
-            <time>{clock(s.observed_at)}</time><b>{short(s.instrument_id)}</b>
-            <span className={s.direction === "LONG" ? "up" : s.direction === "SHORT" ? "down" : ""}>{s.direction} · strength {s.strength.toFixed(2)}</span>
-            <small>{s.source} · {s.strategy_id} · {s.timeframe}</small>
+        {(list ?? []).slice(0, 8).map(s => (
+          <li key={s.key}>
+            <time>{clockUtc(s.at)}</time><b>{short(s.instrument)} {isB3(s.instrument) && <B3Tag />}</b>
+            <span className={s.direction === "LONG" ? "up" : s.direction === "SHORT" ? "down" : ""}>{orDash(s.direction)} · strength {fin(s.strength)}</span>
+            <small>{orDash(s.source)} · {orDash(s.strategy)} · {orDash(s.timeframe)}</small>
           </li>
         ))}
       </ol>
@@ -178,13 +216,13 @@ function DecisionList({ decisions }: { decisions: Decision[] }) {
   return (
     <ol className="fl-list">
       {decisions.slice(0, 6).map(d => (
-        <li key={d.decision_id}>
-          <time>{clock(d.decided_at)}</time><b>{short(d.instrument_id)}</b>
-          <span className={d.outcome === "APPROVED" ? "up" : d.outcome === "ABSTAINED" || d.outcome === "BLOCKED" ? "warn" : ""}>{d.outcome}</span>
+        <li key={d.key}>
+          <time>{clockUtc(d.at)}</time><b>{short(d.instrument)} {isB3(d.instrument) && <B3Tag />}</b>
+          <span className={d.outcome === "APPROVED" ? "up" : d.outcome === "ABSTAINED" || d.outcome === "BLOCKED" ? "warn" : ""}>{orDash(d.outcome)}</span>
           <small>
-            {d.fusion ? `${none(d.fusion.direction)} · score ${d.fusion.score?.toFixed(2) ?? "—"} · ${none(d.fusion.reason)}` : "no fusion data"}
-            {d.abstain_reason ? ` · abstained: ${d.abstain_reason}` : ""}
-            {d.candidate ? ` · ${none(d.candidate.side)} ${none(d.candidate.quantity)} @ ${none(d.candidate.limit_price)}` : ""}
+            {d.hasFusion ? `${orDash(d.direction)} · score ${fin(d.score)} · ${orDash(d.reason)}` : "no fusion data"}
+            {d.abstain ? ` · abstained: ${d.abstain}` : ""}
+            {d.candidate ? ` · ${orDash(d.candidate.side)} ${orDash(d.candidate.quantity)} @ ${orDash(d.candidate.limit)}` : ""}
           </small>
         </li>
       ))}
@@ -192,75 +230,94 @@ function DecisionList({ decisions }: { decisions: Decision[] }) {
   );
 }
 
-function FusionDesk() {
-  const status = useDeskFeed<AgentStatus>("/v1/agents/status");
-  const decisions = useDeskFeed<{ decisions: Decision[] }>("/v1/agents/decisions/recent");
-  const strategy = useDeskFeed<StrategyStatus>("/v1/strategy/status");
-  const s = status.data, st = strategy.data;
+function XpFusionSection({ xp }: { xp: XpState }) {
+  const session = useSession();
+  const b3 = (xp.instruments ?? []).filter(i => i.startsWith("XP_B3:")).map(short);
+  return (
+    <Section title="B3 / XP">
+      <Rows>
+        <Row label="Lane" cls={xp.lane.state === "live" ? "up" : xp.lane.state === "halted" || xp.lane.state === "unavailable" ? "down" : "warn"}>{LANE_LABEL[xp.lane.state]}</Row>
+        <Row label="B3 session hours (no holiday calendar)" cls={session.open ? "up" : ""}>{sessionText(session)}</Row>
+        <Row label="B3 instruments in the pipeline">{xp.instruments === null ? "—" : b3.length ? b3.join(", ") : "none"}</Row>
+      </Rows>
+      <p className="hint">{xp.lane.reason} B3 trades Monday to Friday, 10:00 to 17:55 São Paulo time; outside it the Risk Engine refuses and quotes age out. The account is a DEMO account.</p>
+    </Section>
+  );
+}
+
+function FusionDesk({ xp }: { xp: XpState }) {
+  const status = useDeskFeed("/v1/agents/status", parseAgentStatus);
+  const decisions = useDeskFeed("/v1/agents/decisions/recent", parseDecisions);
+  const strategy = useDeskFeed("/v1/strategy/status", parseStrategy);
+  const s = dataOf(status.state), d = dataOf(decisions.state), st = dataOf(strategy.state);
   return (
     <>
-      <Section title="Pipeline" feed={status}>
+      <Section title="Pipeline" state={status.state}>
         <Rows>
-          <Row label="Agents" cls={s?.enabled ? "up" : ""}>{s ? (s.enabled ? "on" : "off") : "—"}</Row>
-          <Row label="Stage">{none(s?.stage)}</Row>
-          <Row label="Decisions">{none(s?.decisions)}</Row>
-          <Row label="Outcomes">{s && Object.keys(s.outcomes).length ? Object.entries(s.outcomes).map(([k, v]) => `${k} ${v}`).join(" · ") : "—"}</Row>
-          <Row label="Buffered signals">{none(s?.buffered_signals)}</Row>
-          <Row label="Journal failures" cls={s?.journal_failures ? "down" : ""}>{none(s?.journal_failures)}</Row>
+          <Row label="Agents" cls={s?.enabled ? "up" : ""}>{s ? flag(s.enabled, "on", "off") : "—"}</Row>
+          <Row label="Stage">{orDash(s?.stage)}</Row>
+          <Row label="Decisions">{orDash(s?.decisions)}</Row>
+          <Row label="Outcomes">{s && s.outcomes.length ? s.outcomes.map(([k, v]) => `${k} ${v}`).join(" · ") : "—"}</Row>
+          <Row label="Buffered signals">{orDash(s?.buffered)}</Row>
+          <Row label="Journal failures" cls={s?.journalFailures ? "down" : ""}>{orDash(s?.journalFailures)}</Row>
         </Rows>
       </Section>
-      <Section title="Latest decisions" feed={decisions}>
-        {decisions.data ? <DecisionList decisions={decisions.data.decisions} /> : <NoData>Decisions unavailable.</NoData>}
+      <XpFusionSection xp={xp} />
+      <Section title="Latest decisions" state={decisions.state}>
+        {d ? <DecisionList decisions={d} /> : <Missing what="Decisions" />}
       </Section>
-      <Section title="Own strategy" feed={strategy}>
+      <Section title="Own strategy" state={strategy.state}>
         {st ? (
           <>
             <Rows>
-              <Row label="Strategy">{st.strategy_id}</Row>
-              <Row label="State" cls={st.running ? "up" : "warn"}>{st.enabled ? (st.running ? "running" : "stopped") : "disabled"}</Row>
-              <Row label="Market source">{st.market_source}</Row>
-              <Row label="Ticks / signals">{st.ticks} / {st.signals}</Row>
+              <Row label="Strategy">{orDash(st.id)}</Row>
+              <Row label="State" cls={st.running ? "up" : "warn"}>{st.enabled === null || st.running === null ? "—" : st.enabled ? (st.running ? "running" : "stopped") : "disabled"}</Row>
+              <Row label="Market source">{orDash(st.source)}</Row>
+              <Row label="Ticks / signals">{orDash(st.ticks)} / {orDash(st.signals)}</Row>
             </Rows>
             <ul className="fl-bars">
-              {Object.entries(st.books).map(([id, b]) => (
-                <li key={id}>
-                  <span>{short(id)}</span>
-                  <div role="progressbar" aria-label={`${short(id)} warm-up`} aria-valuemin={0} aria-valuemax={b.needs_bars} aria-valuenow={Math.min(b.bars, b.needs_bars)}><i style={{ width: `${Math.min(1, b.bars / Math.max(1, b.needs_bars)) * 100}%` }} /></div>
-                  <small>{b.bars}/{b.needs_bars} bars · last signal {clock(b.last_signal_at)}</small>
-                </li>
-              ))}
+              {st.books.map(b => {
+                const ready = b.bars !== null && b.needs !== null && b.needs > 0;
+                return (
+                  <li key={b.id}>
+                    <span>{short(b.id)}</span>
+                    <div role="progressbar" aria-label={`${short(b.id)} warm-up`} aria-valuemin={0} aria-valuemax={b.needs ?? 0} aria-valuenow={ready ? Math.min(b.bars!, b.needs!) : 0}><i style={{ width: ready ? `${Math.min(1, b.bars! / b.needs!) * 100}%` : "0%" }} /></div>
+                    <small>{orDash(b.bars)}/{orDash(b.needs)} bars · last signal {clockUtc(b.last)}</small>
+                  </li>
+                );
+              })}
             </ul>
             <p className="hint">The strategy emits opinions only; it has no order authority.</p>
           </>
-        ) : <NoData>Strategy status unavailable.</NoData>}
+        ) : <Missing what="Strategy status" />}
       </Section>
     </>
   );
 }
 
 function ReviewerDesk() {
-  const status = useDeskFeed<AgentStatus>("/v1/agents/status");
-  const decisions = useDeskFeed<{ decisions: Decision[] }>("/v1/agents/decisions/recent");
-  const s = status.data;
-  const reviewed = (decisions.data?.decisions ?? []).filter(d => d.review).slice(0, 6);
+  const status = useDeskFeed("/v1/agents/status", parseAgentStatus);
+  const decisions = useDeskFeed("/v1/agents/decisions/recent", parseDecisions);
+  const s = dataOf(status.state), d = dataOf(decisions.state);
+  const reviewed = (d ?? []).filter(x => x.review).slice(0, 6);
   return (
     <>
-      <Section title="Reviewer" feed={status}>
+      <Section title="Reviewer" state={status.state}>
         <Rows>
-          <Row label="Mode">{none(s?.reviewer)}</Row>
-          <Row label="Model">{s ? (s.model ?? "none (deterministic)") : "—"}</Row>
-          <Row label="Stage">{none(s?.stage)}</Row>
+          <Row label="Mode">{orDash(s?.reviewer)}</Row>
+          <Row label="Model">{s ? (s.modelKnown ? s.model ?? "none (deterministic)" : "—") : "—"}</Row>
+          <Row label="Stage">{orDash(s?.stage)}</Row>
         </Rows>
         <p className="hint">The reviewer can only shrink or block a candidate, never enlarge it or place an order.</p>
       </Section>
-      <Section title="Latest reviews" feed={decisions}>
-        {decisions.data == null ? <NoData>Reviews unavailable.</NoData> : !reviewed.length ? <NoData>No review yet.</NoData> : (
+      <Section title="Latest reviews" state={decisions.state}>
+        {d === null ? <Missing what="Reviews" /> : !reviewed.length ? <NoData>No review yet.</NoData> : (
           <ol className="fl-list">
-            {reviewed.map(d => (
-              <li key={d.decision_id}>
-                <time>{clock(d.decided_at)}</time><b>{short(d.instrument_id)}</b>
-                <span className={d.review?.verdict === "APPROVE" ? "up" : "warn"}>{none(d.review?.verdict)} · size ×{d.review?.size_factor ?? "—"}</span>
-                <small>{none(d.review?.rationale)}</small>
+            {reviewed.map(x => (
+              <li key={x.key}>
+                <time>{clockUtc(x.at)}</time><b>{short(x.instrument)} {isB3(x.instrument) && <B3Tag />}</b>
+                <span className={x.review?.verdict === "APPROVE" ? "up" : "warn"}>{orDash(x.review?.verdict)} · size ×{fin(x.review?.sizeFactor)}</span>
+                <small>{orDash(x.review?.rationale)}</small>
               </li>
             ))}
           </ol>
@@ -270,182 +327,313 @@ function ReviewerDesk() {
   );
 }
 
-function RiskDesk() {
-  const risk = useDeskFeed<RiskStatus>("/v1/risk/status");
-  const decisions = useDeskFeed<{ decisions: RiskDecision[] }>("/v1/risk/decisions/recent");
-  const watchdog = useDeskFeed<Watchdog>("/v1/watchdog/status");
-  const c = risk.data?.controls, k = risk.data?.constitution, w = watchdog.data;
-  const checks = Object.entries(w?.last_report?.checks ?? {});
+/** The equity of an account is a measurement only while its executor is readable and its exposure could be marked. */
+function accountRows(l: Ledger) {
+  return l.accounts.map(a => ({ ...a, measured: !l.unavailable && a.exposure !== null, source: a.quote === "BRL" && l.xp ? "XP ledger" : a.quote === "USDT" ? "Binance executor ledger" : "executor / paper ledger" }));
+}
+
+function RiskDesk({ xp }: { xp: XpState }) {
+  const { announce } = useContext(Desk);
+  const risk = useDeskFeed("/v1/risk/status", parseRisk);
+  const decisions = useDeskFeed("/v1/risk/decisions/recent", parseRiskDecisions);
+  const watchdog = useDeskFeed("/v1/watchdog/status", parseWatchdog);
+  const ledger = useDeskFeed("/v1/oms/ledger", parseLedger, 10000);
+  const r = dataOf(risk.state), d = dataOf(decisions.state), w = dataOf(watchdog.state), l = dataOf(ledger.state);
+  const c = r?.controls, k = r?.limits;
+  const signature = c ? JSON.stringify([c.globalKill, c.venues, c.lockdown.value]) : null;
+  const seen = useRef<string | null>(null);
+  useEffect(() => {
+    if (signature === null) return;
+    if (seen.current !== null && seen.current !== signature) announce("Risk controls changed: kill switch, halted venues or lockdown differ from the last read.");
+    seen.current = signature;
+  }, [signature, announce]);
+  const accounts = l ? accountRows(l) : [];
+  const unmeasured = accounts.filter(a => !a.measured).map(a => a.quote);
   return (
     <>
-      <Section title="Controls" feed={risk}>
+      <Section title="Controls" state={risk.state}>
         <Rows>
-          <Row label="Global kill switch" cls={c?.global_kill ? "down" : "up"}>{c ? (c.global_kill ? "ON" : "armed") : "—"}</Row>
-          <Row label="Runtime kill switch" cls={c && c.runtime_kill_switch !== "ARMED" ? "down" : ""}>{none(c?.runtime_kill_switch)}</Row>
-          <Row label="Halted venues" cls={c?.killed_venues?.length ? "down" : ""}>{c ? c.killed_venues?.join(", ") || "none" : "—"}</Row>
-          <Row label="Halted strategies" cls={c?.killed_strategies?.length ? "down" : ""}>{c ? c.killed_strategies?.join(", ") || "none" : "—"}</Row>
-          <Row label="Lockdown" cls={c?.lockdown ? "down" : ""}>{c ? c.lockdown ?? "none" : "—"}</Row>
+          <Row label="Global kill switch" cls={c?.globalKill ? "down" : c?.globalKill === false ? "up" : ""}>{c ? flag(c.globalKill, "ON", "armed") : "—"}</Row>
+          <Row label="Runtime kill switch" cls={c && c.runtime !== null && c.runtime !== "ARMED" ? "down" : ""}>{orDash(c?.runtime)}</Row>
+          <Row label="Halted venues">
+            {c?.venues ? (c.venues.length ? c.venues.map(v => <span key={v} className={`fl-venue down${v === "XP_B3" ? " xp" : ""}`}>{v}{v === "XP_B3" ? " (XP / B3 demo)" : ""}</span>) : "none") : "—"}
+          </Row>
+          <Row label="XP / B3 venue" cls={xp.lane.state === "halted" ? "down" : ""}>{LANE_LABEL[xp.lane.state]}</Row>
+          <Row label="Halted strategies" cls={c?.strategies?.length ? "down" : ""}>{c?.strategies ? c.strategies.join(", ") || "none" : "—"}</Row>
+          <Row label="Lockdown" cls={c?.lockdown.value ? "down" : ""}>{c ? (c.lockdown.known ? c.lockdown.value ?? "none" : "—") : "—"}</Row>
         </Rows>
         <p className="hint">Releasing a halt or a lockdown stays a deliberate operator action outside this view.</p>
       </Section>
-      <Section title="Constitutional limits" feed={risk}>
+      <Section title="Accounts the limits are measured on" state={ledger.state} override={l && unmeasured.length ? `equity not measured for ${unmeasured.join(", ")}` : null}>
+        {l ? (
+          <Rows>
+            {accounts.map(a => (
+              <Row key={a.quote} label={`${a.quote} equity (${a.source})`}>{a.measured ? fmt2(a.equity) : "— last checkpoint, executor unavailable or no live quote"}</Row>
+            ))}
+          </Rows>
+        ) : <Missing what="Accounts" />}
+        {l?.xp && <p className="hint">The BRL account is read from the XP ledger (a DEMO account), not from the Binance executor.</p>}
+      </Section>
+      <Section title="Constitutional limits" state={risk.state}>
         <Rows>
-          <Row label="Reference capital">{none(k?.reference_capital)}</Row>
-          <Row label="Risk per position">{k ? `${(Number(k.max_risk_per_position) * 100).toFixed(2)}%` : "—"}</Row>
-          <Row label="Daily loss">{k ? `${(Number(k.max_daily_loss) * 100).toFixed(2)}%` : "—"}</Row>
-          <Row label="Drawdown">{k ? `${(Number(k.max_drawdown) * 100).toFixed(2)}%` : "—"}</Row>
-          <Row label="Gross leverage">{k ? `${k.max_gross_leverage}x` : "—"}</Row>
-          <Row label="Quote max age">{risk.data ? `${risk.data.policy.max_quote_age_seconds} s` : "—"}</Row>
-          <Row label="Permit TTL">{risk.data ? `${risk.data.policy.permit_ttl_seconds} s` : "—"}</Row>
+          <Row label="Reference capital">{orDash(k?.capital)}</Row>
+          <Row label="Risk per position">{pctOf(k?.perPosition)}</Row>
+          <Row label="Daily loss">{pctOf(k?.dailyLoss)}</Row>
+          <Row label="Drawdown">{pctOf(k?.drawdown)}</Row>
+          <Row label="Gross leverage">{k?.leverage ? `${k.leverage}x` : "—"}</Row>
+          <Row label="Quote max age">{k?.quoteAge ? `${k.quoteAge} s` : "—"}</Row>
+          <Row label="Permit TTL">{k?.permitTtl ? `${k.permitTtl} s` : "—"}</Row>
         </Rows>
       </Section>
-      <Section title="Latest permits and rejections" feed={decisions}>
-        {decisions.data == null ? <NoData>Risk decisions unavailable.</NoData> : !decisions.data.decisions.length ? <NoData>No risk decision yet.</NoData> : (
+      <Section title="Latest permits and rejections" state={decisions.state}>
+        {d === null ? <Missing what="Risk decisions" /> : !d.length ? <NoData>No risk decision yet.</NoData> : (
           <ol className="fl-list">
-            {decisions.data.decisions.slice(0, 6).map(d => (
-              <li key={d.intent_id}>
-                <b>{short(d.instrument_id)}</b>
-                <span className={d.approved ? "up" : "down"}>{d.approved ? "permit issued" : "rejected"}</span>
-                <small>{d.approved ? `daily loss ${none(d.checks.daily_loss)} · drawdown ${none(d.checks.drawdown)}` : d.rejections.join(", ") || "no reason given"}{d.breach ? ` · breach ${d.breach}` : ""}</small>
+            {d.slice(0, 6).map(x => (
+              <li key={x.key}>
+                <b>{short(x.instrument)} {isB3(x.instrument) && <B3Tag />}</b>
+                <span className={x.approved ? "up" : x.approved === false ? "down" : ""}>{x.approved === null ? "—" : x.approved ? "permit issued" : "rejected"}</span>
+                <small>{x.approved ? `daily loss ${orDash(x.dailyLoss)} · drawdown ${orDash(x.drawdown)}` : x.rejections.join(", ") || "no reason given"}{x.breach ? ` · breach ${x.breach}` : ""}</small>
               </li>
             ))}
           </ol>
         )}
       </Section>
-      <Section title="Independent watchdog" feed={watchdog}>
+      <Section title="Independent watchdog" state={watchdog.state}>
         {w ? (
           <>
             <Rows>
-              <Row label="Heartbeat" cls={w.active ? "up" : "down"}>{w.active ? "active" : w.last_beat ? "stale" : "never seen"}</Row>
-              <Row label="Last beat">{clock(w.last_beat)}</Row>
-              <Row label="Coverage">{w.coverage_hours.toFixed(2)} h / {w.required_hours} h</Row>
-              <Row label="Halts" cls={w.recent_trips.length ? "down" : ""}>{w.recent_trips.length}</Row>
+              <Row label="Heartbeat" cls={w.active ? "up" : w.active === false ? "down" : ""}>{w.active === null ? "—" : w.active ? "active" : w.lastBeat ? "stale" : "never seen"}</Row>
+              <Row label="Last beat">{clockUtc(w.lastBeat)}</Row>
+              <Row label="Coverage">{fin(w.coverage)} h / {orDash(w.required)} h</Row>
+              <Row label="Halts" cls={w.halts ? "down" : ""}>{orDash(w.halts)}</Row>
             </Rows>
-            {checks.length > 0 && (
+            {w.checks.length > 0 && (
               <ul className="fl-checks" aria-label="Watchdog checks">
-                {checks.map(([name, value]) => <li key={name} className={value === "ok" ? "ok" : "bad"}>{name}: {value}</li>)}
+                {w.checks.map(([name, value]) => <li key={name} className={value === "ok" ? "ok" : "bad"}>{name}: {value}</li>)}
               </ul>
             )}
-            <p className="hint">The watchdog only halts. It never releases.</p>
+            <p className="hint">The watchdog only halts. It never releases. It does not probe the XP executor yet.</p>
           </>
-        ) : <NoData>Watchdog status unavailable.</NoData>}
+        ) : <Missing what="Watchdog status" />}
       </Section>
     </>
   );
 }
 
 const OPEN = new Set(["NEW", "SUBMITTED", "ACKNOWLEDGED", "PARTIALLY_FILLED"]);
+const MAIN_ASSETS = ["USDT", "BTC", "ETH", "SOL", "BNB", "BRL"];
 
-function OmsDesk({ state }: { state: FloorState | null }) {
-  const orders = useDeskFeed<{ orders: Order[]; venue?: string }>("/v1/oms/orders?limit=20");
-  const ledger = useDeskFeed<Ledger>("/v1/oms/ledger", 10000);
-  const l = ledger.data;
-  const key = ["USDT", "BTC", "ETH", "SOL", "BNB", "BRL"];
-  const held = l ? Object.entries(l.balances).filter(([a, b]) => key.includes(a) && Number(b.total) > 0) : [];
-  const halted = state?.controls.killed_venues ?? [];
-  const list = orders.data?.orders ?? [];
+/** Orders with their cancel / resolve actions; `suffix` carries ?venue=XP_B3 for the XP list. */
+function OrderList({ orders, suffix, refresh, tag }: { orders: Order[]; suffix: string; refresh: () => void; tag: ReactNode }) {
+  return (
+    <ol className="fl-list">
+      {orders.map(o => {
+        const open = o.status !== null && OPEN.has(o.status);
+        const actionable = o.id !== null && ORDER_ID.test(o.id) && (open || o.status === "UNKNOWN");
+        return (
+          <li key={o.key}>
+            <b>{short(o.instrument)} {tag}</b>
+            <span className={o.status === "FILLED" ? "up" : o.status === "REJECTED" || o.status === "UNKNOWN" ? "down" : "warn"}>{orDash(o.side)} {orDash(o.quantity)} · {orDash(o.status)}</span>
+            <small>limit {orDash(o.limit)} · filled {amt(o.filled)}{o.average ? ` @ ${amt(o.average)}` : ""} · fee {amt(o.fee)}{o.reason ? ` · ${o.reason}` : ""}</small>
+            {actionable && o.id && (
+              <span className="fl-actions">
+                {open && <Action label={`Cancel ${o.id}${suffix ? " (XP)" : ""}`} path={`/v1/oms/orders/${o.id}/cancel${suffix}`} verb="Cancel" target={o.id} refresh={refresh} />}
+                {o.status === "UNKNOWN" && <Action label={`Resolve ${o.id}${suffix ? " (XP)" : ""}`} path={`/v1/oms/orders/${o.id}/resolve${suffix}`} verb="Resolve" target={o.id} refresh={refresh} confirm />}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** The XP / B3 demo account: BRL, PROTO's own positions, orders and fills, all read from the XP executor through the API. */
+function XpOmsSection({ xp, ledgerFeed }: { xp: XpState; ledgerFeed: Feed<Ledger> }) {
+  const l = dataOf(ledgerFeed.state);
+  const failed = ledgerFeed.state.kind === "unavailable" || (ledgerFeed.state.kind === "stale" && ledgerFeed.state.failed !== null);
+  const lane = deriveXpLane({ instruments: xp.instruments, ledger: l, ledgerFailed: failed, killedVenues: xp.killedVenues });
+  const off = lane.state === "not-configured" || lane.state === "unknown";
+  const orders = useDeskFeed(off ? null : "/v1/oms/orders?venue=XP_B3&limit=20", parseOrders);
+  const list = dataOf(orders.state);
+  const block = l?.xp ?? null;
+  const measured = lane.state === "live" || lane.state === "halted";
+  const brl = block?.balances.find(b => b.asset === "BRL");
+  const positions = (block?.balances ?? []).filter(b => b.asset !== "BRL" && positive(b.total));
+  return (
+    <Section title="XP / B3 (demo account)" state={off ? undefined : ledgerFeed.state} override={!off && (lane.state === "unavailable") ? "XP executor unavailable, nothing measured" : null}>
+      <Rows>
+        <Row label="Lane" cls={lane.state === "live" ? "up" : lane.state === "halted" || lane.state === "unavailable" ? "down" : "warn"}>{LANE_LABEL[lane.state]}</Row>
+        <Row label="Account">{orDash(measured ? block?.accountId : null)}</Row>
+        <Row label="Environment">{measured ? "TESTNET (XP DEMO account)" : "—"}</Row>
+      </Rows>
+      <p className="hint">{lane.reason}</p>
+      {measured && block && (
+        <>
+          <Rows>
+            <Row label="BRL balance">{brl ? fmt2(brl.total) : "—"}</Row>
+            <Row label="BRL opening balance">{brl?.opening != null ? fmt2(brl.opening) : "not reported"}</Row>
+          </Rows>
+          {positions.length ? (
+            <Rows>
+              {positions.map(p => {
+                const own = p.opening === null ? null : subDecimal(p.total, p.opening);
+                return <Row key={p.asset} label={p.asset}>{amt(p.total)} total · {own === null ? "own position unknown (opening not reported)" : `${amt(own)} PROTO's own`}</Row>;
+              })}
+            </Rows>
+          ) : <NoData>No B3 position held.</NoData>}
+          <p className="hint">PROTO's own position is the total minus the opening balance when the executor reports it: what the demo account already held is outside PROTO's book.</p>
+        </>
+      )}
+      {!off && (
+        <>
+          <h4 className="fl-sub">Orders and fills (XP)</h4>
+          <Freshness name="XP orders" state={orders.state} />
+          {list === null ? <Missing what="XP orders" /> : !list.length ? <NoData>No XP order yet.</NoData> : <OrderList orders={list} suffix="?venue=XP_B3" refresh={orders.refresh} tag={<B3Tag />} />}
+          <div className="row"><Action label="Reconcile now (XP and Binance)" path="/v1/oms/reconcile" verb="Reconcile now" refresh={() => { orders.refresh(); ledgerFeed.refresh(); }} /></div>
+          <p className="hint">The reconcile covers both venues; its outcome (consistent or not, per venue) appears in the status line above.</p>
+          <TokenHint />
+        </>
+      )}
+    </Section>
+  );
+}
+
+function OmsDesk({ state, stateFresh, xp }: { state: FloorState | null; stateFresh: boolean; xp: XpState }) {
+  const orders = useDeskFeed("/v1/oms/orders?limit=20", parseOrders);
+  const ledger = useDeskFeed("/v1/oms/ledger", parseLedger, 10000);
+  const l = dataOf(ledger.state), list = dataOf(orders.state);
+  // An executor that cannot be read, or an account whose exposure cannot be marked, freezes equity at a
+  // checkpoint: that number is not a measurement and is never printed as one.
+  const rows = l ? accountRows(l) : [];
+  const unmeasured = rows.filter(a => !a.measured).map(a => a.quote);
+  const override = l && (l.unavailable ? "executor unavailable, equity not measured" : unmeasured.length ? `equity not measured for ${unmeasured.join(", ")}` : null);
+  const held = l && !l.unavailable ? l.balances.filter(b => positive(b.total)) : [];
+  const main = MAIN_ASSETS.flatMap(a => held.filter(b => b.asset === a));
+  const killed = state?.controls?.killed_venues;
   return (
     <>
-      <Section title="Executor" feed={ledger}>
+      <Section title="Executor (Binance testnet)" state={ledger.state} override={override}>
         <Rows>
-          <Row label="Account">{none(l?.account_id)}</Row>
-          <Row label="Mode">{none(l?.mode)}</Row>
-          <Row label="Venue">{none(l?.venue)}</Row>
-          <Row label="Halted venues" cls={halted.length ? "down" : ""}>{state ? halted.join(", ") || "none" : "—"}</Row>
-          {l?.unavailable && <Row label="Executor" cls="down">unavailable</Row>}
+          <Row label="Account">{orDash(l?.accountId)}</Row>
+          <Row label="Mode">{orDash(l?.mode)}</Row>
+          <Row label="Venue">{orDash(l?.venue)}</Row>
+          <Row label={`Halted venues${stateFresh ? "" : " (last known)"}`} cls={Array.isArray(killed) && killed.length ? "down" : ""}>{Array.isArray(killed) ? killed.join(", ") || "none" : "—"}</Row>
         </Rows>
-        {l && Object.entries(l.accounts).map(([q, a]) => (
-          <Rows key={q}><Row label={`${q} equity`}>{Number(a.equity).toFixed(2)}</Row><Row label={`${q} gross exposure`}>{a.gross_exposure === "Infinity" ? "unknown (blocks new risk)" : Number(a.gross_exposure).toFixed(2)}</Row></Rows>
+        {l && rows.map(a => (
+          <Rows key={a.quote}>
+            <Row label={`${a.quote} equity${a.quote === "BRL" && l.xp ? " (read from the XP ledger)" : ""}`}>{a.measured ? fmt2(a.equity) : "—"}</Row>
+            <Row label={`${a.quote} gross exposure`}>{a.measured ? fmt2(a.exposure) : "—"}</Row>
+            {!a.measured && <Row label={`${a.quote} state`} cls="warn">last checkpoint, executor unavailable or no live quote</Row>}
+          </Rows>
         ))}
-        {l && <p className="hint">{Object.keys(l.balances).length} assets in the ledger{held.length ? "; main balances:" : ""}</p>}
-        {held.length > 0 && <Rows>{held.map(([a, b]) => <Row key={a} label={a}>{amt(b.total)} (reserved {amt(b.reserved)})</Row>)}</Rows>}
-        {l?.xp_b3 && <p className="hint">XP (B3) account {none(l.xp_b3.account_id)}: {l.xp_b3.unavailable ? "unavailable" : `${Object.keys(l.xp_b3.balances ?? {}).length} assets${l.xp_b3.venue_halted ? " · HALTED" : ""}`}</p>}
+        {l && !l.unavailable && <p className="hint">{l.balances.length} assets in the ledger; {held.length} with a balance{main.length ? ". Main balances:" : "."}</p>}
+        {main.length > 0 && <Rows>{main.map(b => <Row key={b.asset} label={b.asset}>{amt(b.total)} (reserved {amt(b.reserved)})</Row>)}</Rows>}
+        {l && !l.unavailable && held.length > main.length && <p className="hint">{held.length - main.length} other assets with a balance are not listed.</p>}
       </Section>
-      <Section title="Orders" feed={orders}>
-        {orders.data == null ? <NoData>Orders unavailable.</NoData> : !list.length ? <NoData>No order yet.</NoData> : (
-          <ol className="fl-list">
-            {list.map(o => (
-              <li key={o.client_order_id}>
-                <b>{short(o.instrument_id)}</b>
-                <span className={o.status === "FILLED" ? "up" : o.status === "REJECTED" || o.status === "UNKNOWN" ? "down" : "warn"}>{o.side} {o.quantity} · {o.status}</span>
-                <small>limit {none(o.limit_price)} · filled {amt(o.filled_quantity)}{o.average_price ? ` @ ${amt(o.average_price)}` : ""} · fee {amt(o.fee)}{o.reason ? ` · ${o.reason}` : ""}</small>
-                {ORDER_ID.test(o.client_order_id) && (OPEN.has(o.status) || o.status === "UNKNOWN") && (
-                  <span className="fl-actions">
-                    {OPEN.has(o.status) && <Action label={`Cancel ${o.client_order_id}`} path={`/v1/oms/orders/${o.client_order_id}/cancel`} refresh={orders.refresh}>Cancel</Action>}
-                    {o.status === "UNKNOWN" && <Action label={`Resolve ${o.client_order_id}`} path={`/v1/oms/orders/${o.client_order_id}/resolve`} refresh={orders.refresh}>Resolve</Action>}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ol>
-        )}
+      <Section title="Orders (Binance)" state={orders.state}>
+        {list === null ? <Missing what="Orders" /> : !list.length ? <NoData>No order yet.</NoData> : <OrderList orders={list} suffix="" refresh={orders.refresh} tag={null} />}
         <TokenHint />
       </Section>
+      <XpOmsSection xp={xp} ledgerFeed={ledger} />
     </>
   );
 }
 
-function ReconciliationDesk() {
-  const drill = useDeskFeed<Drill>("/v1/drills/e2e/latest");
-  const watchdog = useDeskFeed<Watchdog>("/v1/watchdog/status");
-  const d = drill.data, checks = watchdog.data?.last_report?.checks ?? {};
-  const mine = Object.entries(checks).filter(([k]) => k.startsWith("executor_"));
+function ReconciliationDesk({ xp }: { xp: XpState }) {
+  const drill = useDeskFeed("/v1/drills/e2e/latest", parseDrill);
+  const watchdog = useDeskFeed("/v1/watchdog/status", parseWatchdog);
+  const d = dataOf(drill.state), w = dataOf(watchdog.state);
+  const mine = (w?.checks ?? []).filter(([k]) => k.startsWith("executor_"));
   return (
     <>
-      <Section title="Closed test" feed={drill}>
+      <Section title="Closed test (Binance testnet)" state={drill.state}>
         {d ? (
           <>
             <Rows>
-              <Row label="Verdict" cls={d.verdict === "PASSED" ? "up" : d.verdict === "NOT_RUN" ? "" : "down"}>{d.verdict}</Row>
-              <Row label="Environment">{none(d.venue_environment)}</Row>
-              <Row label="Instrument">{none(d.instrument_id)}</Row>
-              <Row label="Started">{clock(d.started_at)} UTC</Row>
+              <Row label="Verdict" cls={d.verdict === "PASSED" ? "up" : d.verdict === "NOT_RUN" || d.verdict === null ? "" : "down"}>{orDash(d.verdict)}</Row>
+              <Row label="Environment">{orDash(d.env)}</Row>
+              <Row label="Instrument">{orDash(d.instrument)}</Row>
+              <Row label="Started">{clockUtc(d.started)}</Row>
             </Rows>
             <ol className="fl-steps-list">
-              {(d.steps ?? []).map((s, i) => (
-                <li key={i} className={s.ok ? "ok" : "bad"}>
-                  <b>{s.ok ? "✓" : "✗"} {String(s.step)}</b>
-                  <small>{Object.entries(s).filter(([k]) => k !== "step" && k !== "ok").map(([k, v]) => `${k} ${stepValue(v)}`).join(" · ")}</small>
+              {d.steps.map(s => (
+                <li key={s.key} className={s.ok ? "ok" : "bad"}>
+                  <b>{s.ok === null ? "?" : s.ok ? "✓" : "✗"} {s.name}</b>
+                  <small>{s.detail}</small>
                 </li>
               ))}
             </ol>
             {d.digest && <p className="hint">Digest {d.digest.slice(0, 16)}…</p>}
           </>
-        ) : <NoData>Closed test unavailable.</NoData>}
+        ) : <Missing what="Closed test" />}
         <div className="row">
-          <Action label="Run closed test" path="/v1/drills/e2e/run" refresh={drill.refresh}>Run closed test</Action>
-          <Action label="Reconcile now" path="/v1/oms/reconcile" refresh={watchdog.refresh}>Reconcile now</Action>
+          <Action label="Run closed test" path="/v1/drills/e2e/run" verb="Run closed test" refresh={drill.refresh} confirm />
+          <Action label="Reconcile now" path="/v1/oms/reconcile" verb="Reconcile now" refresh={watchdog.refresh} />
         </div>
         <TokenHint />
       </Section>
-      <Section title="Executor reconciliation (watchdog view)" feed={watchdog}>
-        {watchdog.data ? (
-          mine.length ? <ul className="fl-checks">{mine.map(([k, v]) => <li key={k} className={v === "ok" ? "ok" : "bad"}>{k}: {v}</li>)}</ul> : <NoData>No reconciliation check reported yet.</NoData>
-        ) : <NoData>Watchdog status unavailable.</NoData>}
-        <p className="hint">A divergence between the ledger and the venue halts new orders until an operator releases it.</p>
+      <Section title="Executor reconciliation (watchdog view)" state={watchdog.state}>
+        {w ? (mine.length ? <ul className="fl-checks">{mine.map(([k, v]) => <li key={k} className={v === "ok" ? "ok" : "bad"}>{k}: {v}</li>)}</ul> : <NoData>No reconciliation check reported yet.</NoData>) : <Missing what="Watchdog status" />}
+        <p className="hint">A divergence between the ledger and the venue halts new orders until an operator releases it. XP / B3: {LANE_LABEL[xp.lane.state]}; the watchdog does not probe the XP executor yet.</p>
       </Section>
     </>
   );
 }
 
-// ---------- the drawer ----------
-type DrawerProps = { id: StationId; state: FloorState | null; actions: FloorAction[]; latest: Partial<Record<StationId, FloorAction>>; onClose: () => void };
+// ---------- failures stay inside the desk ----------
+export class DeskBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: unknown, info: ErrorInfo) { console.error("desk view failed", error, info.componentStack); }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+const PanelFailed = () => <p className="fl-fail" role="alert">Desk view failed - reload the page.</p>;
+/** The whole drawer failed: a bare panel that can still be closed. */
+export function DeskFailed({ onClose }: { onClose: () => void }) {
+  return createPortal(
+    <div className="fl-drawer-wrap">
+      <div className="fl-backdrop" onClick={onClose} aria-hidden="true" />
+      <div className="fl-drawer" role="alertdialog" aria-label="Desk view failed">
+        <div className="fl-drawer-body"><p className="fl-fail">Desk view failed - reload the page.</p><button type="button" className="btn" onClick={onClose}>Close</button></div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
+// ---------- the drawer ----------
+type DrawerProps = { id: StationId; state: FloorState | null; stateFresh: boolean; actions: FloorAction[]; latest: Partial<Record<StationId, FloorAction>>; xp: XpState; onClose: () => void };
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select,textarea,summary,[tabindex]:not([tabindex="-1"])';
 
-export function DeskDrawer({ id, state, actions, latest, onClose }: DrawerProps) {
+export function DeskDrawer({ id, state, stateFresh, actions, latest, xp, onClose }: DrawerProps) {
   const station = STATIONS.find(s => s.id === id)!;
-  const title = useId();
-  const box = useRef<HTMLElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
+  const flip = useRef(false);
+  const labels = useRef(new Set<string>());
+  const { log } = useCommand();
   const last = latest[id] ?? state?.stations?.[id] ?? null;
   const tone: Tone | "idle" = last?.tone ?? "idle";
   const mine = actions.filter(a => a.station === id).slice(-8).reverse();
 
-  // Modal behaviour: focus moves in, Tab stays inside, Escape closes, focus returns to the desk.
+  const announce = useCallback((text: string) => { flip.current = !flip.current; setAnnouncement(flip.current ? text : `${text}​`); }, []);
+  const ctx = useMemo<DeskCtx>(() => ({ announce, registerAction: label => { labels.current.add(label); } }), [announce]);
+  // The result of an action started here (ok, failed with its status, or the token is missing) shows in the drawer.
   useEffect(() => {
-    // A desk is an SVG element over the photo, so "focusable" means HTML or SVG, not only HTMLElement.
-    const opener = document.activeElement instanceof HTMLElement || document.activeElement instanceof SVGElement ? document.activeElement : null;
+    const entry = log[0];
+    if (entry && labels.current.has(entry.label)) setOutcome({ ok: entry.ok, text: `${entry.ok ? "OK" : "FAILED"} · ${entry.label} · ${entry.detail}` });
+  }, [log]);
+
+  // Modal behaviour: the rest of the page is inert, focus moves in and stays inside, Escape closes,
+  // and focus goes back to where it came from (the desk itself when the drawer was opened by a link).
+  useEffect(() => {
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement || active instanceof SVGElement ? active : null;
+    const root = document.getElementById("root");
+    root?.setAttribute("inert", "");
     box.current?.querySelector<HTMLElement>("[data-close]")?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
@@ -458,53 +646,70 @@ export function DeskDrawer({ id, state, actions, latest, onClose }: DrawerProps)
       else if (!box.current.contains(document.activeElement)) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("keydown", onKey); opener?.focus?.(); };
-  }, [onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      root?.removeAttribute("inert");
+      const back = opener && opener !== document.body && document.contains(opener)
+        ? opener
+        : document.querySelector<HTMLElement | SVGElement>(`.fl-hit[data-desk="${id}"], .fl-desks button[data-desk="${id}"]`);
+      back?.focus?.();
+    };
+  }, [id, onClose]);
 
   const copy = () => {
-    void navigator.clipboard?.writeText(`${window.location.origin}${window.location.pathname}#floor/${id}`).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); }, () => undefined);
+    void navigator.clipboard?.writeText(`${window.location.origin}${window.location.pathname}#floor/${id}`).then(() => { setCopied(true); announce("Link copied."); window.setTimeout(() => setCopied(false), 1500); }, () => undefined);
   };
-  const mode = state == null ? null : state.data_mode === "TESTNET" ? "testnet" : "paper";
+  const mode = state?.data_mode === "TESTNET" ? "testnet" : state?.data_mode === "PAPER" ? "paper" : null;
 
-  return (
-    <div className="fl-drawer-wrap">
-      <div className="fl-backdrop" onClick={onClose} aria-hidden="true" />
-      <aside ref={box} className="fl-drawer" role="dialog" aria-modal="true" aria-labelledby={title} data-desk={id}>
-        <header>
-          <div>
-            <h2 id={title}><i className="fl-dot" style={{ background: TONE_COLOR[tone] }} aria-hidden="true" /> {station.label}</h2>
-            <p>{station.role}</p>
+  return createPortal(
+    <Desk.Provider value={ctx}>
+      <div className="fl-drawer-wrap">
+        <div className="fl-backdrop" onClick={onClose} aria-hidden="true" />
+        <div ref={box} className="fl-drawer" role="dialog" aria-modal="true" aria-label={`${station.label} desk`} data-desk={id}>
+          <header>
+            <div>
+              <h2><i className="fl-dot" style={{ background: TONE_COLOR[tone] }} aria-hidden="true" /> {station.label} <span className="fl-tone">{TONE_LABEL[tone]}</span></h2>
+              <p>{station.role}</p>
+            </div>
+            <div className="fl-drawer-tools">
+              {mode ? <><Tag source={mode} />{!stateFresh && <span className="fl-fresh stale">last known</span>}</> : <span className="fl-fresh unavailable">mode unavailable</span>}
+              <button type="button" className="btn" onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
+              <button type="button" className="btn" data-close onClick={onClose} aria-label={`Close ${station.label} desk`}>Close ✕</button>
+            </div>
+          </header>
+          <div className="fl-status" role="status" aria-live="polite" aria-atomic="true">
+            <span className="sr-only">{announcement}</span>
+            {outcome && <span className={`fl-outcome ${outcome.ok ? "ok" : "bad"}`}>{outcome.text}</span>}
           </div>
-          <div className="fl-drawer-tools">
-            {mode ? <Tag source={mode} /> : <span className="fl-fresh unavailable">mode unavailable</span>}
-            <button type="button" className="btn" onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
-            <button type="button" className="btn" data-close onClick={onClose} aria-label={`Close ${station.label} desk`}>Close ✕</button>
+          <div className="fl-drawer-body" tabIndex={0} role="region" aria-label={`${station.label} desk details`}>
+            <p className="fl-last" style={{ borderColor: TONE_COLOR[tone] }}>
+              {last ? <><time>{clockUtc(last.at)}</time> {last.headline}{last.symbol ? ` · ${last.symbol}` : ""}</> : "Waiting for work: no action from this desk yet."}
+            </p>
+            <DeskBoundary fallback={<PanelFailed />}>
+              {id === "tradingview" && <TradingViewDesk actions={actions} />}
+              {id === "fusion" && <FusionDesk xp={xp} />}
+              {id === "reviewer" && <ReviewerDesk />}
+              {id === "risk" && <RiskDesk xp={xp} />}
+              {id === "oms" && <OmsDesk state={state} stateFresh={stateFresh} xp={xp} />}
+              {id === "reconciliation" && <ReconciliationDesk xp={xp} />}
+            </DeskBoundary>
+            <Section title="This desk's recent actions">
+              {mine.length ? (
+                <ol className="fl-list">
+                  {mine.map(a => (
+                    <li key={`${a.seq}:${a.station}`} style={{ borderColor: TONE_COLOR[a.tone] }}>
+                      <time>{clockUtc(a.at)}</time><b>{a.event_type}</b><span>{a.headline} <em className="fl-tone">{TONE_LABEL[a.tone]}</em></span>
+                      {a.why && a.why.length > 0 && <details><summary>why</summary><ul>{a.why.map((w, i) => <li key={i}>{w}</li>)}</ul></details>}
+                    </li>
+                  ))}
+                </ol>
+              ) : <NoData>No action in the floor stream window since this page opened.</NoData>}
+            </Section>
           </div>
-        </header>
-        <div className="fl-drawer-body">
-          <p className="fl-last" style={{ borderColor: TONE_COLOR[tone] }}>
-            {last ? <><time>{clock(last.at)} UTC</time> {last.headline}{last.symbol ? ` · ${last.symbol}` : ""}</> : "Waiting for work: no action from this desk yet."}
-          </p>
-          {id === "tradingview" && <TradingViewDesk actions={actions} />}
-          {id === "fusion" && <FusionDesk />}
-          {id === "reviewer" && <ReviewerDesk />}
-          {id === "risk" && <RiskDesk />}
-          {id === "oms" && <OmsDesk state={state} />}
-          {id === "reconciliation" && <ReconciliationDesk />}
-          <Section title="This desk's recent actions">
-            {mine.length ? (
-              <ol className="fl-list">
-                {mine.map(a => (
-                  <li key={`${a.seq}:${a.station}`} style={{ borderColor: TONE_COLOR[a.tone] }}>
-                    <time>{clock(a.at)}</time><b>{a.event_type}</b><span>{a.headline}</span>
-                    {a.why && a.why.length > 0 && <details><summary>why</summary><ul>{a.why.map((w, i) => <li key={i}>{w}</li>)}</ul></details>}
-                  </li>
-                ))}
-              </ol>
-            ) : <NoData>No action since this page opened.</NoData>}
-          </Section>
         </div>
-      </aside>
-    </div>
+      </div>
+    </Desk.Provider>,
+    document.body,
   );
 }
+

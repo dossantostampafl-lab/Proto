@@ -7,7 +7,7 @@ import { type Sym, SYMBOLS } from "../api";
 import ROOM from "../assets/floor-room.webp";
 import type { Shared } from "../main";
 import { pct, usd } from "../ui";
-import { changeOf, type FloorAction, type FloorState, isHalted, priceOf, sparkPath, STAGES, STATIONS, type StationId, type Tone, TONE_COLOR } from "./floorModel";
+import { changeOf, type FloorAction, type FloorState, isHalted, priceOf, sparkPath, STAGES, STATIONS, type StationId, type Tone, TONE_COLOR, TONE_LABEL } from "./floorModel";
 import { VectorScene } from "./floorSceneVector";
 
 export { isHalted, STAGES, STATIONS, TONE_COLOR };
@@ -272,15 +272,15 @@ function DeskHotspot({ id, label, action, busy, selected, onSelect }: {
   const color = TONE_COLOR[action ? action.tone : "idle"];
   const headline = action?.headline ?? "waiting for work";
   return (
-    <g className={`fl-hit${selected ? " selected" : ""}${busy ? " busy" : ""}`} role="button" tabIndex={0} aria-pressed={selected}
-      aria-label={`Open the ${label} desk. Last action: ${headline}`} data-desk={id}
+    <g className={`fl-hit${selected ? " selected" : ""}${busy ? " busy" : ""}`} role="button" tabIndex={0} aria-haspopup="dialog"
+      aria-label={`Open the ${label} desk. Status: ${TONE_LABEL[action ? action.tone : "idle"]}. Last action: ${headline}`} data-desk={id}
       onClick={() => onSelect(id)}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(id); } }}>
-      <rect className="fl-hit-box" x={x} y={y} width={w} height={h} rx={7} fill="transparent" />
+      <rect className="fl-hit-ring" x={x} y={y} width={w} height={h} rx={7} fill="none" vectorEffect="non-scaling-stroke" />
+      <rect className="fl-hit-box" x={x} y={y} width={w} height={h} rx={7} fill="transparent" vectorEffect="non-scaling-stroke" />
       <circle className="fl-hit-halo" cx={x + w - 11} cy={y + 11} r={9} fill={color} opacity={0.22} />
       <circle className="fl-hit-dot" cx={x + w - 11} cy={y + 11} r={4.2} fill={color} />
       <text className="fl-hit-cta" x={x + w / 2} y={y + h - 6} textAnchor="middle">{selected ? "OPEN" : "OPEN DESK"}</text>
-      <title>{`${label}: ${headline}`}</title>
     </g>
   );
 }
