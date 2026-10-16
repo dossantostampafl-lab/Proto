@@ -119,6 +119,18 @@ def floor_actions(event: dict[str, Any]) -> list[dict[str, Any]]:
         headline = f"{signal.get('direction', '?')} alert · strength {signal.get('strength', '?')}"
         return [_action(event, "tradingview", "ok", headline, signal.get("instrument_id"))]
 
+    if kind == "PROTO_STRATEGY_SIGNAL":
+        signal = payload.get("signal") or {}
+        strength = signal.get("strength", "?")
+        headline = f"{signal.get('direction', '?')} · own strategy · strength {strength}"
+        return [_action(event, "tradingview", "ok", headline, signal.get("instrument_id"))]
+
+    if kind == "E2E_DRILL_COMPLETED":
+        verdict = payload.get("verdict", "?")
+        tone = "ok" if verdict == "PASSED" else "alert"
+        instrument = payload.get("instrument_id")
+        return [_action(event, "reconciliation", tone, f"closed test {verdict}", instrument)]
+
     if kind == "AGENT_DECISION":
         instrument = payload.get("instrument_id")
         fusion = payload.get("fusion") or {}

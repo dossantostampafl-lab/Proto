@@ -497,3 +497,4 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+.fl-steps { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; font: 400 11px var(--mono); }

@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     )
     # Hybrid agent pipeline (Phase 2). Proposals only: no order authority.
     agent_pipeline_enabled: bool = False
+    # PROTO's own strategy (EMA cross on live mids) feeds the pipeline next to TradingView.
+    proto_strategy_enabled: bool = False
+    # Run the closed-loop drill (signal -> permit -> executor testnet -> reconciliation) once
+    # after start, when the executor backend is configured.
+    e2e_drill_on_start: bool = False
     # "deterministic" approves every sized candidate; "claude" adds the AI reviewer,
     # which may only reduce, defer or veto. Switch only after the offline gate passes.
     agent_reviewer: str = "deterministic"
