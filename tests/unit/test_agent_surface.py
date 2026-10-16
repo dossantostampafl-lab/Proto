@@ -132,6 +132,16 @@ def test_live_quote_requires_a_binance_usdt_stream(monkeypatch) -> None:
     assert agent_surface.live_quote("BINANCE_SPOT:BTCUSDT") is None
 
 
+def test_live_quote_accepts_the_venue_label_the_public_feed_really_emits(monkeypatch) -> None:
+    configure(monkeypatch)
+    monkeypatch.setattr(
+        agent_surface.live_monitor,
+        "snapshot",
+        lambda s: live_snapshot(s, venue="binance-public-spot"),
+    )
+    assert agent_surface.live_quote("BINANCE_SPOT:BTCUSDT") is not None
+
+
 def test_operator_evaluate_requires_the_token_and_a_known_instrument(monkeypatch) -> None:
     configure(monkeypatch, operator_api_token="o" * 32)
     client = TestClient(main.app)
