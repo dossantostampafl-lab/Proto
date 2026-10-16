@@ -184,6 +184,17 @@ async def _totals() -> tuple[dict[str, Decimal], dict[str, Decimal]]:
     )
 
 
+def _book_key(quote_asset: str) -> str:
+    """Checkpoint key for the own-book accounting basis.
+
+    Equity used to include the venue's opening holdings (the testnet faucet's 1 BTC). Start-of-day
+    and peak values saved on that basis would read the switch to the own book as a ~89% loss and
+    trip the daily-loss and drawdown lockdowns, so the own book starts from its own baseline.
+    """
+
+    return f"{quote_asset}:own"
+
+
 async def account_state(quote_asset: str) -> AccountState:
     """Conservative account view in one quote currency, marked at live mid prices.
 
@@ -199,7 +210,7 @@ async def account_state(quote_asset: str) -> AccountState:
         balances, openings = await _totals()
     except (ExecutorUnavailable, ExecutorRefused) as exc:
         logger.error("account state unavailable: %s", exc)
-        saved = await checkpoints.get(quote_asset)
+        saved = await checkpoints.get(_book_key(quote_asset))
         baseline = saved[1] if saved else REFERENCE_CAPITAL
         return AccountState(
             equity=baseline,
@@ -233,7 +244,7 @@ async def account_state(quote_asset: str) -> AccountState:
         exposure += quantity * (quote.bid + quote.ask) / 2
 
     today = datetime.now(UTC).date()
-    saved = await checkpoints.get(quote_asset)
+    saved = await checkpoints.get(_book_key(quote_asset))
     day, start, peak = saved or (today, cash + exposure, cash + exposure)
     if not marked:
         return AccountState(
@@ -248,7 +259,7 @@ async def account_state(quote_asset: str) -> AccountState:
         day, start = today, equity
     checkpoint = (day, start, max(peak, equity))
     if checkpoint != saved:
-        await checkpoints.put(quote_asset, checkpoint)
+        await checkpoints.put(_book_key(quote_asset), checkpoint)
     return AccountState(
         equity=equity,
         start_of_day_equity=start,

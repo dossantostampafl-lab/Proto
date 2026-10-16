@@ -244,6 +244,19 @@ async def test_executor_mode_reads_the_opening_balance_when_reported(
     assert state.positions["BINANCE_SPOT:BTCUSDT"] == expected_position
 
 
+async def test_checkpoints_saved_on_the_old_basis_do_not_read_as_a_loss(monkeypatch) -> None:
+    """Start/peak saved with the faucet BTC in equity (~91k) must not trip the 1% / 5% locks."""
+
+    configure(monkeypatch)
+    await oms_surface.components()
+    today = datetime.now(UTC).date()
+    await oms_surface._checkpoint_store().put("USDT", (today, Decimal("91000"), Decimal("91000")))
+    state = await oms_surface.account_state("USDT")
+    assert state.equity == Decimal("10000")
+    assert state.start_of_day_equity == Decimal("10000")
+    assert state.peak_equity == Decimal("10000")
+
+
 def test_operator_routes_require_the_token(monkeypatch) -> None:
     configure(monkeypatch)
     client = TestClient(main.app)
@@ -291,21 +304,20 @@ async def test_equity_checkpoints_survive_a_restart(monkeypatch, tmp_path) -> No
         # An earlier high and an earlier start of day were recorded before the restart.
         checkpoints = SqlCheckpoints(engine, account_id=oms_surface.ACCOUNT_ID)
         today = datetime.now(UTC).date()
-        await checkpoints.put("USDT", (today, Decimal("10080"), Decimal("10600")))
+        key = oms_surface._book_key("USDT")
+        await checkpoints.put(key, (today, Decimal("10080"), Decimal("10600")))
         oms_surface.reset_oms_state()
         restarted = await oms_surface.account_state("USDT")
         assert restarted.start_of_day_equity == Decimal("10080")
         assert restarted.peak_equity == Decimal("10600")
 
         # A new UTC day resets the start of day but never the peak.
-        await checkpoints.put(
-            "USDT", (today - timedelta(days=1), Decimal("9000"), Decimal("10600"))
-        )
+        await checkpoints.put(key, (today - timedelta(days=1), Decimal("9000"), Decimal("10600")))
         oms_surface.reset_oms_state()
         next_day = await oms_surface.account_state("USDT")
         assert next_day.start_of_day_equity == Decimal("10000")
         assert next_day.peak_equity == Decimal("10600")
-        assert await checkpoints.get("USDT") == (today, Decimal("10000"), Decimal("10600"))
+        assert await checkpoints.get(key) == (today, Decimal("10000"), Decimal("10600"))
     finally:
         await engine.dispose()
 
