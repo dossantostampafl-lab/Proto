@@ -35,6 +35,20 @@ from .live_database import LiveBase
 
 logger = logging.getLogger(__name__)
 
+
+def _driver_error_cause(error: SQLAlchemyError) -> str:
+    """Class name and SQLSTATE of the driver exception under SQLAlchemy's DBAPI wrapper.
+
+    asyncpg errors arrive as an adapter ``Error`` whose ``__cause__`` is the real exception
+    (``UndefinedTableError``, ``InvalidPasswordError``...). Class and SQLSTATE only: no SQL,
+    parameters or connection details.
+    """
+    orig = getattr(error, "orig", None) or error
+    real = getattr(orig, "__cause__", None) or orig
+    sqlstate = getattr(real, "sqlstate", None) or getattr(orig, "sqlstate", None)
+    name = type(real).__name__
+    return f"{name} [{sqlstate}]" if sqlstate else name
+
 _HISTORY_CURSOR_VERSION = 2
 _MAX_HISTORY_CURSOR_CHARS = 512
 
@@ -268,9 +282,7 @@ class AsyncSqlLiveTickJournal:
                 self._last_write_error = type(error).__name__
                 # Driver exception class only (e.g. UndefinedTableError): the public status
                 # must not carry SQL text, parameters or connection details.
-                self._last_write_error_cause = type(
-                    getattr(error, "orig", None) or error.__cause__ or error
-                ).__name__
+                self._last_write_error_cause = _driver_error_cause(error)
                 if self._write_failures == 1 or self._write_failures % 1000 == 0:
                     logger.error(
                         "live tick journal write failed (%d so far): %s / %s",
