@@ -1,8 +1,8 @@
-// Photo trading room, shown while the live 3D room loads or where it cannot run. The room itself is a photograph with every screen blank; each screen, desk
+// Photo trading room. The room itself is a photograph with every screen blank; each screen, desk
 // label and activity light is drawn live on top of it from /v1/floor/state, /ws/floor and the live
 // public market stream. Nothing operational is baked into the picture. If the photo cannot be loaded
 // the vector room is drawn instead.
-import { Component, lazy, type ReactNode, Suspense, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { type Sym, SYMBOLS } from "../api";
 import ROOM from "../assets/floor-room.webp";
 import type { Shared } from "../main";
@@ -244,28 +244,10 @@ type SceneProps = {
   active: (s: StationId) => boolean;
 };
 
-// The live 3D room is the floor; it loads on demand and needs WebGL and OffscreenCanvas. While it
-// loads, or if it cannot run, the photo room is shown.
-const Floor3D = lazy(() => import("./floor3d/Floor3D"));
-const can3d = () => typeof OffscreenCanvas !== "undefined" && typeof WebGL2RenderingContext !== "undefined";
-
-class Fallback extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch() { this.props.onError(); }
-  render() { return this.state.failed ? null : this.props.children; }
-}
-
+// The floor is the photo room: a photograph with blank screens, every live value drawn over it.
+// If the photo cannot be loaded, the vector room is drawn instead.
 export function Scene(props: SceneProps) {
-  const [mode, setMode] = useState<"3d" | "photo">(() => (can3d() ? "3d" : "photo"));
-  if (mode === "photo") return <PhotoScene {...props} />;
-  return (
-    <Fallback onError={() => setMode("photo")}>
-      <Suspense fallback={<PhotoScene {...props} />}>
-        <Floor3D {...props} onFail={() => setMode("photo")} />
-      </Suspense>
-    </Fallback>
-  );
+  return <PhotoScene {...props} />;
 }
 
 function PhotoScene(props: SceneProps) {

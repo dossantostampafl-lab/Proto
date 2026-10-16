@@ -75,8 +75,7 @@ uvicorn apps.executor.main:app --port 8100   # executor (needs EXECUTOR_* and PR
   formatted. Format only the files you touch.
 - **Contract check.** `apps/web/scripts/contract-check.mjs` enforces the provenance and boundary
   labels and forbids real-money wording in the UI. Keep it passing.
-- **Bundle budget.** At most 450 KB per JS file and 700 KB loaded up front. The live 3D floor
-  (three.js) is the one on-demand chunk: at most 1.2 MB, never preloaded, 2 MB of assets in total.
+- **Bundle budget.** At most 450 KB per JS file and 700 KB of assets in total, the floor photo included.
 
 ## PRAGMA-CORE 2.0
 

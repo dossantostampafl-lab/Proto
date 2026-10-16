@@ -6,7 +6,4 @@ export default defineConfig({
   server: {
     port: 5173,
   },
-  // The live 3D floor (three.js) is a deliberate on-demand chunk; scripts/bundle-budget-check.mjs
-  // holds it to its own budget.
-  build: { chunkSizeWarningLimit: 1200 },
 });
