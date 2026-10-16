@@ -17,7 +17,8 @@ def live_quote(instrument_id: str, *, market_source: str) -> Quote | None:
     if venue != "BINANCE_SPOT" or not symbol.endswith("USDT") or market_source != "BINANCE":
         return None
     snapshot = live_monitor.snapshot(symbol.removesuffix("USDT"))
-    if snapshot is None or str(snapshot.get("venue", "")).upper() != "BINANCE":
+    # The feed labels its frames "binance-public-spot"; any other feed (Coinbase) is refused.
+    if snapshot is None or not str(snapshot.get("venue", "")).upper().startswith("BINANCE"):
         return None
     try:
         return Quote(

@@ -41,7 +41,7 @@ def _reset():
     risk_surface.reset_risk_state()
 
 
-def live_snapshot(symbol: str, *, venue: str = "BINANCE", age: float = 1.0):
+def live_snapshot(symbol: str, *, venue: str = "binance-public-spot", age: float = 1.0):
     return {
         "symbol": symbol,
         "venue": venue,
@@ -125,7 +125,7 @@ def test_live_quote_requires_a_binance_usdt_stream(monkeypatch) -> None:
     assert agent_surface.live_quote("BINANCE_SPOT:BTCUSDT") is not None
     assert agent_surface.live_quote("BINANCE_SPOT:BTCBRL") is None
     monkeypatch.setattr(
-        agent_surface.live_monitor, "snapshot", lambda s: live_snapshot(s, venue="COINBASE")
+        agent_surface.live_monitor, "snapshot", lambda s: live_snapshot(s, venue="coinbase-public")
     )
     assert agent_surface.live_quote("BINANCE_SPOT:BTCUSDT") is None
     configure(monkeypatch, live_market_source="COINBASE")
