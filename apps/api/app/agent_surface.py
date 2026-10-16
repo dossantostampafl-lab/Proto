@@ -31,12 +31,12 @@ from services.agents import (
 )
 from services.agents.review import defer
 from services.execution import Signal
-from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import REFERENCE_CAPITAL
 from services.execution.venue import Quote
 from services.risk import RiskDecision
 
 from .event_state import JournalUnavailable, record_operational_event
+from .instrument_registry import active_instruments
 from .live_monitor import live_monitor  # noqa: F401  (re-exported for tests)
 from .market_quotes import live_quote as _market_quote
 from .oms_surface import account_state as ledger_account_state
@@ -111,7 +111,7 @@ def _portfolio(instrument_id: str) -> PortfolioView:
 async def _refresh_portfolio(instrument_id: str) -> None:
     """Size from the paper ledger: equity in the quote currency and the held position."""
 
-    instrument = PAPER_INSTRUMENTS.get(instrument_id)
+    instrument = active_instruments().get(instrument_id)
     if instrument is None:
         return
     state = await ledger_account_state(instrument.quote_asset)
@@ -141,7 +141,7 @@ def pipeline() -> HybridDecisionPipeline:
     global _pipeline, _pipeline_settings_id
     if _pipeline is None or _pipeline_settings_id != id(settings):
         _pipeline = HybridDecisionPipeline(
-            instruments=PAPER_INSTRUMENTS,
+            instruments=active_instruments(),
             reviewer=_reviewer(),
             quotes=live_quote,
             portfolio=_portfolio,
@@ -235,7 +235,7 @@ def agent_status() -> dict[str, object]:
         "decisions": sum(_outcomes.values()),
         "outcomes": dict(_outcomes),
         "journal_failures": _record_failures,
-        "instruments": sorted(PAPER_INSTRUMENTS),
+        "instruments": sorted(active_instruments()),
         **_BOUNDARY,
     }
 
@@ -250,7 +250,7 @@ def recent_decisions(limit: int = 20) -> dict[str, object]:
 async def evaluate_now(request: EvaluateRequest) -> dict[str, object]:
     """Operator-triggered evaluation over the buffered signals (operator token required)."""
 
-    if request.instrument_id not in PAPER_INSTRUMENTS:
+    if request.instrument_id not in active_instruments():
         raise HTTPException(422, "instrument is not supported")
     decision, risk, order = await _evaluate(request.instrument_id)
     return {

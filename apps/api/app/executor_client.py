@@ -17,6 +17,7 @@ import httpx
 from services.execution import RiskPermit, TradeIntent
 
 _ORDER_ID = re.compile(r"^[A-Za-z0-9_-]{1,36}$")
+_SYMBOL = re.compile(r"^[A-Z0-9]{1,20}$")
 
 
 class ExecutorUnavailable(RuntimeError):
@@ -71,6 +72,13 @@ class ExecutorClient:
 
     async def ledger(self) -> dict[str, Any]:
         return await self._call("GET", "/v1/ledger")
+
+    async def quotes(self, names: list[str]) -> dict[str, Any]:
+        """Venue quotes (XP_B3: read from the MT5 terminal by the executor)."""
+
+        if not names or not all(_SYMBOL.match(name) for name in names):
+            raise ValueError("names must be upper-case venue symbols")
+        return await self._call("GET", f"/v1/quotes?names={','.join(names)}")
 
     async def reconcile(self) -> dict[str, Any]:
         return await self._call("POST", "/v1/reconcile")
