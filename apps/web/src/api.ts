@@ -53,10 +53,20 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<Result<T>>
   try {
     const response = await fetch(`${API_BASE}${path}`, { cache: "no-store", ...init, headers, signal: controller.signal });
     const text = await response.text();
-    const body: unknown = text ? JSON.parse(text) : null;
-    if (response.ok) return { ok: true, status: response.status, data: body as T };
-    const detail = body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : text;
-    return { ok: false, status: response.status, error: typeof detail === "string" ? detail : JSON.stringify(detail) };
+    if (!response.ok) {
+      // An error body is not always JSON (a proxy's 502/504 page): the status is what matters.
+      let detail: unknown = text.slice(0, 200);
+      try {
+        const body: unknown = text ? JSON.parse(text) : null;
+        if (body && typeof body === "object" && "detail" in body) detail = (body as { detail: unknown }).detail;
+      } catch { /* keep the text */ }
+      return { ok: false, status: response.status, error: typeof detail === "string" ? detail || `HTTP ${response.status}` : JSON.stringify(detail) };
+    }
+    let body: unknown = null;
+    if (text) {
+      try { body = JSON.parse(text); } catch { return { ok: false, status: response.status, error: "invalid JSON" }; }
+    }
+    return { ok: true, status: response.status, data: body as T };
   } catch (error) {
     return { ok: false, status: 0, error: error instanceof Error ? error.message : "network error" };
   } finally {

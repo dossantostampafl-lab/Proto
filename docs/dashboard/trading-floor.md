@@ -117,6 +117,39 @@ say why. With it: cancel or resolve an order (OMS), run the closed test and reco
 (Reconciliation). A desk has no way to release a halt or a lockdown, nor to change a limit; the
 contract check fails if one is added.
 
+## XP / B3 lane (demo account)
+
+A strip at the top of the FLOOR view, and a section in the OMS, Fusion and Risk desks, show the XP
+(B3) lane. It is a **DEMO** account (the executor maps a demo login to `TESTNET`): nothing here is
+real money, and no number is shown that was not measured. The state comes from what the API says:
+
+| State | When | What it shows |
+|---|---|---|
+| **NOT CONFIGURED** | `/v1/agents/status` lists no `XP_B3:` instrument and the ledger has no `xp_b3` block | "XP routing is off: XP_EXECUTOR_URL is not set on the API." Nothing else. |
+| **UNAVAILABLE** | the XP ledger cannot be read, or its block is `unavailable` | "The XP executor cannot be read: nothing about XP is measured." Account and balances read "—"; a list kept from an earlier read is marked STALE with the failure. |
+| **LIVE** | the `xp_b3` ledger block is readable | account, BRL balance and opening balance, positions, B3 session, orders and fills |
+| **HALTED** | `controls.killed_venues` has `XP_B3`, or the executor reports the venue halted | the reason, in red; the rest stays readable |
+
+- **OMS desk, "XP / B3 (demo account)".** BRL balance, the opening balance when reported, each
+  position as total and PROTO's own part (total minus the opening balance, computed on the decimal
+  strings; "own position unknown" when the executor does not report the opening), orders and fills
+  from `/v1/oms/orders?venue=XP_B3`, cancel and resolve with `?venue=XP_B3` (the same token and
+  confirmation flow), and a reconcile whose outcome shows each venue as consistent or diverged.
+- **Fusion desk.** The lane state, the B3 session and the B3 instruments in the pipeline; decisions
+  and signals for XP instruments carry a **B3** tag. The session is regular hours in São Paulo,
+  Monday to Friday, 10:00 up to 17:55, computed from the clock as the Risk Engine does and labelled
+  "no holiday calendar".
+- **Risk desk.** Halted venues are listed per venue with `XP_B3` highlighted, and the accounts the
+  limits are measured on say where each comes from; with an XP block the BRL account is read from the
+  XP ledger. An equity whose executor cannot be read, or whose exposure cannot be marked, is not a
+  measurement: it reads "—" with "last checkpoint, executor unavailable or no live quote" and its
+  section is UNAVAILABLE.
+- **Not shown.** B3 quotes: the API keeps them in memory only, and no read endpoint exposes them.
+
+Every payload is narrowed at runtime: an odd or missing field makes that panel UNAVAILABLE or "—"
+and never a TypeError, and a desk that still fails is caught by an error boundary ("Desk view failed
+- reload the page.") without taking the app down.
+
 ## Phones
 
 On narrow screens the scene pans sideways and opens centred on the desks. Below it, a card per

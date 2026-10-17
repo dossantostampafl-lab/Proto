@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, WS_BASE } from "../api";
 import type { Shared } from "../main";
 import { Button, Panel, Tag } from "../ui";
-import { DeskDrawer, useDeskSelection } from "./floorDesks";
+import { DeskBoundary, DeskDrawer, DeskFailed, useDeskSelection, useXpLane, XpStrip } from "./floorDesks";
+import { hms, TONE_LABEL } from "./floorModel";
 
 import { type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone, type WatchdogSummary } from "./floorScene";
 
@@ -46,7 +47,7 @@ function Watchdog({ watchdog }: { watchdog: WatchdogSummary | undefined }) {
     <>
       <ul className="floor-controls">
         <li><span>Heartbeat</span><b className={watchdog.active ? "up" : "down"}>{watchdog.active ? "active" : watchdog.last_beat ? "stale" : "never seen"}</b></li>
-        <li><span>Last beat</span><b>{watchdog.last_beat ? watchdog.last_beat.slice(11, 19) : "—"}</b></li>
+        <li><span>Last beat</span><b>{hms(watchdog.last_beat)}</b></li>
         <li><span>Coverage</span><b className={covered >= 1 ? "up" : ""}>{watchdog.coverage_hours.toFixed(1)} h / {watchdog.required_hours} h</b></li>
         <li><span>Halts</span><b className={watchdog.trips ? "down" : ""}>{watchdog.trips}</b></li>
       </ul>
@@ -69,10 +70,10 @@ function DeskCards({ latest, active, selected, onSelect }: {
         const color = TONE_COLOR[a?.tone ?? "idle"];
         return (
           <li key={s.id} className={active(s.id) ? "busy" : ""} style={{ borderColor: color }}>
-            <button type="button" aria-pressed={selected === s.id} aria-label={`Open the ${s.label} desk`} onClick={() => onSelect(s.id)}>
+            <button type="button" aria-haspopup="dialog" data-desk={s.id} aria-label={`Open the ${s.label} desk, status ${TONE_LABEL[a?.tone ?? "idle"]}`} onClick={() => onSelect(s.id)}>
               <b style={{ color }}>{s.label}</b>
               <span>{a?.headline ?? "waiting for work"}</span>
-              <small>{a ? `${a.at.slice(11, 19)}${a.symbol ? ` · ${a.symbol}` : ""}` : s.role}</small>
+              <small>{TONE_LABEL[a?.tone ?? "idle"]} · {a ? `${hms(a.at)}${a.symbol ? ` · ${a.symbol}` : ""}` : s.role}</small>
             </button>
           </li>
         );
@@ -153,11 +154,11 @@ function useFloor() {
   return { state, stateFresh, actions, latest, active, connected };
 }
 
-const TONE_LABEL: Record<Tone, string> = { ok: "ok", warn: "attention", alert: "alert", working: "working" };
 
 export function Floor({ market }: Shared) {
   const floor = useFloor();
   const { selected, select } = useDeskSelection();
+  const xp = useXpLane();
   const closeDesk = useCallback(() => select(null), [select]);
   const pan = useRef<HTMLDivElement>(null);
   // On narrow screens the scene pans; start centred on the desks, not on the window wall.
@@ -170,6 +171,7 @@ export function Floor({ market }: Shared) {
   const recent = [...floor.actions].reverse().slice(0, 30);
   return (
     <div className="floor-view">
+      <XpStrip xp={xp} />
       <Panel
         title="Trading floor"
         className="floor-stage"
@@ -181,7 +183,7 @@ export function Floor({ market }: Shared) {
         </span>}
       >
         <div className="fl-pan" ref={pan}><Scene market={market} state={state} actions={floor.actions} latest={floor.latest} active={floor.active} onSelect={select} selected={selected} /></div>
-        <p className="fl-hint">Click or press Enter on a desk to open it: live data, its recent actions and, with the operator token, its actions.</p>
+        <p className="fl-hint">Click, or press Enter or Space on a desk to open it: live data, its recent actions and, with the operator token, its actions.</p>
         <DeskCards latest={floor.latest} active={floor.active} selected={selected} onSelect={select} />
       </Panel>
 
@@ -214,7 +216,7 @@ export function Floor({ market }: Shared) {
             <ol aria-live="polite">
               {recent.map(a => (
                 <li key={`${a.seq}:${a.station}`} className={`tone-${a.tone}`}>
-                  <time>{a.at.slice(11, 19)}</time>
+                  <time>{hms(a.at)}</time>
                   <b>{STATIONS.find(s => s.id === a.station)?.label}</b>
                   <span>{a.headline}</span>
                   <em>{TONE_LABEL[a.tone]}</em>
@@ -230,7 +232,11 @@ export function Floor({ market }: Shared) {
           ) : <p className="empty">No agent activity yet. Alerts from TradingView start the chain.</p>}
         </Panel>
       </div>
-      {selected && <DeskDrawer key={selected} id={selected} state={state} actions={floor.actions} latest={floor.latest} onClose={closeDesk} />}
+      {selected && (
+        <DeskBoundary key={selected} fallback={<DeskFailed onClose={closeDesk} />}>
+          <DeskDrawer id={selected} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} xp={xp} onClose={closeDesk} />
+        </DeskBoundary>
+      )}
     </div>
   );
 }
