@@ -7,10 +7,12 @@ operator action, and a lockdown cannot be released while its breach persists.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from threading import Lock
+from typing import Any
 
 from services.execution import ReleaseStage, TradeIntent
 from services.execution.venue import Quote
@@ -99,6 +101,27 @@ class RiskGovernor:
                 "killed_strategies": sorted(self._strategies),
                 "lockdown": self._lockdown.value if self._lockdown else None,
             }
+
+    def restore(self, state: Mapping[str, Any]) -> None:
+        """Merge a persisted snapshot. Only ever stricter: a restore never releases anything."""
+
+        lockdown = state.get("lockdown")
+        with self._lock:
+            self._global = self._global or bool(state.get("global_kill"))
+            self._venues.update(str(v) for v in state.get("killed_venues") or ())
+            self._strategies.update(str(s) for s in state.get("killed_strategies") or ())
+            if self._lockdown is None and lockdown:
+                self._lockdown = LockdownReason(str(lockdown))
+
+    def replace(self, state: Mapping[str, Any]) -> None:
+        """Put back an exact earlier snapshot (an operator release that could not be saved)."""
+
+        lockdown = state.get("lockdown")
+        with self._lock:
+            self._global = bool(state.get("global_kill"))
+            self._venues = {str(v) for v in state.get("killed_venues") or ()}
+            self._strategies = {str(s) for s in state.get("killed_strategies") or ()}
+            self._lockdown = LockdownReason(str(lockdown)) if lockdown else None
 
     def _target(self, scope: KillScope, key: str | None, *, add: bool) -> None:
         if scope is KillScope.GLOBAL:

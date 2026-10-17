@@ -98,10 +98,106 @@ def permit_ledger() -> PermitLedger:
 
 
 def reset_risk_state() -> None:
-    global _governor, _ledger, _governor_settings_id
+    global _governor, _ledger, _governor_settings_id, _controls_loaded, _controls_saved
     _governor = _ledger = None
     _governor_settings_id = None
+    _controls_loaded = _controls_saved = None
     _decisions.clear()
+
+
+# Kill switches and the lockdown latch are durable on the control-plane store (control_state).
+CONTROLS_KEY = "risk_controls"
+# (id(governor), store generation) the controls were last restored for.
+_controls_loaded: tuple[int, int] | None = None
+_controls_saved: dict[str, object] | None = None
+
+
+async def governor_ready() -> RiskGovernor:
+    """The governor with its durable controls restored (stricter merge), when a store exists.
+
+    Nothing is ever written before the saved state is read, so an empty in-memory governor can
+    never overwrite a persisted lockdown or kill switch.
+    """
+
+    global _controls_loaded, _controls_saved
+    from services.risk import SqlControlState
+
+    from . import control_state
+
+    gov = governor()
+    store = control_state.current()
+    if store.engine is None or not await store.ensure():
+        return gov
+    marker = (id(gov), store.generation)
+    if _controls_loaded == marker:
+        return gov
+    try:
+        saved = await SqlControlState(store.engine).get(CONTROLS_KEY)
+    except Exception as exc:
+        store.mark_unavailable(exc)
+        return gov
+    if saved:
+        gov.restore(saved)
+    _controls_loaded, _controls_saved = marker, saved
+    if gov.snapshot() != saved:
+        await persist_controls()  # memory held something stricter (or nothing was saved yet)
+    return gov
+
+
+async def restore_controls() -> None:
+    """Startup: restore kill switches and lockdown before any proposal is assessed."""
+
+    await governor_ready()
+
+
+async def persist_controls() -> bool:
+    """Save the governor's controls. True when saved or when no durable store is configured."""
+
+    global _controls_saved
+    from services.risk import SqlControlState
+
+    from . import control_state
+
+    store = control_state.current()
+    if store.engine is None:
+        return True
+    gov = await governor_ready()
+    if _controls_loaded != (id(gov), store.generation):
+        return False  # the saved state could not be read: never overwrite it blind
+    snapshot = gov.snapshot()
+    if snapshot == _controls_saved:
+        return True
+    try:
+        await SqlControlState(store.engine).put(CONTROLS_KEY, snapshot)
+    except Exception as exc:
+        store.mark_unavailable(exc)
+        return False
+    _controls_saved = snapshot
+    return True
+
+
+def controls_durability() -> dict[str, object]:
+    from . import control_state
+
+    store = control_state.current()
+    return {
+        "durable": store.durable,
+        "store": store.status.value,
+        "accepts_new_risk": store.accepts_new_risk(),
+    }
+
+
+def _refused_unavailable() -> RiskDecision:
+    """Fail closed: no permit while the durable control-plane state cannot be read or written."""
+
+    detail = "fail: durable control store unreachable"
+    return RiskDecision(
+        approved=False,
+        permit=None,
+        rejections=("control_state_available",),
+        checks={"control_state_available": detail},
+        breach=None,
+    )
 
 
 async def account_state(quote_asset: str) -> AccountState:
@@ -128,12 +224,27 @@ async def _journal(event_type: str, payload: dict[str, object], key: str | None 
 async def assess(intent: TradeIntent) -> RiskDecision:
     """Assess one proposal and journal the outcome (without the permit signature)."""
 
+    from . import control_state
     from .fx_rates import canary_capital
     from .oms_surface import quote_asset_of
     from .promotion_surface import stage_for
 
+    gov = await governor_ready()
+    if not control_state.current().accepts_new_risk():
+        decision = _refused_unavailable()
+        record = {
+            "intent_id": str(intent.intent_id),
+            "intent_fingerprint": intent.fingerprint(),
+            "instrument_id": intent.instrument_id,
+            "strategy_id": intent.strategy_id,
+            **decision.to_dict(),
+            **_BOUNDARY,
+        }
+        _decisions.append(record)
+        await _journal("RISK_DECISION", record)
+        return decision
     quote_asset = quote_asset_of(intent)
-    decision = governor().assess(
+    decision = gov.assess(
         intent,
         account=await account_state(quote_asset),
         quote=live_quote(intent.instrument_id, market_source=settings.live_market_source),
@@ -159,6 +270,8 @@ async def assess(intent: TradeIntent) -> RiskDecision:
     key = f"risk-decision:{decision.permit.permit_id}" if decision.permit else None
     await _journal("RISK_DECISION", record, key)
     if decision.breach is not None:
+        if not await persist_controls():
+            logger.critical("lockdown %s latched in memory only", decision.breach.value)
         await _journal("RISK_LOCKDOWN_LATCHED", {"reason": decision.breach.value, **_BOUNDARY})
         from .promotion_surface import violation
 
@@ -200,6 +313,7 @@ def risk_status() -> dict[str, object]:
             ),
         },
         "controls": {**gov.snapshot(), "runtime_kill_switch": runtime.kill_switch},
+        "controls_persistence": controls_durability(),
         "account_source": "paper_ledger",
         "decisions": len(_decisions),
         **_BOUNDARY,
@@ -212,33 +326,57 @@ def recent_risk_decisions(limit: int = 20) -> dict[str, object]:
     return {"decisions": list(reversed(selected)), **_BOUNDARY}
 
 
+async def _release(gov: RiskGovernor, release) -> None:
+    """Apply an operator release only if it can be saved; otherwise put the controls back.
+
+    A release that lived only in memory would silently come back stricter after a restart,
+    which is safe but misleading; refusing it keeps the operator's view truthful.
+    """
+
+    before = gov.snapshot()
+    try:
+        release()
+    except GovernorError:
+        gov.replace(before)  # all or nothing: one account still in breach keeps the latch
+        raise
+    if not await persist_controls():
+        gov.replace(before)
+        raise HTTPException(503, "durable control store unavailable; release not applied")
+
+
 @router.post("/killswitch")
 async def change_kill_switch(request: KillSwitchRequest) -> dict[str, object]:
-    gov = governor()
+    gov = await governor_ready()
     try:
         if request.action == "TRIGGER":
             gov.trigger_kill(request.scope, request.key)
+            if not await persist_controls():
+                logger.critical("kill switch %s held in memory only", request.scope.value)
         else:
-            gov.release_kill(request.scope, request.key)
+            await _release(gov, lambda: gov.release_kill(request.scope, request.key))
     except GovernorError as exc:
         raise HTTPException(422, str(exc)) from exc
     await _journal(
         "RISK_KILL_SWITCH_CHANGED",
         {"scope": request.scope.value, "key": request.key, "action": request.action},
     )
-    return {"controls": gov.snapshot(), **_BOUNDARY}
+    return {"controls": gov.snapshot(), **controls_durability(), **_BOUNDARY}
 
 
 @router.post("/lockdown/release")
 async def release_lockdown() -> dict[str, object]:
     from .oms_surface import _QUOTE_ASSETS
 
-    gov = governor()
+    gov = await governor_ready()
     accounts = [await account_state(asset) for asset in _QUOTE_ASSETS]
-    try:
+
+    def release_all() -> None:
         for account in accounts:
             gov.release_lockdown(account)
+
+    try:
+        await _release(gov, release_all)
     except GovernorError as exc:
         raise HTTPException(409, str(exc)) from exc
     await _journal("RISK_LOCKDOWN_RELEASED", {"by": "operator"})
-    return {"controls": gov.snapshot(), **_BOUNDARY}
+    return {"controls": gov.snapshot(), **controls_durability(), **_BOUNDARY}

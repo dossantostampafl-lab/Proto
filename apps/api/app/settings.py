@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     event_bus_backend: str = "memory"
     persistence_enabled: bool = False
     orchestration_persistence_enabled: bool = False
+    # Durable control-plane state (journal, kill switches, lockdown, equity checkpoints, permits,
+    # promotion coverage, agent roster). Never simulation data: see control_persistence_active.
+    control_persistence_enabled: bool = False
     alpaca_equity_symbols: str = ""
     alpaca_market_data_key_id: str | None = None
     alpaca_market_data_secret_key: str | None = None
@@ -371,6 +374,30 @@ class Settings(BaseSettings):
         if production and self.durable_database_configured:
             return True
         return self.live_persistence_enabled and self.durable_database_configured
+
+    @property
+    def control_persistence_active(self) -> bool:
+        """Resolve durable control-plane storage without enabling simulation persistence.
+
+        Control-plane state is what keeps the constitutional limits and the audit trail honest
+        across restarts: the operational journal, kill switches and the lockdown latch, the
+        daily-loss and drawdown baselines, spent permits, promotion records, watchdog coverage
+        and the agent roster. It shares DATABASE_URL with orchestration but never touches the
+        simulation tables, so it is allowed in production LIVE_MONITORING where
+        PERSISTENCE_ENABLED is not. Same derivation rules as orchestration persistence.
+        """
+        if self.control_persistence_enabled or self.persistence_enabled:
+            return True
+        production = self.app_env.strip().lower() == "production"
+        if production and self.durable_database_configured:
+            return True
+        return self.live_persistence_enabled and self.durable_database_configured
+
+    @property
+    def database_process_local(self) -> bool:
+        """An in-memory SQLite URL: it never outlives the process, so it is not durable."""
+        url = self.database_url.strip()
+        return ":memory:" in url or url in {"sqlite://", "sqlite+aiosqlite://"}
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

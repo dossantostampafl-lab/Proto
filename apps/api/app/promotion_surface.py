@@ -30,7 +30,7 @@ from services.promotion import (
     Scope,
 )
 
-from .app_state import persistence_engine
+from . import control_state
 from .event_state import JournalUnavailable, record_operational_event
 from .settings import settings
 
@@ -45,7 +45,9 @@ _registry: PromotionRegistry | None = None
 def registry() -> PromotionRegistry:
     global _registry
     if _registry is None:
-        _registry = PromotionRegistry(persistence_engine)
+        # Durable on the control-plane store, so clean paper days and evidence accumulate
+        # across deploys (production LIVE_MONITORING included).
+        _registry = PromotionRegistry(control_state.current().engine)
     return _registry
 
 

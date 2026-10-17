@@ -1,10 +1,10 @@
 """Trader-agent roster surface: virtual R$200 agents, their books and eliminations.
 
-The roster (``services.agents.roster``) is durable when persistence is enabled. Fills are
-folded into the agents' books from the OMS orders this API already reads (the isolated
-executor's, or the in-process paper OMS's); the executor's wire contract is unchanged, the
-intent -> agent mapping lives in this API's database. Capital is virtual testnet/paper
-sizing budget, never money. Read-only route: GET /v1/agents/roster.
+The roster (``services.agents.roster``) is durable on the control-plane store
+(control_state). Fills are folded into the agents' books from the OMS orders this API
+already reads (the isolated executor's, or the in-process paper OMS's); the executor's wire
+contract is unchanged, the intent -> agent mapping lives in this API's database. Capital is
+virtual testnet/paper sizing budget, never money. Read-only route: GET /v1/agents/roster.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from services.agents.roster import (
 from services.execution import TradableInstrument
 from services.execution.constitution import REFERENCE_CAPITAL
 
-from .app_state import persistence_engine
+from . import control_state
 from .event_state import record_operational_event
 from .executor_client import ExecutorRefused, ExecutorUnavailable
 from .instrument_registry import active_instruments
@@ -56,7 +56,7 @@ async def _journal(event_type: str, payload: dict[str, Any], key: str) -> None:
 def roster() -> AgentRoster:
     global _roster
     if _roster is None:
-        _roster = AgentRoster(persistence_engine, recorder=_journal)
+        _roster = AgentRoster(control_state.current().engine, recorder=_journal)
     return _roster
 
 

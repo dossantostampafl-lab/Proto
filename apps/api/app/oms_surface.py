@@ -4,8 +4,9 @@ A paper venue stands in for BINANCE_SPOT: PAPER-stage proposals approved by
 the Risk Engine are executed against live public quotes, with fills, fees and
 reservations posted to the ledger. The paper account opens with the reference
 capital in each quote currency (BRL and USDT; FX is not modelled). The ledger
-is durable when persistence is enabled; the simulated venue is re-seeded from
-it on start so the two stay reconciled across restarts. With persistence the
+is durable on the control-plane store (control_state; on in the image, also in
+LIVE_MONITORING); the simulated venue is re-seeded from
+it on start so the two stay reconciled across restarts. With that store the
 spent permits, the order book and the equity checkpoints are durable too, and
 orders left open by a restart come back as UNKNOWN for the operator to resolve.
 
@@ -42,7 +43,7 @@ from services.oms import (
 )
 from services.risk import AccountState, KillScope
 
-from .app_state import persistence_engine
+from . import control_state
 from .event_state import JournalUnavailable, record_operational_event
 from .executor_client import ExecutorClient, ExecutorRefused, ExecutorUnavailable
 from .instrument_registry import active_instruments
@@ -72,6 +73,12 @@ _oms_settings_id: int | None = None
 # Opening holdings seen by the last good read of each venue's executor.
 _last_openings: dict[VenueId, dict[str, Decimal]] = {}
 _start_lock = asyncio.Lock()
+
+
+def _control_engine():
+    """The durable control-plane engine (also in production LIVE_MONITORING), or None."""
+
+    return control_state.current().engine
 
 
 def _quote(instrument_id: str):
@@ -127,9 +134,10 @@ def _checkpoint_store(venue: VenueId = VENUE) -> InMemoryCheckpoints | SqlCheckp
             account = XP_ACCOUNT_ID
         else:
             account = EXECUTOR_ACCOUNT_ID if executor_mode() else ACCOUNT_ID
+        engine = _control_engine()
         store = _checkpoints[venue] = (
-            SqlCheckpoints(persistence_engine, account_id=account)
-            if persistence_engine is not None
+            SqlCheckpoints(engine, account_id=account)
+            if engine is not None
             else InMemoryCheckpoints()
         )
     return store
@@ -154,7 +162,7 @@ async def components() -> tuple[OrderManager, InMemoryLedger | SqlLedger, PaperV
         from .risk_surface import permit_ledger
 
         now = datetime.now(UTC)
-        engine = persistence_engine
+        engine = _control_engine()
         if engine is not None:
             ledger: InMemoryLedger | SqlLedger = SqlLedger(
                 engine, account_id=ACCOUNT_ID, venue=VENUE
@@ -360,9 +368,11 @@ def quote_asset_of(intent: TradeIntent) -> str:
 async def _halt_venue(divergences: list[dict], venue: VenueId = VENUE) -> None:
     """Kill the diverged venue only: a Binance divergence never stops XP, nor the reverse."""
 
-    from .risk_surface import governor
+    from .risk_surface import governor_ready, persist_controls
 
-    governor().trigger_kill(KillScope.VENUE, venue.value)
+    (await governor_ready()).trigger_kill(KillScope.VENUE, venue.value)
+    if not await persist_controls():
+        logger.critical("venue kill %s held in memory only", venue.value)
     await _record("RECONCILIATION_DIVERGENCE", {"venue": venue.value, "divergences": divergences})
     from .promotion_surface import violation
 

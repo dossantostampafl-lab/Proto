@@ -24,6 +24,7 @@ from services.events import journal_metadata
 from services.oms import ledger_metadata
 from services.orchestration import DecisionMemoryBase, OrchestrationBase
 from services.promotion import promotion_metadata
+from services.risk import control_metadata
 
 from .models import Fill, SimulationOrder
 from .portfolio import PaperPortfolio
@@ -104,12 +105,30 @@ async def init_database(engine: AsyncEngine) -> None:
         await connection.run_sync(ledger_metadata.create_all)
         await connection.run_sync(promotion_metadata.create_all)
         await connection.run_sync(roster_metadata.create_all)
+        await connection.run_sync(control_metadata.create_all)
 
     journal = AsyncSqlFillJournal(engine)
     await journal.ensure_active_session()
     if _recovery_target is not None:
         _recovery_target.reset()
         await recover_paper_portfolio(_recovery_target, journal.iter_chronological())
+
+
+# Control-plane tables only. Never the simulation tables (Base, canonical, orchestration):
+# this is what may run in production LIVE_MONITORING, where PERSISTENCE_ENABLED is refused.
+CONTROL_PLANE_METADATA = (
+    journal_metadata,
+    ledger_metadata,
+    promotion_metadata,
+    roster_metadata,
+    control_metadata,
+)
+
+
+async def init_control_database(engine: AsyncEngine) -> None:
+    async with engine.begin() as connection:
+        for metadata in CONTROL_PLANE_METADATA:
+            await connection.run_sync(metadata.create_all)
 
 
 async def database_ready(engine: AsyncEngine) -> bool:

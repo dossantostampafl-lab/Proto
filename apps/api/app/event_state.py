@@ -19,7 +19,7 @@ from services.events import (
     SqlJournalStore,
 )
 
-from .app_state import persistence_engine
+from .app_state import control_engine
 from .settings import settings
 
 logger = logging.getLogger("proto.events")
@@ -67,6 +67,9 @@ class OperationalJournal:
         if self.store is None:
             return
         async with self._lock:
+            # Until the durable head is restored, writes are refused: appending from an empty
+            # in-memory head would fork the chain. A database error propagates to the caller.
+            self.integrity = JournalIntegrity.UNVERIFIED
             self.journal.reset()
             try:
                 async for event in self.store.iter_events():
@@ -150,6 +153,9 @@ class OperationalJournal:
                 verifier.restore(event)
         except JournalCorrupted as exc:
             return self._verification(False, scope="durable_history", error=str(exc))
+        except Exception as exc:  # unreachable database: unverifiable, never "valid"
+            error = f"durable store unreachable: {type(exc).__name__}"
+            return self._verification(False, scope="durable_history", error=error)
         matches_head = (
             verifier.head_sequence == self.journal.head_sequence
             and verifier.head_hash == self.journal.head_hash
@@ -194,8 +200,9 @@ class OperationalJournal:
         logger.critical("operational journal integrity failure: %s", reason)
 
 
+# Durable on the control-plane engine (also in production LIVE_MONITORING); see control_state.
 operational_journal = OperationalJournal(
-    SqlJournalStore(persistence_engine) if persistence_engine is not None else None
+    SqlJournalStore(control_engine) if control_engine is not None else None
 )
 
 

@@ -20,14 +20,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, b3_quotes
+from . import __version__, b3_quotes, control_state
 from .agent_surface import router as agent_router
-from .app_state import persistence_engine
+from .app_state import control_engine, orchestration_engine, persistence_engine
 from .core_routes import router as core_router
 from .creation_surface import router as creation_router
 from .e2e_drill import router as e2e_drill_router
 from .equity_market_surface import router as equity_market_router
-from .event_state import JournalUnavailable, operational_journal, record_operational_event
+from .event_state import JournalUnavailable, record_operational_event
 from .event_surface import router as event_router
 from .floor_surface import router as floor_router
 from .live_routes import router as live_router
@@ -42,6 +42,7 @@ from .persistence import init_database
 from .promotion_surface import router as promotion_router
 from .research import metrics
 from .research import router as research_router
+from .risk_surface import restore_controls
 from .risk_surface import router as risk_router
 from .roster_surface import router as roster_router
 from .safety_metrics import router as safety_router
@@ -52,6 +53,7 @@ from .signal_surface import router as signal_router
 from .strategy_surface import router as strategy_router
 from .universe_surface import router as universe_router
 from .watchdog_surface import PREFIX as WATCHDOG_PREFIX
+from .watchdog_surface import restore_watchdog
 from .watchdog_surface import router as watchdog_router
 
 logger = logging.getLogger("proto.api")
@@ -60,12 +62,19 @@ logger = logging.getLogger("proto.api")
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if persistence_engine is not None:
         await init_database(persistence_engine)
-    await operational_journal.start()
+    # Control-plane state (journal head, kill switches, lockdown, watchdog coverage) is restored
+    # before any route runs. An unreachable store does not stop the app: it fails closed and
+    # refuses new risk until the database answers (control_state).
+    await control_state.current().start()
+    await restore_controls()
+    await restore_watchdog()
     b3_feed = await b3_quotes.start_if_enabled()
     yield
     await b3_quotes.stop(b3_feed)
     if persistence_engine is not None:
         await persistence_engine.dispose()
+    elif control_engine is not None and control_engine is not orchestration_engine:
+        await control_engine.dispose()
 
 app = FastAPI(
     title="Prediction Market Quant Engine",
