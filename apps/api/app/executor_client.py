@@ -16,6 +16,9 @@ import httpx
 
 from services.execution import RiskPermit, TradeIntent
 
+# A venue reached over a link that can drop (the XP node on a PC over Tailscale) must fail fast:
+# with the default 15 s, a switched-off PC would stall every view that touches both venues.
+SHORT_TIMEOUT = httpx.Timeout(4.0, connect=2.0)
 _ORDER_ID = re.compile(r"^[A-Za-z0-9_-]{1,36}$")
 _SYMBOL = re.compile(r"^[A-Z0-9]{1,20}$")
 
@@ -33,11 +36,16 @@ class ExecutorRefused(RuntimeError):
 
 class ExecutorClient:
     def __init__(
-        self, base_url: str, token: str, *, client: httpx.AsyncClient | None = None
+        self,
+        base_url: str,
+        token: str,
+        *,
+        client: httpx.AsyncClient | None = None,
+        timeout: httpx.Timeout | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {token}"}
-        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(15.0))
+        self._client = client or httpx.AsyncClient(timeout=timeout or httpx.Timeout(15.0))
 
     async def _call(self, method: str, path: str, *, json: Any = None) -> dict[str, Any]:
         try:

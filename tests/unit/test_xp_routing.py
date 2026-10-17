@@ -81,9 +81,10 @@ class FakeClient:
     """Stands in for one venue's ExecutorClient and records what reached it."""
 
     def __init__(
-        self, name: str, *, balances=None, consistent=True, halted=False, down=False
+        self, name: str, *, balances=None, consistent=True, halted=False, down=False, delay=0.0
     ) -> None:
         self.name, self.consistent, self.halted, self.down = name, consistent, halted, down
+        self.delay = delay
         self.balances = balances or {}
         self.calls: list[tuple] = []
         self.quote_body: dict = {}
@@ -95,6 +96,8 @@ class FakeClient:
 
     async def ledger(self):
         self.calls.append(("ledger",))
+        if self.delay:
+            await asyncio.sleep(self.delay)
         if self.down:
             raise ExecutorUnavailable("down")
         return {"account_id": f"acct-{self.name}", "balances": self.balances}
@@ -478,3 +481,48 @@ def test_without_xp_a_down_executor_is_still_a_503(monkeypatch) -> None:
     client = TestClient(main.app)
     assert client.get("/v1/oms/ledger").status_code == 503
     assert client.post("/v1/oms/reconcile", headers=HEADERS).status_code == 503
+
+
+async def test_the_ledger_view_asks_every_venue_at_once(monkeypatch) -> None:
+    """A slow venue costs its own wait once: the view must not add the waits up (the dashboard
+    gives up after 3.5 s and would call everything unavailable)."""
+
+    import time
+
+    configure(monkeypatch, **XP_ON)
+    wire(
+        monkeypatch,
+        FakeClient("binance", balances={"USDT": {"total": "10000", "opening": "10000"}}, delay=0.4),
+        FakeClient("xp", balances={"BRL": {"total": "1000000", "opening": "1000000"}}, delay=0.4),
+    )
+    started = time.perf_counter()
+    view = await oms_surface.ledger_view()
+    elapsed = time.perf_counter() - started
+    assert view["xp_b3"]["account_id"] == "acct-xp" and view["accounts"]["BRL"]["equity"]
+    # Four ledger reads of 0.4 s: one after another would take 1.6 s.
+    assert elapsed < 1.0, f"the venues were asked one after another ({elapsed:.2f}s)"
+
+
+async def test_a_slow_xp_node_does_not_slow_the_binance_numbers_beyond_its_own_wait(
+    monkeypatch,
+) -> None:
+    import time
+
+    configure(monkeypatch, **XP_ON)
+    wire(
+        monkeypatch,
+        FakeClient("binance", balances={"USDT": {"total": "10000", "opening": "10000"}}),
+        FakeClient("xp", down=True, delay=0.5),
+    )
+    started = time.perf_counter()
+    view = await oms_surface.ledger_view()
+    assert time.perf_counter() - started < 1.0
+    assert view["xp_b3"]["unavailable"] is True and view["balances"]["USDT"]["total"] == "10000"
+
+
+def test_the_xp_executor_gives_up_fast_and_binance_keeps_its_timeout(monkeypatch) -> None:
+    configure(monkeypatch, **XP_ON)
+    xp = oms_surface.executor_client(VenueId.XP_B3)._client.timeout
+    binance = oms_surface.executor_client()._client.timeout
+    assert xp.connect == 2.0 and xp.read == 4.0  # a switched-off PC must not stall the views
+    assert binance.read == 15.0  # Binance is unchanged
