@@ -22,7 +22,8 @@ from services.execution.constitution import CANARY_CAPITAL, canary_capital_in
 
 logger = logging.getLogger("proto.fx")
 
-BOOK_TICKER = "https://api.binance.com/api/v3/ticker/bookTicker"
+# Binance's public market-data host: same data as api.binance.com, without its regional block.
+BOOK_TICKER = "https://data-api.binance.vision/api/v3/ticker/bookTicker"
 MAX_AGE = timedelta(seconds=30)
 # A rate outside this band is a bad print, not a market: refuse rather than size on it.
 SANE_BRL_PER_USDT = (Decimal("2"), Decimal("20"))

@@ -26,6 +26,18 @@ orchestration_engine = (
     if settings.orchestration_persistence_active
     else None
 )
+# Control-plane state (journal, kill switches, lockdown, checkpoints, permits, promotion,
+# watchdog coverage, roster). It reuses an engine already open on DATABASE_URL and never
+# creates the simulation tables, so it stays durable in production LIVE_MONITORING.
+control_engine = (
+    persistence_engine
+    if persistence_engine is not None
+    else orchestration_engine
+    if orchestration_engine is not None and settings.control_persistence_active
+    else build_engine(settings.database_url)
+    if settings.control_persistence_active
+    else None
+)
 orchestration_store = (
     SqlJobStore(orchestration_engine) if orchestration_engine is not None else None
 )
@@ -75,6 +87,7 @@ def reset_runtime_state() -> RuntimeState:
 
 
 __all__ = [
+    "control_engine",
     "decision_memory_store",
     "orchestration_engine",
     "orchestration_store",

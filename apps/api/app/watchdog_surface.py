@@ -14,6 +14,7 @@ import hmac
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -83,8 +84,34 @@ class WatchdogState:
             "recent_trips": self.trips[-20:],
         }
 
+    def to_document(self) -> dict[str, object]:
+        return {
+            "watchdog_id": self.watchdog_id,
+            "covered_since": self.covered_since.isoformat() if self.covered_since else None,
+            "last_beat": self.last_beat.isoformat() if self.last_beat else None,
+            "beats": self.beats,
+            "trips": self.trips[-50:],
+        }
+
+    @classmethod
+    def from_document(cls, raw: dict[str, Any]) -> WatchdogState:
+        def when(value: object) -> datetime | None:
+            return datetime.fromisoformat(str(value)) if value else None
+
+        return cls(
+            watchdog_id=raw.get("watchdog_id"),
+            covered_since=when(raw.get("covered_since")),
+            last_beat=when(raw.get("last_beat")),
+            beats=int(raw.get("beats") or 0),
+            trips=list(raw.get("trips") or []),
+        )
+
 
 _state = WatchdogState()
+# Coverage is durable on the control-plane store: a quick deploy (shorter than MAX_GAP) does not
+# reset the 24 h window, and a longer one breaks it on the next beat exactly as a gap would.
+WATCHDOG_KEY = "watchdog_coverage"
+_restored_generation: int | None = None
 
 
 def state() -> WatchdogState:
@@ -92,8 +119,46 @@ def state() -> WatchdogState:
 
 
 def reset_watchdog_state() -> None:
-    global _state
+    global _state, _restored_generation
     _state = WatchdogState()
+    _restored_generation = None
+
+
+async def restore_watchdog() -> None:
+    """Load the saved coverage window once per store connection (startup or recovery)."""
+
+    global _state, _restored_generation
+    from services.risk import SqlControlState
+
+    from . import control_state
+
+    store = control_state.current()
+    if store.engine is None or not await store.ensure():
+        return
+    if _restored_generation == store.generation:
+        return
+    try:
+        saved = await SqlControlState(store.engine).get(WATCHDOG_KEY)
+    except Exception as exc:
+        store.mark_unavailable(exc)
+        return
+    if saved and _state.last_beat is None:
+        _state = WatchdogState.from_document(saved)
+    _restored_generation = store.generation
+
+
+async def _persist() -> None:
+    from services.risk import SqlControlState
+
+    from . import control_state
+
+    store = control_state.current()
+    if store.engine is None or _restored_generation != store.generation:
+        return
+    try:
+        await SqlControlState(store.engine).put(WATCHDOG_KEY, _state.to_document())
+    except Exception as exc:
+        store.mark_unavailable(exc)
 
 
 def _authorize(token: str | None) -> None:
@@ -133,8 +198,10 @@ async def heartbeat(
     body: HeartbeatBody, x_proto_watchdog_token: str | None = Header(default=None)
 ) -> dict[str, object]:
     _authorize(x_proto_watchdog_token)
+    await restore_watchdog()
     now = _utc_now()
     _state.beat(body.watchdog_id, body.model_dump(), now)
+    await _persist()
     return {"accepted": True, **_BOUNDARY}
 
 
@@ -144,15 +211,18 @@ async def halt(
 ) -> dict[str, object]:
     """Trigger the global kill switch. Idempotent; there is no watchdog release."""
 
-    from .risk_surface import governor
+    from .risk_surface import governor_ready, persist_controls
 
     _authorize(x_proto_watchdog_token)
-    gov = governor()
+    gov = await governor_ready()
     already = bool(gov.snapshot()["global_kill"])
     gov.trigger_kill(KillScope.GLOBAL)
+    if not await persist_controls():
+        logger.critical("watchdog halt held in memory only")
     now = _utc_now()
     if not already:
         _state.trips.append({"at": now.isoformat(), "reasons": body.reasons})
+        await _persist()
         await _journal(
             "WATCHDOG_TRIPPED", {"watchdog_id": body.watchdog_id, "reasons": body.reasons}
         )
@@ -161,4 +231,7 @@ async def halt(
 
 @router.get("/status")
 def watchdog_status() -> dict[str, object]:
-    return {**_state.to_dict(_utc_now()), **_BOUNDARY}
+    from . import control_state
+
+    durable = control_state.current().durable and _restored_generation is not None
+    return {**_state.to_dict(_utc_now()), "coverage_durable": durable, **_BOUNDARY}

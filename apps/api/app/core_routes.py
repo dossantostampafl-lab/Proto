@@ -61,19 +61,29 @@ def health() -> dict[str, object]:
 
 @router.get("/ready")
 async def ready(response: Response) -> dict[str, object]:
+    from . import control_state
+
+    control = control_state.current()
+    control_ok = await control.ensure()
+    if control_ok and control.engine is not None and not await database_ready(control.engine):
+        control.mark_unavailable(ConnectionError("control store did not answer SELECT 1"))
+        control_ok = False
     if persistence_engine is None:
-        return {
-            "status": "ready",
-            "database": "disabled",
-            "mode": runtime.mode,
-        }
-    ready_state = await database_ready(persistence_engine)
+        database = "disabled"
+        ready_state = control_ok
+    else:
+        database_ok = await database_ready(persistence_engine)
+        database = "ready" if database_ok else "unavailable"
+        ready_state = database_ok and control_ok
     if not ready_state:
         response.status_code = 503
     return {
         "status": "ready" if ready_state else "not_ready",
-        "database": "ready" if ready_state else "unavailable",
+        "database": database,
         "mode": runtime.mode,
+        # Truthful label: whether kill switches, lockdown, checkpoints, permits, promotion and
+        # the journal survive a restart, or live only in this process.
+        "control_plane": control.snapshot(),
     }
 
 

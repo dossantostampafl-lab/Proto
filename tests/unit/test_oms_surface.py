@@ -403,7 +403,7 @@ async def test_equity_checkpoints_survive_a_restart(monkeypatch, tmp_path) -> No
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'oms.db'}")
     async with engine.begin() as connection:
         await connection.run_sync(ledger_metadata.create_all)
-    monkeypatch.setattr(oms_surface, "persistence_engine", engine)
+    monkeypatch.setattr(oms_surface, "_control_engine", lambda: engine)
     try:
         first = await oms_surface.account_state("USDT")
         assert first.peak_equity == Decimal("10000")

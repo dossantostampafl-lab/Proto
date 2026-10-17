@@ -17,6 +17,7 @@ from services.agents.roster import roster_metadata
 from services.events import journal_metadata
 from services.oms import ledger_metadata
 from services.promotion import promotion_metadata
+from services.risk import control_metadata
 
 config = context.config
 
@@ -35,6 +36,7 @@ target_metadata = [
     ledger_metadata,
     promotion_metadata,
     roster_metadata,
+    control_metadata,
 ]
 
 

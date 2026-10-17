@@ -52,7 +52,11 @@ def event_journal(limit: int = Query(default=100, ge=1, le=1_000)) -> dict[str, 
 @router.get("/journal/verify")
 async def event_journal_verify(response: Response) -> dict[str, object]:
     """Re-verify the whole durable history from GENESIS (or the memory window)."""
+    from . import control_state
+
     result = await operational_journal.verify()
     if not result["chain_valid"]:
         response.status_code = 409
-    return result
+    control = control_state.current().snapshot()
+    # Truthful label: durable only when the history lives in a reachable, persistent database.
+    return {**result, "durable": bool(control["durable"]), "control_plane": control}

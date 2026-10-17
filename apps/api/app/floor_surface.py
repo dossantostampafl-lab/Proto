@@ -255,6 +255,7 @@ def data_mode() -> str:
 
 @router.get("/v1/floor/state")
 async def floor_state(limit: int = 80) -> dict[str, object]:
+    from . import control_state
     from .event_state import operational_journal
     from .oms_surface import _QUOTE_ASSETS, account_state
     from .risk_surface import governor, runtime
@@ -291,6 +292,8 @@ async def floor_state(limit: int = 80) -> dict[str, object]:
         "stations": stations,
         "actions": actions,
         "controls": {**governor().snapshot(), "runtime_kill_switch": runtime.kill_switch},
+        # Whether controls, checkpoints and the journal survive a restart (truthful label).
+        "control_plane": control_state.current().snapshot(),
         "accounts": accounts,
         "pipeline": {
             "agents_enabled": settings.agent_pipeline_enabled,

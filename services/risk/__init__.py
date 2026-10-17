@@ -1,5 +1,6 @@
 """Deterministic Risk Engine, signed single-use permits and the kill-switch governor."""
 
+from .control_store import SqlControlState, control_metadata, control_state_table
 from .engine import (
     AccountState,
     Controls,
@@ -36,6 +37,9 @@ __all__ = [
     "RiskEngine",
     "RiskGovernor",
     "RiskPolicy",
+    "SqlControlState",
     "account_breach",
+    "control_metadata",
+    "control_state_table",
     "session_open",
 ]

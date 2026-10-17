@@ -31,7 +31,9 @@ TradingView ─> agents ─> Risk Engine ─(permit)─> OMS ─> paper venue (l
 
 ## Durable state and restart recovery (`services/oms/store.py`)
 
-With persistence enabled, every order state change is written to `oms_orders` before the OMS moves
+Persistence here is the control-plane store (`CONTROL_PERSISTENCE_ENABLED`, on in the image and
+allowed in production LIVE_MONITORING; see `docs/runbooks/control-plane-persistence.md`). It is
+separate from simulation persistence (`PERSISTENCE_ENABLED`). With it, every order state change is written to `oms_orders` before the OMS moves
 on. The new order is written before its reservation is posted, so a crash never orphans funds.
 Decimals are stored as exact text. On start, `OrderManager.recover()` reloads the book:
 
@@ -122,8 +124,8 @@ durable ledger and the venue stay reconciled across restarts.
 
 ## Current limitations (closed by later phases)
 
-- Without persistence (`PERSISTENCE_ENABLED=false`), orders, spent permits and checkpoints live in
-  memory and are lost on restart. Spent permits expire within 60 s anyway.
+- Without a control-plane store (`CONTROL_PERSISTENCE_ENABLED=false` and no derived Postgres),
+  orders, spent permits and checkpoints live in memory and are lost on restart. Spent permits expire within 60 s anyway.
 - Recovered `UNKNOWN` orders are resolved by the operator, not automatically. The recovery gate
   (Phase 6) adds automated resolution and its adversarial tests.
 - Resting limit orders are not matched later by the paper venue. They rest until canceled.
