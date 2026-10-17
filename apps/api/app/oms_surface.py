@@ -471,6 +471,20 @@ async def _from_executor(call) -> dict:
         raise HTTPException(503, "executor unavailable") from exc
 
 
+async def recent_orders(limit: int = 200) -> list[dict]:
+    """Recent Binance orders as the API already reads them (executor or in-process paper OMS).
+
+    Used to fold fills into the trader agents' books; raises ExecutorUnavailable/Refused when
+    the executor cannot be read.
+    """
+
+    if executor_mode():
+        body = await executor_client().orders(limit)
+        return list(body.get("orders", []))
+    oms, _, _ = await components()
+    return [order.to_dict() for order in oms.orders[-max(1, min(limit, 500)) :]]
+
+
 @router.get("/orders")
 async def list_orders(limit: int = 50, venue: str = "BINANCE_SPOT") -> dict[str, object]:
     chosen = _venue_param(venue)

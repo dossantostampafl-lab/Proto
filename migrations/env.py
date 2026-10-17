@@ -13,6 +13,7 @@ from apps.api.app import live_persistence as _live_persistence
 from apps.api.app.live_database import LiveBase
 from apps.api.app.persistence import Base
 from apps.api.app.schema_registry import canonical_metadata
+from services.agents.roster import roster_metadata
 from services.events import journal_metadata
 from services.oms import ledger_metadata
 from services.promotion import promotion_metadata
@@ -33,6 +34,7 @@ target_metadata = [
     journal_metadata,
     ledger_metadata,
     promotion_metadata,
+    roster_metadata,
 ]
 
 
