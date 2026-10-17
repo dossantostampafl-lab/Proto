@@ -469,3 +469,18 @@ def test_the_watchdog_depends_on_neither_the_api_nor_the_executor() -> None:
                     modules = [node.module]
                 for module in modules:
                     assert not module.startswith(forbidden), f"{path} imports {module}"
+
+
+def test_a_deploy_restart_is_not_an_outage_but_a_real_one_still_trips() -> None:
+    from apps.watchdog.settings import WatchdogSettings
+
+    token = "w" * 40
+    settings = WatchdogSettings(api_url="http://api", api_token=token)
+    assert settings.outage_grace_seconds == 180 and settings.unreachable_cycles == 36
+    checks = Checks(limits=Limits(unreachable_cycles=settings.unreachable_cycles))
+    down = obs(api_health=False, floor=None, market_ready=None)
+    restart = [checks.evaluate(down)[0] for _ in range(35)]  # ~3 min of a restarting API
+    assert restart == [[]] * 35
+    assert checks.evaluate(down)[0] == ["api_unreachable"]
+    with pytest.raises(ValidationError):  # the grace is bounded: 5 min at most
+        WatchdogSettings(api_url="http://api", api_token=token, outage_grace_seconds=600)

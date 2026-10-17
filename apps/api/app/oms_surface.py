@@ -561,6 +561,20 @@ async def reconcile_now() -> dict[str, object]:
     return await reconcile()
 
 
+@router.get("/executor/status")
+async def executor_status(venue: str = "BINANCE_SPOT") -> dict[str, object]:
+    """Read-only: whether the executor accepts orders (``ok``) or is ``halted``/``starting``."""
+
+    chosen = _venue_param(venue)
+    if not executor_mode():
+        return {"venue": chosen.value, "status": "not_configured", **_BOUNDARY}
+    try:
+        body = await _call_client(chosen).health()
+    except (ExecutorUnavailable, ExecutorRefused):
+        return {"venue": chosen.value, "status": "unreachable", **_BOUNDARY}
+    return {"venue": chosen.value, "status": str(body.get("status", "unknown")), **_BOUNDARY}
+
+
 @router.post("/executor/halt/release")
 async def release_executor_halt(venue: str = "BINANCE_SPOT") -> dict[str, object]:
     """Operator action: release the executor's halt (divergence or watchdog).

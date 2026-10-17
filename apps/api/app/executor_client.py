@@ -67,6 +67,11 @@ class ExecutorClient:
             },
         )
 
+    async def health(self) -> dict[str, Any]:
+        """Public health: ``ok``, ``starting`` or ``halted`` (no reason, no token needed)."""
+
+        return await self._call("GET", "/health")
+
     async def orders(self, limit: int = 50) -> dict[str, Any]:
         return await self._call("GET", f"/v1/orders?limit={int(limit)}")
 

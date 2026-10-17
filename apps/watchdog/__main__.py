@@ -40,6 +40,7 @@ async def main() -> None:
                 limits=Limits(
                     daily_loss_fraction=settings.daily_loss_fraction,
                     drawdown_fraction=settings.drawdown_fraction,
+                    unreachable_cycles=settings.unreachable_cycles,
                 ),
             )
             await watchdog.run(settings.interval_seconds, stop)
