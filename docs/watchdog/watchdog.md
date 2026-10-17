@@ -17,13 +17,13 @@ neither the API, nor the executor, nor the OMS, risk or venue code; a test enfor
 
 | Check | Trips when | Reason |
 |---|---|---|
-| API reachable | `/health` or `/v1/floor/state` fail for 3 cycles in a row | `api_unreachable` |
+| API reachable | `/health` or `/v1/floor/state` fail for the whole outage grace (`WATCHDOG_OUTAGE_GRACE_SECONDS`, default 180 s, at most 300 s) | `api_unreachable` |
 | Journal | the operational journal is not `VALID` | `journal_<state>` |
-| Accounts | an account cannot be read for 3 cycles | `account_unavailable:<asset>` |
+| Accounts | an account cannot be read for the whole outage grace | `account_unavailable:<asset>` |
 | Daily loss | equity / start-of-day − 1 ≤ −1% (constitution) | `daily_loss:<asset>` |
 | Drawdown | equity / peak − 1 ≤ −5% (constitution) | `drawdown:<asset>` |
 | Market data | `/live/ready` is not ready for 6 cycles **while execution is on** | `market_data_stale` |
-| Executor reachable | its status fails for 3 cycles (when configured) | `executor_unreachable` |
+| Executor reachable | its status fails for the whole outage grace (when configured) | `executor_unreachable` |
 | Reconciliation | the executor reports a divergence | `reconciliation_divergence` |
 | Reconciliation age | its last reconciliation is older than 3 minutes | `reconciliation_stale` |
 
@@ -106,3 +106,14 @@ journalctl -u proto-watchdog -f
   operator API. The read-only live stack (`docker-compose.live.yml`) keeps its own provisioning.
 - **Promotion metrics:** `proto_promotion_stage` carries the stage as its value (0 RESEARCH … 5 LIVE), so the
   series survives a promotion or demotion and `ProtoScopeDemoted` fires when it falls.
+
+## Outage grace
+
+A deploy restarts the API (and, after approval, the executor): image pull, migrations and
+warm-up take tens of seconds. With a 15 s threshold every deploy halted the executor, and the
+halt stays until an operator releases it, so nothing traded after a deploy. The grace (default
+180 s, bounded to 15–300 s) covers a restart. A real outage still trips once the grace runs out.
+While the API is down no order can reach the executor anyway: the API is the only order source.
+
+`GET /v1/oms/executor/status` shows, without a token, whether the executor accepts orders
+(`ok`) or is `halted`, `starting` or `unreachable`.

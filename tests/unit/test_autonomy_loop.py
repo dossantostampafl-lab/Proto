@@ -47,6 +47,26 @@ def test_a_strong_upward_cross_emits_one_long_signal_with_no_order_authority() -
     assert not hasattr(signal, "quantity")  # an opinion, never an order
 
 
+def test_a_cross_waits_for_the_gap_to_open_before_signalling() -> None:
+    """The cross bar alone is too weak; the signal comes once the trend has opened the gap."""
+
+    strategy = EmaCrossStrategy()
+    base = [100.0] * 25
+    # A gentle climb: crosses on the first bar, the gap only reaches entry strength later.
+    climb = [100 + 0.03 * i for i in range(1, 15)]
+    signals = feed(strategy, base + climb)
+    assert len(signals) == 1 and signals[0].direction is SignalDirection.LONG
+    assert signals[0].strength >= 0.6
+    assert signals[0].observed_at > T0 + timedelta(minutes=26)  # not the cross bar itself
+
+
+def test_a_cross_that_reverses_or_never_opens_up_emits_nothing() -> None:
+    reversal = [100.0] * 25 + [100.01, 99.99, 99.98, 99.97]
+    assert [s for s in feed(EmaCrossStrategy(), reversal) if s.direction.value == "LONG"] == []
+    drift = [100.0] * 25 + [100 + 0.001 * i for i in range(1, 30)]
+    assert feed(EmaCrossStrategy(), drift) == []
+
+
 def test_no_signal_before_enough_bars_or_on_a_flat_market() -> None:
     strategy = EmaCrossStrategy()
     assert feed(strategy, [100.0] * 60) == []
@@ -277,6 +297,8 @@ def test_the_image_turns_the_loop_on_and_reads_binance_quotes() -> None:
         "AGENT_PIPELINE_ENABLED=true",
         "PROTO_STRATEGY_ENABLED=true",
         "E2E_DRILL_ON_START=true",
+        # TradingView alerts name the pairs that have live quotes (USDT, not BRL).
+        "TRADINGVIEW_INSTRUMENTS=BINANCE_SPOT:BTCUSDT,BINANCE_SPOT:ETHUSDT,BINANCE_SPOT:SOLUSDT",
     ):
         assert line in dockerfile
     assert "REAL_MONEY" not in dockerfile and "LIVE_TRADING" not in dockerfile

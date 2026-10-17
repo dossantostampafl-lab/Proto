@@ -10,10 +10,13 @@ own strategy ──────┘                                              
 
 - **Own strategy** (`services/signals/proto_strategy.py`, `apps/api/app/strategy_surface.py`):
   EMA 5/20 cross on one-minute bars of the live Binance mid for BTC, ETH and SOL against USDT.
-  Strength grows with the EMA gap, so a weak cross stays under the fusion threshold (0.6). A
-  15-minute cooldown per instrument stops flapping. Stale or missing quotes feed nothing. Each
+  A cross arms the instrument; the signal comes on the first closed bar (within 10) where the EMA
+  gap has opened enough: strength = gap / 0.1% of price, at least 0.6 for an entry and 0.2 for an
+  exit. At the cross bar the gap is near zero, which is why signals emitted there never traded. A
+  cross that reverses or never opens up emits nothing. A 15-minute cooldown per instrument stops flapping. Stale or missing quotes feed nothing. Each
   signal is journaled as `PROTO_STRATEGY_SIGNAL` and shows on the TradingView desk of the floor.
-- **TradingView**: alerts to `POST /v1/signals/tradingview` with the webhook secret. Behind the
+- **TradingView**: alerts to `POST /v1/signals/tradingview` with the webhook secret, for
+  `BINANCE_SPOT:BTCUSDT`, `ETHUSDT` and `SOLUSDT` (the pairs with live quotes). Behind the
   local reverse proxy the source address is the last `X-Forwarded-For` hop; only a loopback peer
   may supply it, so the official TradingView IP allowlist still holds.
 - **Closed test** (`apps/api/app/e2e_drill.py`): once after every API start (and on

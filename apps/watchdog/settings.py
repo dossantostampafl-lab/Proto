@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -21,9 +22,16 @@ class WatchdogSettings(BaseSettings):
     # Same value as the executor's EXECUTOR_WATCHDOG_TOKEN; never the executor's API token.
     executor_token: SecretStr | None = None
     interval_seconds: float = Field(default=5.0, ge=1.0, le=60.0, allow_inf_nan=False)
+    # How long the API or the executor may stay unreachable before it counts as an outage. It
+    # covers a deploy restart (image pull, migrations, warm-up); a real outage still halts.
+    outage_grace_seconds: float = Field(default=180.0, ge=15.0, le=300.0, allow_inf_nan=False)
     # Fractions of the constitutional limits; the watchdog may only tighten them.
     daily_loss_fraction: Decimal = Field(default=Decimal("1"), gt=0, le=1)
     drawdown_fraction: Decimal = Field(default=Decimal("1"), gt=0, le=1)
+
+    @property
+    def unreachable_cycles(self) -> int:
+        return max(1, math.ceil(self.outage_grace_seconds / self.interval_seconds))
 
     @field_validator("api_token", "executor_token")
     @classmethod

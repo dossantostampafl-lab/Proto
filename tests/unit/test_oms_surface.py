@@ -452,3 +452,22 @@ def test_oms_state_migration_matches_the_runtime_tables(monkeypatch) -> None:
             assert columns == set(table.columns.keys()), name
         migration.downgrade()
         assert not set(runtime) & set(inspect(connection).get_table_names())
+
+
+async def test_executor_status_is_readable_without_a_token(monkeypatch) -> None:
+    class Health:
+        def __init__(self, status):
+            self.status = status
+
+        async def health(self):
+            if self.status is None:
+                raise oms_surface.ExecutorUnavailable("down")
+            return {"status": self.status}
+
+    monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
+    for status, expected in (("halted", "halted"), ("ok", "ok"), (None, "unreachable")):
+        monkeypatch.setattr(oms_surface, "_call_client", lambda venue, s=status: Health(s))
+        body = await oms_surface.executor_status()
+        assert body["status"] == expected and body["real_money_execution"] is False
+    monkeypatch.setattr(oms_surface, "executor_mode", lambda: False)
+    assert (await oms_surface.executor_status())["status"] == "not_configured"

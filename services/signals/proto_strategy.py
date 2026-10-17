@@ -4,9 +4,12 @@ The strategy only produces `Signal`s (opinions). It has no order authority: ever
 goes through fusion, the shrink-only reviewer, the Risk Engine permit and the OMS. It is fed
 public read-only quotes; when the feed is missing or stale it emits nothing.
 
-A signal is emitted when the fast EMA crosses the slow EMA on a closed bar and the gap between
-them is wide enough. Strength grows with the gap, so a weak cross stays below the fusion
-threshold. A cooldown keeps one instrument from flapping.
+A cross of the fast EMA over the slow EMA on a closed bar arms the instrument. The signal is
+emitted on the first closed bar, within `confirm_bars`, where the gap has opened in the cross's
+direction enough to reach the emit strength (entries need more than exits). At the cross bar
+itself the gap is close to zero, so emitting there gave signals too weak to ever trade. A cross
+that never opens up, or that reverses first, emits nothing. A cooldown keeps one instrument from
+flapping.
 """
 
 from __future__ import annotations
@@ -28,14 +31,21 @@ class EmaCrossPolicy:
     fast: int = 5
     slow: int = 20
     # Gap between the EMAs, as a fraction of price, that gives full strength.
-    full_strength_gap: float = 0.002
+    full_strength_gap: float = 0.001
+    # Closed bars after a cross during which the gap may open up to the emit strength.
+    confirm_bars: int = 10
+    # Strength needed to emit: an entry (LONG) asks for more than an exit (SHORT of holdings).
+    entry_strength: float = 0.6
+    exit_strength: float = 0.2
     cooldown: timedelta = timedelta(minutes=15)
 
     def __post_init__(self) -> None:
         if not 1 < self.fast < self.slow:
             raise ValueError("need 1 < fast < slow")
-        if self.full_strength_gap <= 0 or self.bar <= timedelta(0):
-            raise ValueError("full_strength_gap and bar must be positive")
+        if self.full_strength_gap <= 0 or self.bar <= timedelta(0) or self.confirm_bars < 1:
+            raise ValueError("full_strength_gap, bar and confirm_bars must be positive")
+        if not 0 < self.exit_strength <= self.entry_strength <= 1:
+            raise ValueError("need 0 < exit_strength <= entry_strength <= 1")
 
 
 def _ema(values: list[float], period: int) -> list[float]:
@@ -52,6 +62,8 @@ class _Book:
     bar_start: datetime | None = None
     last_mid: float | None = None
     last_signal_at: datetime | None = None
+    # (direction, closed bars left) after a cross that has not opened up yet.
+    armed: tuple[SignalDirection, int] | None = None
 
 
 @dataclass
@@ -88,15 +100,28 @@ class EmaCrossStrategy:
         fast, slow = _ema(closes, self.policy.fast), _ema(closes, self.policy.slow)
         before, now = fast[-2] - slow[-2], fast[-1] - slow[-1]
         if before <= 0 < now:
-            direction = SignalDirection.LONG
+            book.armed = (SignalDirection.LONG, self.policy.confirm_bars)
         elif before >= 0 > now:
-            direction = SignalDirection.SHORT
-        else:
+            book.armed = (SignalDirection.SHORT, self.policy.confirm_bars)
+        if book.armed is None:
             return None
-        if book.last_signal_at is not None and at - book.last_signal_at < self.policy.cooldown:
+        direction, bars_left = book.armed
+        book.armed = (direction, bars_left - 1) if bars_left > 1 else None
+        if (now > 0) != (direction is SignalDirection.LONG):
+            book.armed = None  # reversed before it opened up
             return None
         gap = abs(now) / closes[-1]
         strength = round(min(1.0, gap / self.policy.full_strength_gap), 4)
+        needed = (
+            self.policy.entry_strength
+            if direction is SignalDirection.LONG
+            else self.policy.exit_strength
+        )
+        if strength < needed:
+            return None
+        book.armed = None
+        if book.last_signal_at is not None and at - book.last_signal_at < self.policy.cooldown:
+            return None
         book.last_signal_at = at
         bar_close = book.bar_start
         assert bar_close is not None
