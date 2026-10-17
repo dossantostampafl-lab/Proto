@@ -297,6 +297,7 @@ def test_the_image_turns_the_loop_on_and_reads_binance_quotes() -> None:
         "AGENT_PIPELINE_ENABLED=true",
         "PROTO_STRATEGY_ENABLED=true",
         "E2E_DRILL_ON_START=true",
+        "AGENT_ROSTER_ENABLED=true",
         # TradingView alerts name the pairs that have live quotes (USDT, not BRL).
         "TRADINGVIEW_INSTRUMENTS=BINANCE_SPOT:BTCUSDT,BINANCE_SPOT:ETHUSDT,BINANCE_SPOT:SOLUSDT",
     ):

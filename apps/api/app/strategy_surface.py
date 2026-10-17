@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter
 
 from services.execution.catalog import PAPER_INSTRUMENTS
-from services.signals.proto_strategy import STRATEGY_ID, EmaCrossStrategy
+from services.signals.proto_strategy import STRATEGY_ID, EmaCrossPolicy, EmaCrossStrategy
 
 from .event_state import JournalUnavailable
 from .market_quotes import live_quote
@@ -37,6 +37,9 @@ _BOUNDARY = {
 }
 
 strategy = EmaCrossStrategy()
+# With the agent roster on, an EMA agent whose (fast, slow) differs from the default gets its
+# own strategy instance per instrument (a replacement trades varied parameters).
+_agent_strategies: dict[tuple[str, int, int], EmaCrossStrategy] = {}
 _counters = {"ticks": 0, "signals": 0, "journal_failures": 0}
 _task: asyncio.Task[None] | None = None
 
@@ -44,8 +47,25 @@ _task: asyncio.Task[None] | None = None
 def reset_strategy_state() -> None:
     global strategy
     strategy = EmaCrossStrategy()
+    _agent_strategies.clear()
     for key in _counters:
         _counters[key] = 0
+
+
+def _strategy_for(instrument_id: str) -> EmaCrossStrategy:
+    if not settings.agent_roster_enabled:
+        return strategy
+    from .roster_surface import ema_params
+
+    params = ema_params(instrument_id)
+    if params is None or params == (strategy.policy.fast, strategy.policy.slow):
+        return strategy
+    key = (instrument_id, *params)
+    found = _agent_strategies.get(key)
+    if found is None:
+        fast, slow = params
+        found = _agent_strategies[key] = EmaCrossStrategy(EmaCrossPolicy(fast=fast, slow=slow))
+    return found
 
 
 async def tick(now: datetime | None = None) -> int:
@@ -58,7 +78,8 @@ async def tick(now: datetime | None = None) -> int:
         if quote is None or (now - quote.observed_at).total_seconds() > _MAX_QUOTE_AGE_SECONDS:
             continue
         _counters["ticks"] += 1
-        signal = strategy.observe(instrument_id, float((quote.bid + quote.ask) / 2), now)
+        mid = float((quote.bid + quote.ask) / 2)
+        signal = _strategy_for(instrument_id).observe(instrument_id, mid, now)
         if signal is None:
             continue
         try:

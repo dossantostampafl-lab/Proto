@@ -169,6 +169,31 @@ def floor_actions(event: dict[str, Any]) -> list[dict[str, Any]]:
             actions.append(_action(event, "reviewer", "warn", "nothing to review", instrument))
         return actions
 
+    if kind == "AGENT_SPAWNED":
+        slot = payload.get("slot") or {}
+        headline = (
+            f"agent {payload.get('agent_id', '?')} joined · {slot.get('kind', '?')} · "
+            f"generation {payload.get('generation', '?')} · virtual R${payload.get('capital_brl')}"
+        )
+        why = _why(
+            f"replaces {payload['replaces']}" if payload.get("replaces") else None,
+            f"params {payload.get('params')}" if payload.get("params") else None,
+        )
+        return [_action(event, "fusion", "ok", headline, slot.get("instrument_id"), why)]
+    if kind == "AGENT_ELIMINATED":
+        slot = payload.get("slot") or {}
+        headline = f"agent {payload.get('agent_id', '?')} eliminated"
+        reason = payload.get("elimination_reason")
+        if reason:
+            headline += f" · {reason}"
+        return [_action(event, "risk", "alert", headline, slot.get("instrument_id"), _why(reason))]
+    if kind == "AGENT_TRADE_ATTRIBUTED":
+        headline = (
+            f"{payload.get('agent_id', '?')} {payload.get('side', '')} "
+            f"{payload.get('quantity', '')} · realized {payload.get('realized_pnl', '0')}"
+        )
+        return [_action(event, "oms", "ok", headline, payload.get("instrument_id"))]
+
     if kind == "RISK_DECISION":
         instrument = payload.get("instrument_id")
         if payload.get("approved"):

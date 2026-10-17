@@ -81,8 +81,8 @@ assert.match(floorScene, /data-activity=\{busy \? "working" : "idle"\}/, "visual
 assert.match(floorView, /connected && \(activeAt\[s\]/, "agents must stop performing work when the floor stream disconnects");
 assert.match(floorScene, /market\.connected \? "LIVE PUBLIC" : "LAST KNOWN \/ REST"/, "screen must disclose a disconnected market stream");
 assert.doesNotMatch(floorScene, /shapeRendering="crispEdges"/, "new floor must not use pixel-art rendering");
-// The room may be a photograph, but only of a room with blank screens: every operational value is drawn
-// live over it, and the photo is the only picture on the floor.
+// The photo room (the fallback where WebGL cannot run) may be a photograph, but only of a room with
+// blank screens: every operational value is drawn live over it, and the photo is the only picture.
 assert.equal((floorScene.match(/<image\b/g) ?? []).length, 1, "the floor may hold a single room photo");
 assert.doesNotMatch(floorScene, /<img\b/, "the floor may hold a single room photo");
 assert.match(floorScene, /import ROOM from "\.\.\/assets\/floor-room\.webp"/, "the room photo is the blank-screen asset");
@@ -92,9 +92,28 @@ assert.match(floorScene, /onError=\{\(\) => setPhoto\(false\)\}/, "a missing pho
 assert.match(floorView, /const \[stateFresh, setStateFresh\]/, "floor state polling must expose freshness");
 assert.match(floorView, /source=\{state == null \? undefined : state\.data_mode === "TESTNET"/, "floor sidebars must disclose paper vs testnet mode");
 
-
-assert.match(floorScene, /export function Scene\(props: SceneProps\) \{\n  return <PhotoScene \{\.\.\.props\} \/>;/, "the floor is the photo room, with nothing replacing it after load");
-assert.doesNotMatch(floorScene, /floor3d|Floor3D/, "no second scene may swap in after the photo room loads");
+// The floor is the live 3D room, loaded on demand. While its chunk loads a neutral loading state is
+// shown, never the photo, so no scene ever swaps in after load; the photo room is used only where
+// WebGL cannot run (or the GPU context is lost).
+const sceneFn = floorScene.slice(floorScene.indexOf("export function Scene("), floorScene.indexOf("function PhotoScene("));
+const floor3d = files.filter(([p]) => p.includes("floor3d")).map(([, s]) => s).join("\n");
+assert.match(floorScene, /lazy\(\(\) => import\("\.\/floor3d\/Floor3D"\)\)/, "the 3D floor must load on demand");
+assert.match(sceneFn, /useState<"3d" \| "photo">\(\(\) => \(canRender3d\(\) \? "3d" : "photo"\)\)/, "the photo room is chosen up front, only when WebGL cannot run");
+assert.match(sceneFn, /<Suspense fallback=\{<Loading3D \/>\}>/, "the 3D floor shows a neutral loading state while its chunk loads");
+assert.doesNotMatch(sceneFn, /fallback=\{<PhotoScene/, "the photo must never stand in while the 3D floor loads");
+assert.match(floorScene, /Carregando pregão 3D…/, "the loading state says what is loading");
+assert.match(floorScene, /getContext\("webgl2"\)/, "WebGL support is probed, not assumed");
+assert.match(floor3d, /Math\.min\(window\.devicePixelRatio \|\| 1, 1\.5\)/, "the 3D floor caps the pixel ratio at 1.5 for tablets");
+assert.match(floor3d, /prefers-reduced-motion: reduce/, "the 3D floor must respect reduced motion");
+assert.match(floor3d, /IntersectionObserver/, "the 3D floor pauses while off-screen");
+assert.match(floor3d, /visibilitychange/, "the 3D floor pauses while the tab is hidden");
+assert.match(floor3d, /instance\.dispose\(\)/, "the 3D floor disposes its GPU resources on unmount");
+assert.doesNotMatch(floor3d, /shadowMap\.enabled = true|EffectComposer/, "the 3D floor stays cheap: blob shadows, no shadow maps or post-processing");
+assert.match(floor3d, /if \(first \|\| !data\.busy\[a\.station\]\) continue;/, "operators carry work only for fresh live events, never for history");
+assert.match(floor3d, /select\.current\?\.\(drawerOf\(id\)\)/, "tapping a 3D desk opens the same drawer as the photo room");
+for (const label of ["LIVE PUBLIC", "LAST KNOWN / REST", "PAPER / SIM", "TESTNET · NO REAL MONEY", "MODE UNAVAILABLE", "FLOOR STATE UNAVAILABLE", "STALE", "HALTED", "ARMED", "no feed", "NOT CONFIGURED", "NO REAL MONEY"]) {
+  assert.ok(floor3d.includes(label), `3D floor must show ${label}`);
+}
 
 // Every desk is a real control over the photo and opens a drawer of live, read-only data.
 const desks = ["floorDesks.tsx", "deskData.ts"].map(name => files.find(([p]) => p.endsWith(name))?.[1] ?? "").join("\n");

@@ -1,13 +1,16 @@
-// Photo trading room. The room itself is a photograph with every screen blank; each screen, desk
-// label and activity light is drawn live on top of it from /v1/floor/state, /ws/floor and the live
-// public market stream. Nothing operational is baked into the picture. If the photo cannot be loaded
-// the vector room is drawn instead.
-import { type ReactNode, useState } from "react";
+// The trading floor scene. The floor is the live 3D room (three.js, its own on-demand chunk). While
+// that chunk loads a neutral loading state is shown, never another scene, so nothing swaps in after
+// load. Only where WebGL cannot run (or the GPU context is lost) is the photo room drawn instead: a
+// photograph with every screen blank, each screen, desk label and activity light drawn live on top
+// of it from /v1/floor/state, /ws/floor and the live public market stream. If the photo cannot be
+// loaded the vector room is drawn instead.
+import { Component, lazy, type ReactNode, Suspense, useState } from "react";
 import { type Sym, SYMBOLS } from "../api";
 import ROOM from "../assets/floor-room.webp";
 import type { Shared } from "../main";
 import { pct, usd } from "../ui";
 import { changeOf, type FloorAction, type FloorState, isHalted, priceOf, sparkPath, STAGES, STATIONS, type StationId, type Tone, TONE_COLOR, TONE_LABEL } from "./floorModel";
+import type { XpLaneState } from "./deskData";
 import { VectorScene } from "./floorSceneVector";
 
 export { isHalted, STAGES, STATIONS, TONE_COLOR };
@@ -242,6 +245,10 @@ type SceneProps = {
   actions: FloorAction[];
   latest: Partial<Record<StationId, FloorAction>>;
   active: (s: StationId) => boolean;
+  /** Whether the last /v1/floor/state read succeeded. */
+  stateFresh?: boolean;
+  /** The XP / B3 lane state, shown on its own desk in the 3D room. */
+  xp?: XpLaneState | null;
   /** Opens a desk. Without it the photo is look-only. */
   onSelect?: (id: StationId) => void;
   selected?: StationId | null;
@@ -285,10 +292,49 @@ function DeskHotspot({ id, label, action, busy, selected, onSelect }: {
   );
 }
 
-// The floor is the photo room: a photograph with blank screens, every live value drawn over it.
-// If the photo cannot be loaded, the vector room is drawn instead.
+// The floor is the live 3D room. It needs WebGL2 and OffscreenCanvas (its screens are canvas
+// textures); both are probed once, without touching the DOM. Where they are missing the photo room
+// is the floor from the first paint, so the page never shows one scene and then another.
+const Floor3D = lazy(() => import("./floor3d/Floor3D"));
+let webgl: boolean | null = null;
+export function canRender3d(): boolean {
+  if (webgl !== null) return webgl;
+  try {
+    const gl = typeof OffscreenCanvas === "undefined" ? null : new OffscreenCanvas(1, 1).getContext("webgl2");
+    webgl = gl != null;
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  } catch {
+    webgl = false;
+  }
+  return webgl;
+}
+
+class Fallback extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { this.props.onError(); }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+
+/** What shows while the 3D chunk loads: a neutral room-sized placeholder, never the photo. */
+function Loading3D() {
+  return (
+    <div className="fl-scene fl-3d" role="status" aria-live="polite">
+      <p className="fl-3d-loading">Carregando pregão 3D…</p>
+    </div>
+  );
+}
+
 export function Scene(props: SceneProps) {
-  return <PhotoScene {...props} />;
+  const [mode, setMode] = useState<"3d" | "photo">(() => (canRender3d() ? "3d" : "photo"));
+  if (mode === "photo") return <PhotoScene {...props} />;
+  return (
+    <Fallback onError={() => setMode("photo")}>
+      <Suspense fallback={<Loading3D />}>
+        <Floor3D {...props} onFail={() => setMode("photo")} />
+      </Suspense>
+    </Fallback>
+  );
 }
 
 function PhotoScene(props: SceneProps) {

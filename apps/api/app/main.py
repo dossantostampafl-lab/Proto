@@ -43,6 +43,7 @@ from .promotion_surface import router as promotion_router
 from .research import metrics
 from .research import router as research_router
 from .risk_surface import router as risk_router
+from .roster_surface import router as roster_router
 from .safety_metrics import router as safety_router
 from .settings import settings
 from .shadow_control import router as shadow_control_router
@@ -100,6 +101,7 @@ for router in (
     creation_router,
     signal_router,
     agent_router,
+    roster_router,
     risk_router,
     oms_router,
     b3_quotes.router,

@@ -121,6 +121,30 @@ class HybridDecisionPipeline:
         self._stage = stage
         self._clock = clock
 
+    def derive(
+        self,
+        *,
+        fusion_policy: FusionPolicy | None = None,
+        recorder: Callable[[AgentDecision], Awaitable[None]] | None = None,
+    ) -> HybridDecisionPipeline:
+        """The same pipeline (reviewer, quotes, sizing, stage) with another fusion policy.
+
+        ``recorder=None`` leaves recording to the caller (a trader agent records the decision
+        once it has shaped the proposal to its own book).
+        """
+
+        return HybridDecisionPipeline(
+            instruments=self._instruments,
+            reviewer=self._reviewer,
+            quotes=self._quotes,
+            portfolio=self._portfolio,
+            recorder=recorder,
+            fusion_policy=fusion_policy or self._fusion_policy,
+            sizing_policy=self._sizing_policy,
+            stage=self._stage,
+            clock=self._clock,
+        )
+
     async def evaluate(self, instrument_id: str, signals: Iterable[Signal]) -> AgentDecision:
         now = self._clock()
         pool = list(signals)

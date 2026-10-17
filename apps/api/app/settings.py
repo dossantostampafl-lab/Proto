@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     agent_pipeline_enabled: bool = False
     # PROTO's own strategy (EMA cross on live mids) feeds the pipeline next to TradingView.
     proto_strategy_enabled: bool = False
+    # Trader-agent roster: route each signal to the ACTIVE agent of its slot, sized on that
+    # agent's virtual R$200 (docs/agents/roster.md). Tightens sizing only; off keeps the
+    # account-level pipeline exactly as it was.
+    agent_roster_enabled: bool = False
     # Run the closed-loop drill (signal -> permit -> executor testnet -> reconciliation) once
     # after start, when the executor backend is configured.
     e2e_drill_on_start: bool = False
