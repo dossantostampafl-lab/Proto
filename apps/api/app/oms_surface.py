@@ -44,7 +44,12 @@ from services.risk import AccountState, KillScope
 
 from .app_state import persistence_engine
 from .event_state import JournalUnavailable, record_operational_event
-from .executor_client import ExecutorClient, ExecutorRefused, ExecutorUnavailable
+from .executor_client import (
+    SHORT_TIMEOUT,
+    ExecutorClient,
+    ExecutorRefused,
+    ExecutorUnavailable,
+)
 from .instrument_registry import active_instruments
 from .market_quotes import live_quote
 from .settings import settings
@@ -110,7 +115,9 @@ def executor_client(venue: VenueId = VENUE) -> ExecutorClient:
             url, token = settings.executor_url, settings.executor_api_token
         if not url or not token:
             raise ExecutorUnavailable("executor backend is not configured")
-        client = _executors[venue] = ExecutorClient(url, token)
+        client = _executors[venue] = ExecutorClient(
+            url, token, timeout=SHORT_TIMEOUT if venue is XP_VENUE else None
+        )
     return client
 
 
@@ -489,53 +496,71 @@ async def list_orders(limit: int = 50, venue: str = "BINANCE_SPOT") -> dict[str,
 
 @router.get("/ledger")
 async def ledger_view() -> dict[str, object]:
-    binance_unavailable = False
-    if executor_mode():
+    """Balances and per-currency accounts. Every venue is asked at the same time, so a slow or
+    switched-off one costs its own timeout once, not once per call, and never hides the other."""
+
+    async def binance_part() -> tuple[dict, str, str, bool]:
+        if not executor_mode():
+            _, ledger, _ = await components()
+            balances = {a: b.to_dict() for a, b in (await ledger.balances()).items()}
+            return balances, ACCOUNT_ID, "PAPER", False
         try:
             body = await _from_executor(executor_client().ledger())
-            balances_view = body["balances"]
-            account_id, mode = body.get("account_id", EXECUTOR_ACCOUNT_ID), "TESTNET"
         except HTTPException:
             if not xp_enabled():  # unchanged without XP: one executor, one failure
                 raise
             # With two venues one being down must not hide the other.
-            binance_unavailable = True
-            balances_view, account_id, mode = {}, EXECUTOR_ACCOUNT_ID, "TESTNET"
-    else:
-        _, ledger, _ = await components()
-        balances_view = {a: b.to_dict() for a, b in (await ledger.balances()).items()}
-        account_id, mode = ACCOUNT_ID, "PAPER"
-    accounts = {}
-    for quote_asset in _QUOTE_ASSETS:
+            return {}, EXECUTOR_ACCOUNT_ID, "TESTNET", True
+        return (
+            body["balances"],
+            body.get("account_id", EXECUTOR_ACCOUNT_ID),
+            "TESTNET",
+            False,
+        )
+
+    async def xp_part() -> dict[str, object] | None:
+        if not (executor_mode() and xp_enabled()):
+            return None
+        try:
+            xp = await executor_client(XP_VENUE).ledger()
+        except (ExecutorUnavailable, ExecutorRefused):
+            return {"venue": XP_VENUE.value, "unavailable": True}
+        return {
+            "account_id": xp.get("account_id", XP_ACCOUNT_ID),
+            "venue": XP_VENUE.value,
+            "mode": "TESTNET",
+            "balances": dict(xp["balances"]),
+            "venue_halted": xp.get("venue_halted"),
+        }
+
+    async def account(quote_asset: str) -> dict[str, str]:
         state = await account_state(quote_asset)
-        accounts[quote_asset] = {
+        return {
             "equity": str(state.equity),
             "start_of_day_equity": str(state.start_of_day_equity),
             "peak_equity": str(state.peak_equity),
             "gross_exposure": str(state.gross_exposure),
         }
+
+    results = await asyncio.gather(
+        binance_part(), xp_part(), *(account(q) for q in _QUOTE_ASSETS), return_exceptions=True
+    )
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    (balances_view, account_id, mode, binance_unavailable), xp_block = results[0], results[1]
     view: dict[str, object] = {
         "account_id": account_id,
         "venue": VENUE.value,
         "mode": mode,
         "balances": dict(balances_view),
-        "accounts": accounts,
+        "accounts": dict(zip(_QUOTE_ASSETS, results[2:], strict=True)),
         **_BOUNDARY,
     }
     if binance_unavailable:
         view["unavailable"] = True
-    if executor_mode() and xp_enabled():
-        try:
-            xp = await executor_client(XP_VENUE).ledger()
-            view["xp_b3"] = {
-                "account_id": xp.get("account_id", XP_ACCOUNT_ID),
-                "venue": XP_VENUE.value,
-                "mode": "TESTNET",
-                "balances": dict(xp["balances"]),
-                "venue_halted": xp.get("venue_halted"),
-            }
-        except (ExecutorUnavailable, ExecutorRefused):
-            view["xp_b3"] = {"venue": XP_VENUE.value, "unavailable": True}
+    if xp_block is not None:
+        view["xp_b3"] = xp_block
     return view
 
 
