@@ -1,17 +1,36 @@
 # Trading floor view (Phase 7 preview)
 
 The dashboard opens on **Floor**: a live 3D trading room (three.js), loaded on demand only on this
-view. The camera sits high behind the central desk and drifts slowly; the curved wall of screens,
-the three monitors on each desk and the floating desk labels are live canvas textures fed by
-`/v1/floor/state`, `/ws/floor` and the public market stream. Operators are procedural figures:
-they type and lean in only while their desk is working (a journal event arrived in the last few
-seconds over a connected stream), and otherwise breathe and glance at their screens. A supervisor
-walks the room and goes to a desk that raised an alert. The desk LEDs and the floor lines take the
-state colour of the desk's last action. With reduced motion the camera and idle movement stop.
+view as its own chunk. While that chunk loads the floor shows a neutral **Carregando pregão 3D…**
+state, never another scene, so nothing swaps in after load.
 
-If WebGL or OffscreenCanvas is unavailable, the GPU context is lost or the 3D chunk fails to load,
-the photo room is shown instead: a photograph with every screen blank
-(`apps/web/src/assets/floor-room.webp`) with the same live screens drawn over it. If the photo
+- **Room.** Seven desks stand on an arc in pipeline order (TradingView, Fusion, AI Reviewer, Risk
+  Engine, OMS / Executor, Reconciliation, and the XP / B3 lane desk) facing a curved video wall with
+  an LED ticker. Warm light, wood floor, glass walls with a dusk skyline, baked blob shadows.
+- **Screens.** The wall, each desk's two monitors and the floating desk labels are live canvas
+  textures fed by `/v1/floor/state`, `/ws/floor` and the public market stream. A desk's main monitor
+  shows its latest headline and tone in words; the second shows its journal. The XP / B3 desk shows
+  the lane state (`NOT CONFIGURED`, `UNAVAILABLE`, `LIVE`, `HALTED`) and no number.
+- **Agents walk.** When a fresh event arrives over a connected `/ws/floor`, the operator of the desk
+  before it in the chain stands up, carries a card in the event's tone to that desk, and walks back.
+  History (the first read, or anything that did not arrive fresh on the stream) never makes anyone
+  walk. Between events three floor staff walk from desk to desk and look at the screens; they are
+  decoration and say nothing about data. Seated operators type only while their desk is working.
+- **Lights.** A desk's beacon, LED edge and floor glow take the tone of its last action; an `alert`
+  is a pulsing red light on that desk. The floor light path into a desk lights while it works.
+- **Labels.** Badges over the canvas say the data mode (`PAPER / SIM`, `TESTNET · NO REAL MONEY` or
+  `MODE UNAVAILABLE`), whether the floor state is live, stale or unavailable, and whether the market
+  stream is live or last known.
+- **Camera.** It orbits slowly; drag to orbit, pinch (or ctrl + wheel) to zoom, tap a desk to open
+  its drawer (the XP / B3 desk opens the OMS drawer, which holds the XP section).
+- **Tablets.** Pixel ratio capped at 1.5, low-poly shared geometry, no shadow maps or
+  post-processing, about 30 fps on touch devices, the loop paused while the tab is hidden or the
+  floor is off-screen, every GPU resource disposed on unmount. With reduced motion the camera stays
+  put and agents are placed at their destination instead of walking.
+
+If WebGL2 or OffscreenCanvas is unavailable (probed before anything is drawn), the GPU context is
+lost or the 3D chunk fails to load, the photo room is shown instead: a photograph with every screen
+blank (`apps/web/src/assets/floor-room.webp`) with the same live screens drawn over it. If the photo
 cannot load either, a vector drawing of the room (`floorSceneVector.tsx`) is shown. Nothing
 operational is baked into any picture; the contract check enforces it.
 
@@ -45,7 +64,8 @@ The wall screen shows:
 - the drawdown against the 5% limit;
 - an **Últimas ações** strip with the latest agent actions.
 
-Each desk has three monitors: two live public mids and the desk's own journal events.
+In the photo room each desk has three monitors: two live public mids and the desk's own journal
+events. In the 3D room each desk has two: its latest headline and tone, and its journal.
 
 A missing value is shown as `—` and is never estimated.
 
@@ -87,13 +107,14 @@ An event that carries no reason shows no **why** list.
 
 ## Desks you can open
 
-Every desk of the photo is a real button, not part of the picture. Hover or focus shows its
+In the 3D room a tap or click on a desk opens its drawer. In the photo room every desk is a real
+button, not part of the picture. Hover or focus shows its
 outline and a status dot in the tone of its last action (`ok`, `warn`, `alert`, `working`).
 Click, Enter or Space opens the desk in a drawer; Escape or **Close** shuts it and returns the focus
 to the desk. The open desk is kept in the URL hash, so a desk can be linked: `#floor/risk`,
 `#floor/oms`, `#floor/fusion`, `#floor/reviewer`, `#floor/tradingview`, `#floor/reconciliation`
-(**Copy link** in the drawer). The same six desks are also cards under the photo, which is the
-way in on a phone and when the photo cannot load.
+(**Copy link** in the drawer). The same six desks are also cards under the scene, which is the
+keyboard way in for the 3D room and the way in when no picture can load.
 
 The drawer is a modal dialog: the focus moves into it and stays inside until it closes. Wide
 screens open it as a side panel, narrow ones as a sheet from the bottom. Its panels poll only while

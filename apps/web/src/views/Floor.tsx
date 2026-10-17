@@ -182,8 +182,8 @@ export function Floor({ market }: Shared) {
           {!floor.stateFresh && <span className="floor-stale">floor state {state == null ? "unavailable" : "last known"}</span>}
         </span>}
       >
-        <div className="fl-pan" ref={pan}><Scene market={market} state={state} actions={floor.actions} latest={floor.latest} active={floor.active} onSelect={select} selected={selected} /></div>
-        <p className="fl-hint">Click, or press Enter or Space on a desk to open it: live data, its recent actions and, with the operator token, its actions.</p>
+        <div className="fl-pan" ref={pan}><Scene market={market} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} active={floor.active} xp={xp.lane.state} onSelect={select} selected={selected} /></div>
+        <p className="fl-hint">Tap or click a desk to open it: live data, its recent actions and, with the operator token, its actions. Drag to orbit the room; the desk cards below open the same desks from the keyboard.</p>
         <DeskCards latest={floor.latest} active={floor.active} selected={selected} onSelect={select} />
       </Panel>
 
