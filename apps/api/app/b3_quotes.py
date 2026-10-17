@@ -12,9 +12,11 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
+
+from fastapi import APIRouter
 
 from services.execution.catalog import B3_INSTRUMENTS
 from services.execution.venue import Quote
@@ -53,6 +55,10 @@ class B3QuoteFeed:
 
     def quote(self, symbol: str) -> Quote | None:
         return self._quotes.get(symbol)
+
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done()
 
     async def refresh(self) -> None:
         body = await self._fetch(self._symbols)
@@ -97,6 +103,46 @@ def install(feed: B3QuoteFeed | None) -> None:
 
 def quote_for(symbol: str) -> Quote | None:
     return _feed.quote(symbol) if _feed is not None else None
+
+
+router = APIRouter(prefix="/v1/b3", tags=["b3"])
+_BOUNDARY = {"financial_connectivity": False, "real_money_execution": False}
+
+
+@router.get("/quotes")
+async def quotes_view() -> dict[str, Any]:
+    """Read-only view of the B3 quotes the API holds (nothing is fetched on request).
+
+    Each quote carries the terminal's own timestamp and its age, so a reader can tell a live price
+    from the last one before the session closed. A symbol with no usable quote is null.
+    """
+
+    from . import settings as settings_module
+
+    if not settings_module.settings.xp_routing_enabled:
+        return {"enabled": False, "reason": "XP routing is not configured", **_BOUNDARY}
+    now = datetime.now(UTC)
+    symbols: dict[str, Any] = {}
+    for symbol in b3_symbols():
+        quote = quote_for(symbol)
+        symbols[symbol] = (
+            None
+            if quote is None
+            else {
+                "bid": str(quote.bid),
+                "ask": str(quote.ask),
+                "observed_at": quote.observed_at.isoformat(),
+                "age_seconds": max(0.0, (now - quote.observed_at).total_seconds()),
+            }
+        )
+    return {
+        "enabled": True,
+        "source": "XP executor (MT5 terminal, demo account)",
+        "feed_running": _feed is not None and _feed.running,
+        "refresh_failures": _feed.failures if _feed is not None else 0,
+        "symbols": symbols,
+        **_BOUNDARY,
+    }
 
 
 async def start_if_enabled() -> B3QuoteFeed | None:

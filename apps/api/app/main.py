@@ -102,6 +102,7 @@ for router in (
     agent_router,
     risk_router,
     oms_router,
+    b3_quotes.router,
     promotion_router,
     watchdog_router,
     safety_router,
