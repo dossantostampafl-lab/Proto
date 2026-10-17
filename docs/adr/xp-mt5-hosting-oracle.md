@@ -1,6 +1,10 @@
 # ADR: Hosting the XP MT5 terminal for the Oracle deployment
 
-- Status: Proposed. Needs an owner decision on cost (below). Nothing here is applied.
+- Status: **Option C is now the chosen path, with a private Tailscale link: the terminal stays on
+  the operator's PC and the Oracle API reaches it, at no cost.** See
+  `docs/runbooks/xp-node-on-pc.md` (scripts in `infra/xp-node/`, Oracle side `infra/oci/deploy/set-xp-node.sh`).
+  Option A (Windows VM on OCI) stays the way to a 24/7 host if the cost is ever accepted.
+  Nothing here is applied to the Oracle stack until the runbook is followed.
 - Context: `docs/adr/venues-and-executor-hosting.md`, `docs/adr/xp-routing-in-the-api.md`.
 
 ## Problem
