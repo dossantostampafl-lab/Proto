@@ -68,12 +68,32 @@ ensure_db() {
   exit 1
 }
 
+# Optional XP (B3) executor for the API: a root-only file with XP_EXECUTOR_URL and
+# XP_EXECUTOR_API_TOKEN, written by deploy/set-xp-node.sh. Absent file = XP routing off, exactly as
+# before. A malformed file is ignored with a warning instead of passed on: the API refuses to start
+# on an invalid XP setting, and a bad optional file must never take the API down.
+xp_env_file="${PROTO_XP_ENV:-/etc/proto/xp.env}"
+xp_env_args() {
+  [ -s "$xp_env_file" ] || return 0
+  local url token
+  url="$(sed -n 's/^XP_EXECUTOR_URL=//p' "$xp_env_file" | head -n1)"
+  token="$(sed -n 's/^XP_EXECUTOR_API_TOKEN=//p' "$xp_env_file" | head -n1)"
+  case "$url" in http://* | https://*) ;; *) log "ignoring $xp_env_file: XP_EXECUTOR_URL missing" >&2; return 0 ;; esac
+  if [ "${#token}" -lt 32 ]; then
+    log "ignoring $xp_env_file: XP_EXECUTOR_API_TOKEN shorter than 32 characters" >&2
+    return 0
+  fi
+  printf '%s\n' --env-file "$xp_env_file"
+}
+
 start() {  # start <image id>
   local image="$1"
   podman rm -f "proto-${role}" >/dev/null 2>&1 || true
   case "$role" in
     api)
+      mapfile -t xp_args < <(xp_env_args)
       podman run -d --name proto-api --restart=always --network host --env-file "$secrets" \
+        ${xp_args[@]+"${xp_args[@]}"} \
         -e APP_ENV=production -e OMS_EXECUTION_BACKEND=executor \
         -e "EXECUTOR_URL=http://${EXECUTOR_IP}:8100" \
         ${DOMAIN:+-e "PUBLIC_ORIGIN=https://${DOMAIN}"} \
