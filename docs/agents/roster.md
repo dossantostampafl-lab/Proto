@@ -34,8 +34,9 @@ The capital is a sizing budget inside the paper or testnet account. It is not mo
     from then on trades its instrument's `LAB_PARAM_LADDER` entry instead of an EMA pair: a
     strategy-lab spec run by `services.research.live.LabSignalStrategy`, emitting
     `proto-lab-*` signals that only that agent accepts. Agents already ACTIVE keep their EMA
-    params until replaced. `AGENT_LAB_WARMUP_KLINES=true` seeds its bars from Binance public
-    klines instead of waiting weeks for live mids. Evidence and caveats:
+    params until replaced. It requires `AGENT_LAB_WARMUP_KLINES=true` (settings refuse to
+    start otherwise), which seeds its bars from Binance public klines instead of waiting weeks
+    for live mids. Evidence and caveats:
     `docs/research/strategy-lab-2026-10-19.md`.
 
 ## Routing and attribution

@@ -114,3 +114,12 @@ def test_live_adapter_rejects_bad_input() -> None:
     with pytest.raises(ValueError):
         LabSignalStrategy(SPEC, timeframe_minutes=0)
     assert LabSignalStrategy(SPEC, timeframe_minutes=60).observe(BTC, 0.0, START) is None
+
+
+def test_lab_strategies_refuse_to_start_without_the_warm_up() -> None:
+    from apps.api.app.settings import Settings
+
+    with pytest.raises(ValueError, match="AGENT_LAB_WARMUP_KLINES"):
+        Settings(agent_lab_strategies_enabled=True)
+    assert Settings(agent_lab_strategies_enabled=True, agent_lab_warmup_klines=True)
+    assert Settings(agent_lab_warmup_klines=True)  # warm-up alone changes nothing

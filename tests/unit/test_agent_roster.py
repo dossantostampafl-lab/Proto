@@ -724,7 +724,7 @@ async def test_lab_strategies_stay_off_unless_flagged(monkeypatch, surfaces) -> 
     assert roster_surface.lab_params(BTC) is None
 
     roster_surface.reset_roster_state()
-    configure(monkeypatch, agent_lab_strategies_enabled=True)
+    configure(monkeypatch, agent_lab_strategies_enabled=True, agent_lab_warmup_klines=True)
     monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
     await roster_surface.ready()
     chosen = strategy_surface._strategy_for(BTC)
@@ -736,6 +736,11 @@ async def test_lab_strategies_stay_off_unless_flagged(monkeypatch, surfaces) -> 
     warmed = []
     monkeypatch.setattr(
         strategy_surface, "lab_klines", lambda i, m, n: warmed.append((i, m, n)) or []
+    )
+    monkeypatch.setattr(
+        strategy_surface,
+        "settings",
+        roster_surface.settings.model_copy(update={"agent_lab_warmup_klines": False}),
     )
     await strategy_surface._warm_lab(chosen, BTC)  # warm-up flag off: no fetch
     assert warmed == []

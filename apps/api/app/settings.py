@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # trade the lab ladder's strategy instead of an EMA pair. Signals only; off keeps the EMA.
     agent_lab_strategies_enabled: bool = False
     # Seed a lab strategy's bars from Binance public klines (read-only market data) instead of
-    # waiting for live mids to fill its history.
+    # waiting for live mids to fill its history. Required by agent_lab_strategies_enabled.
     agent_lab_warmup_klines: bool = False
     # Run the closed-loop drill (signal -> permit -> executor testnet -> reconciliation) once
     # after start, when the executor backend is configured.
@@ -194,6 +194,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 "RISK_PERMIT_SIGNING_KEY or RISK_PERMIT_PRIVATE_KEY is required with the executor"
             )
+        return self
+
+    @model_validator(mode="after")
+    def enforce_lab_warmup(self) -> Settings:
+        # The hourly lab strategy needs ~720 bars: without public klines it would sit idle for
+        # about a month on live mids alone, an agent that looks on but never trades.
+        if self.agent_lab_strategies_enabled and not self.agent_lab_warmup_klines:
+            raise ValueError("AGENT_LAB_STRATEGIES_ENABLED requires AGENT_LAB_WARMUP_KLINES=true")
         return self
 
     @model_validator(mode="after")
