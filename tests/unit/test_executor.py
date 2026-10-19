@@ -89,6 +89,8 @@ def test_routes_require_the_token_and_report_the_boundary(fake, db) -> None:
         health = client.get("/health").json()
         assert health == {
             "status": "ok",
+            "halted_reason": None,
+            "divergences": [],
             "venue_environment": "TESTNET",
             "financial_connectivity": False,
             "real_money_execution": False,
@@ -134,7 +136,10 @@ def test_divergence_halts_until_the_venue_agrees_again(fake, db) -> None:
         fake.balances["USDT"] -= Decimal("1")  # money moved outside the system
         result = client.post("/v1/reconcile", headers=AUTH).json()
         assert result["consistent"] is False and result["venue_halted"] is True
-        assert client.get("/health").json()["status"] == "halted"
+        health = client.get("/health").json()  # public: why it stopped and what diverged
+        assert health["status"] == "halted"
+        assert health["halted_reason"] == "reconciliation divergence"
+        assert [d["asset"] for d in health["divergences"]] == ["USDT"]
         assert client.post("/v1/orders", json=body(intent()), headers=AUTH).status_code == 409
         assert client.post("/v1/halt/release", headers=AUTH).status_code == 409
 

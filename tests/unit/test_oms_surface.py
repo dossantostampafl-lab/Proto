@@ -462,12 +462,15 @@ async def test_executor_status_is_readable_without_a_token(monkeypatch) -> None:
         async def health(self):
             if self.status is None:
                 raise oms_surface.ExecutorUnavailable("down")
-            return {"status": self.status}
+            reason = "reconciliation divergence" if self.status == "halted" else None
+            return {"status": self.status, "halted_reason": reason, "divergences": []}
 
     monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
     for status, expected in (("halted", "halted"), ("ok", "ok"), (None, "unreachable")):
         monkeypatch.setattr(oms_surface, "_call_client", lambda venue, s=status: Health(s))
         body = await oms_surface.executor_status()
         assert body["status"] == expected and body["real_money_execution"] is False
+        if expected == "halted":
+            assert body["halted_reason"] == "reconciliation divergence"
     monkeypatch.setattr(oms_surface, "executor_mode", lambda: False)
     assert (await oms_surface.executor_status())["status"] == "not_configured"
