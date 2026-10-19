@@ -8,9 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .safety_policy import SafetyPolicyError, validate_runtime_mode
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9.-]{1,40}$")
-_ALLOWED_ALPACA_EQUITY_FEEDS = frozenset(
-    {"iex", "sip", "delayed_sip", "otc", "boats", "overnight"}
-)
+_ALLOWED_ALPACA_EQUITY_FEEDS = frozenset({"iex", "sip", "delayed_sip", "otc", "boats", "overnight"})
 _MIN_PRODUCTION_SECRET_LENGTH = 32
 
 
@@ -43,9 +41,7 @@ class Settings(BaseSettings):
     creation_bridge_shared_secret: str | None = None
     # TradingView webhook (Phase 1). Unset secret keeps the endpoint closed (503).
     tradingview_webhook_secret: str | None = None
-    tradingview_instruments: str = (
-        "BINANCE_SPOT:BTCBRL,BINANCE_SPOT:ETHBRL,BINANCE_SPOT:SOLBRL"
-    )
+    tradingview_instruments: str = "BINANCE_SPOT:BTCBRL,BINANCE_SPOT:ETHBRL,BINANCE_SPOT:SOLBRL"
     tradingview_ip_allowlist_enabled: bool = True
     # Trust the right-most X-Forwarded-For entry; only behind our own reverse proxy.
     tradingview_trust_forwarded_for: bool = False
@@ -60,6 +56,12 @@ class Settings(BaseSettings):
     # agent's virtual R$200 (docs/agents/roster.md). Tightens sizing only; off keeps the
     # account-level pipeline exactly as it was.
     agent_roster_enabled: bool = False
+    # Strategy lab (docs/research/strategy-lab-2026-10-19.md): newly spawned own-strategy agents
+    # trade the lab ladder's strategy instead of an EMA pair. Signals only; off keeps the EMA.
+    agent_lab_strategies_enabled: bool = False
+    # Seed a lab strategy's bars from Binance public klines (read-only market data) instead of
+    # waiting for live mids to fill its history.
+    agent_lab_warmup_klines: bool = False
     # Run the closed-loop drill (signal -> permit -> executor testnet -> reconciliation) once
     # after start, when the executor backend is configured.
     e2e_drill_on_start: bool = False
@@ -280,9 +282,7 @@ class Settings(BaseSettings):
             self.risk_permit_signing_key is not None
             and len(self.risk_permit_signing_key) < _MIN_PRODUCTION_SECRET_LENGTH
         ):
-            raise ValueError(
-                "RISK_PERMIT_SIGNING_KEY must be at least 32 characters in production"
-            )
+            raise ValueError("RISK_PERMIT_SIGNING_KEY must be at least 32 characters in production")
         if (
             self.watchdog_api_token is not None
             and len(self.watchdog_api_token) < _MIN_PRODUCTION_SECRET_LENGTH

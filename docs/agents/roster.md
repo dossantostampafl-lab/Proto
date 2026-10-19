@@ -30,6 +30,13 @@ The capital is a sizing budget inside the paper or testnet account. It is not mo
     parameter set.
   - TradingView agents ignore alerts weaker than `min_strength`. The steps are 0, 0.2, 0.4,
     0.5, 0.6 and 0.7.
+  - With `AGENT_LAB_STRATEGIES_ENABLED=true` (off by default), an own-strategy agent spawned
+    from then on trades its instrument's `LAB_PARAM_LADDER` entry instead of an EMA pair: a
+    strategy-lab spec run by `services.research.live.LabSignalStrategy`, emitting
+    `proto-lab-*` signals that only that agent accepts. Agents already ACTIVE keep their EMA
+    params until replaced. `AGENT_LAB_WARMUP_KLINES=true` seeds its bars from Binance public
+    klines instead of waiting weeks for live mids. Evidence and caveats:
+    `docs/research/strategy-lab-2026-10-19.md`.
 
 ## Routing and attribution
 

@@ -15,3 +15,6 @@ target/
 *.log
 graphify-out/
 *.egg-info/
+
+# Strategy-lab market data cache (never committed)
+data/research/
