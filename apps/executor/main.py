@@ -101,7 +101,13 @@ def create_app(executor: Executor | None = None) -> FastAPI:
     async def health(request: Request) -> dict[str, object]:
         executor_ = runtime(request)
         status = "starting" if not executor_.ready else "halted" if executor_.halted else "ok"
-        return {"status": status, **_boundary(executor_)}
+        # Why it stopped and what diverged: operational facts, no credentials or tokens.
+        return {
+            "status": status,
+            "halted_reason": executor_.halted,
+            "divergences": executor_.last_divergences,
+            **_boundary(executor_),
+        }
 
     @app.post("/v1/orders")
     async def submit(body: ExecuteRequest, executor_: Authorized):

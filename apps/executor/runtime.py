@@ -105,6 +105,7 @@ class Executor:
         self.halted: str | None = None
         self.last_reconcile_at: datetime | None = None
         self.last_consistent: bool | None = None
+        self.last_divergences: list[dict[str, Any]] = []
         self.events: deque[dict[str, Any]] = deque(maxlen=500)
         self._tasks: list[asyncio.Task] = []
         self._reconcile_lock = asyncio.Lock()
@@ -218,6 +219,7 @@ class Executor:
             )
             self.last_reconcile_at = self._clock()
             self.last_consistent = not divergences
+            self.last_divergences = [d.to_dict() for d in divergences]
             if divergences and self.halted is None:
                 self.halted = "reconciliation divergence"
                 self._event(

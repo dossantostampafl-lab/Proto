@@ -621,7 +621,13 @@ async def executor_status(venue: str = "BINANCE_SPOT") -> dict[str, object]:
         body = await _call_client(chosen).health()
     except (ExecutorUnavailable, ExecutorRefused):
         return {"venue": chosen.value, "status": "unreachable", **_BOUNDARY}
-    return {"venue": chosen.value, "status": str(body.get("status", "unknown")), **_BOUNDARY}
+    return {
+        "venue": chosen.value,
+        "status": str(body.get("status", "unknown")),
+        "halted_reason": body.get("halted_reason"),
+        "divergences": body.get("divergences") or [],
+        **_BOUNDARY,
+    }
 
 
 @router.post("/executor/halt/release")
