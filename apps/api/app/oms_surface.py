@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
 from services.execution import RiskPermit, TradeIntent, VenueId
 from services.execution.catalog import PAPER_INSTRUMENTS
@@ -608,6 +609,60 @@ async def reconcile_now() -> dict[str, object]:
                 }
         return {**results[VENUE.value], "xp_b3": results[XP_VENUE.value]}
     return await reconcile()
+
+
+class BaselineRebaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quote_asset: str = Field(pattern=r"^[A-Z]{3,5}$")
+    reason: str = Field(min_length=10, max_length=300)
+
+
+async def _non_real_money(venue: VenueId) -> str:
+    """The account's environment, only when it cannot hold real money (PAPER or TESTNET)."""
+
+    if not executor_mode():
+        return "PAPER"
+    try:
+        health = await _call_client(venue).health()
+    except (ExecutorUnavailable, ExecutorRefused) as exc:
+        raise HTTPException(503, "executor unavailable: environment unknown") from exc
+    environment = str(health.get("venue_environment", ""))
+    if environment != "TESTNET" or health.get("real_money_execution") is not False:
+        shown = environment or "unknown"
+        raise HTTPException(409, f"refused: the {venue.value} account is {shown}")
+    return environment
+
+
+@router.post("/baseline/rebase")
+async def rebase_baseline(request: BaselineRebaseRequest) -> dict[str, object]:
+    """Operator action, testnet and paper only: start the daily-loss and drawdown basis anew.
+
+    Sets start-of-day and peak equity to the current equity of one quote currency. It forgets
+    past losses, so a real-money account always refuses it, and an unmarked or unreadable
+    account (exposure unknown) refuses it too. Journaled with the values it replaced.
+    """
+
+    venue = venue_for_quote(request.quote_asset)
+    environment = await _non_real_money(venue)
+    state = await account_state(request.quote_asset)
+    if not state.gross_exposure.is_finite():
+        raise HTTPException(409, "refused: exposure is unknown (unmarked or unreadable account)")
+    checkpoints = _checkpoint_store(venue)
+    key = _checkpoint_key(request.quote_asset, _last_openings.get(venue, {}), venue)
+    before = await checkpoints.get(key)
+    after = (datetime.now(UTC).date(), state.equity, state.equity)
+    await checkpoints.put(key, after)
+    payload = {
+        "venue": venue.value,
+        "environment": environment,
+        "quote_asset": request.quote_asset,
+        "reason": request.reason,
+        "before": {"start_of_day": str(before[1]), "peak": str(before[2])} if before else None,
+        "after": {"start_of_day": str(state.equity), "peak": str(state.equity)},
+    }
+    await _record("RISK_BASELINE_REBASED", payload)
+    return {**payload, **_BOUNDARY}
 
 
 @router.get("/executor/status")

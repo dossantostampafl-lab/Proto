@@ -207,6 +207,9 @@ def floor_actions(event: dict[str, Any]) -> list[dict[str, Any]]:
         return [_action(event, "risk", "alert", f"lockdown: {payload.get('reason', '?')}")]
     if kind == "RISK_LOCKDOWN_RELEASED":
         return [_action(event, "risk", "ok", "lockdown released by operator")]
+    if kind == "RISK_BASELINE_REBASED":
+        asset = payload.get("quote_asset", "?")
+        return [_action(event, "risk", "warn", f"new loss baseline {asset} (testnet, operator)")]
     if kind == "RISK_KILL_SWITCH_CHANGED":
         action = payload.get("action", "?")
         headline = f"kill switch {payload.get('scope', '?')} {action}".strip()

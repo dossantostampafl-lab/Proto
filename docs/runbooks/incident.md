@@ -78,3 +78,12 @@ Venue and strategy kill switches take `{"scope":"VENUE","key":"BINANCE_SPOT", ..
 - release a halt to "see if it happens again";
 - raise a limit, disable the watchdog or remove a kill switch to get trading back;
 - move funds, withdraw or transfer: the system cannot, and no runbook step asks for it.
+
+## New loss baseline (testnet and paper only)
+
+`POST /v1/oms/baseline/rebase` with the operator token and
+`{"quote_asset": "USDT", "reason": "<why, 10+ chars>"}` sets one account's start-of-day and peak
+equity to its current equity, so past losses no longer count toward the 1% daily loss and 5%
+drawdown. It forgets losses, so it is refused on any account that can hold real money and on an
+account whose exposure is unknown. Every use is journaled (`RISK_BASELINE_REBASED`) with the values
+it replaced and shows on the floor's risk desk.
