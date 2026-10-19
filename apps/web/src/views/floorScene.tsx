@@ -309,7 +309,7 @@ export function canRender3d(): boolean {
   return webgl;
 }
 
-class Fallback extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
+export class Fallback extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   componentDidCatch() { this.props.onError(); }

@@ -79,6 +79,9 @@ uvicorn apps.executor.main:app --port 8100   # executor (needs EXECUTOR_* and PR
   included). The live 3D floor loads on demand, never preloaded: JS chunks `Floor3DThree-*` (three.js,
   ≤ 600 KB), `Floor3D-*` and `Floor3DAssets-*` (≤ 120 KB each, ≤ 800 KB together), plus its CC0 people
   and textures in `public/floor3d/` (≤ 3 MB, ≤ 1 MB per file; sources and licences in its `ASSETS.md`).
+  The stylized building view ("Realista | Prédio" toggle, `src/views/floorBuilding/`) is its own
+  on-demand chunk `FloorBuilding-*` (≤ 150 KB, reuses `Floor3DThree-*`), loaded only when selected.
+  `localStorage` is allowed only in `src/views/floorViewPref.ts`, for that view choice.
 
 ## PRAGMA-CORE 2.0
 

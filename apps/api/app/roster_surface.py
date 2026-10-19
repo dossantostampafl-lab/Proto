@@ -56,7 +56,11 @@ async def _journal(event_type: str, payload: dict[str, Any], key: str) -> None:
 def roster() -> AgentRoster:
     global _roster
     if _roster is None:
-        _roster = AgentRoster(control_state.current().engine, recorder=_journal)
+        _roster = AgentRoster(
+            control_state.current().engine,
+            recorder=_journal,
+            lab_strategies=settings.agent_lab_strategies_enabled,
+        )
     return _roster
 
 
@@ -183,8 +187,25 @@ def ema_params(instrument_id: str) -> tuple[int, int] | None:
             agent.active
             and agent.slot.kind is SlotKind.EMA
             and agent.slot.instrument_id == instrument_id
+            and "fast" in agent.params
         ):
             return int(agent.params["fast"]), int(agent.params["slow"])
+    return None
+
+
+def lab_params(instrument_id: str) -> dict[str, Any] | None:
+    """Lab strategy params of the ACTIVE own-strategy agent on ``instrument_id``, if it has one."""
+
+    if _roster is None:
+        return None
+    for agent in _roster.agents():
+        if (
+            agent.active
+            and agent.slot.kind is SlotKind.EMA
+            and agent.slot.instrument_id == instrument_id
+            and "lab_strategy" in agent.params
+        ):
+            return dict(agent.params)
     return None
 
 

@@ -705,3 +705,51 @@ async def test_a_replacement_ema_agent_trades_its_own_parameters(monkeypatch, su
     assert (replaced.policy.fast, replaced.policy.slow) == (8, 21)
     assert strategy_surface._strategy_for(SOL) is strategy_surface.strategy
     strategy_surface.reset_strategy_state()
+
+
+async def test_lab_strategies_stay_off_unless_flagged(monkeypatch, surfaces) -> None:
+    from apps.api.app import strategy_surface
+    from services.agents import roster as roster_module
+    from services.research.live import LabSignalStrategy
+
+    spec = {"strategy": "ts_momentum", "lookback": 3, "vol_period": 5}
+    monkeypatch.setattr(
+        roster_module, "LAB_PARAM_LADDER", {BTC: ({"spec": spec, "timeframe_minutes": 60},)}
+    )
+    configure(monkeypatch)
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+    await roster_surface.ready()
+    assert strategy_surface._strategy_for(BTC) is strategy_surface.strategy  # flag off: EMA
+    assert roster_surface.lab_params(BTC) is None
+
+    roster_surface.reset_roster_state()
+    configure(monkeypatch, agent_lab_strategies_enabled=True, agent_lab_warmup_klines=True)
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    await roster_surface.ready()
+    chosen = strategy_surface._strategy_for(BTC)
+    assert isinstance(chosen, LabSignalStrategy) and chosen.spec == spec
+    assert strategy_surface._strategy_for(BTC) is chosen  # one adapter per lab strategy
+    assert strategy_surface._strategy_for(SOL) is strategy_surface.strategy  # no ladder there
+    assert roster_surface.ema_params(BTC) is None
+
+    warmed = []
+    monkeypatch.setattr(
+        strategy_surface, "lab_klines", lambda i, m, n: warmed.append((i, m, n)) or []
+    )
+    monkeypatch.setattr(
+        strategy_surface,
+        "settings",
+        roster_surface.settings.model_copy(update={"agent_lab_warmup_klines": False}),
+    )
+    await strategy_surface._warm_lab(chosen, BTC)  # warm-up flag off: no fetch
+    assert warmed == []
+    monkeypatch.setattr(
+        strategy_surface,
+        "settings",
+        roster_surface.settings.model_copy(update={"agent_lab_warmup_klines": True}),
+    )
+    await strategy_surface._warm_lab(chosen, BTC)
+    await strategy_surface._warm_lab(chosen, BTC)  # once per instrument
+    assert warmed == [(BTC, 60, chosen.history)]
+    strategy_surface.reset_strategy_state()

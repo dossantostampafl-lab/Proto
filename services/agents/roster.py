@@ -88,6 +88,37 @@ EMA_PARAM_LADDER: tuple[tuple[int, int], ...] = (
     (4, 16),
     (15, 40),
 )
+# Lab strategies (docs/research/strategy-lab-2026-10-19.md), per instrument. Used only when
+# the roster is built with lab_strategies=True (settings.agent_lab_strategies_enabled, off by
+# default): replacement n of an own-strategy slot then trades the n-th entry. Each entry is a
+# services.research.strategies spec (signals only, always with a stop and a take-profit).
+LAB_STRATEGY_PREFIX = "proto-lab-"  # services.research.live.LAB_STRATEGY_PREFIX
+# Recommendation of the 2026-10-19 lab run: an hourly, regime-filtered time-series momentum
+# (long while the 7-day and 30-day returns are positive and ATR% sits in the upper half of its
+# 30-day range; 3-ATR stop, 12-ATR take-profit). Positive out of sample on all three symbols
+# after costs, but NOT statistically significant after deflation: a forward-test candidate.
+LAB_HOURLY_TS_MOMENTUM: dict[str, Any] = {
+    "strategy": "regime",
+    "inner": {
+        "strategy": "ts_momentum",
+        "lookback": 168,
+        "confirm_lookback": 720,
+        "vol_period": 72,
+        "target_vol": 0.5,
+        "bars_per_year": 8760.0,
+        "atr_period": 14,
+        "stop_atr": 3.0,
+        "target_atr": 12.0,
+    },
+    "atr_period": 14,
+    "window": 720,
+    "low": 0.5,
+    "high": 1.0,
+}
+LAB_PARAM_LADDER: dict[str, tuple[dict[str, Any], ...]] = {
+    f"BINANCE_SPOT:{symbol}": ({"spec": LAB_HOURLY_TS_MOMENTUM, "timeframe_minutes": 60},)
+    for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT")
+}
 # Replacement n of a TradingView slot ignores alerts weaker than the n-th strength.
 TRADINGVIEW_MIN_STRENGTH_LADDER: tuple[str, ...] = ("0", "0.2", "0.4", "0.5", "0.6", "0.7")
 
@@ -129,18 +160,45 @@ INITIAL_SLOTS: tuple[Slot, ...] = tuple(
 
 
 def slot_of(signal: Signal) -> Slot | None:
-    """The slot a signal belongs to, or None when no agent trades that kind of signal."""
+    """The slot a signal belongs to, or None when no agent trades that kind of signal.
 
-    if signal.source is SignalSource.PROTO_STRATEGY and signal.strategy_id == EMA_STRATEGY_ID:
+    PROTO's own slot takes the EMA cross and, for agents spawned with a lab strategy, the lab
+    strategy's signals (``proto-lab-*``); which agent accepts which id is ``TraderAgent.accepts``.
+    """
+
+    if signal.source is SignalSource.PROTO_STRATEGY and (
+        signal.strategy_id == EMA_STRATEGY_ID or signal.strategy_id.startswith(LAB_STRATEGY_PREFIX)
+    ):
         return Slot(SlotKind.EMA, signal.instrument_id)
     if signal.source is SignalSource.TRADINGVIEW:
         return Slot(SlotKind.TRADINGVIEW, signal.instrument_id)
     return None
 
 
-def params_for(kind: SlotKind, generation: int) -> dict[str, Any]:
-    """Deterministic parameters of the ``generation``-th agent of a slot."""
+def params_for(
+    kind: SlotKind,
+    generation: int,
+    *,
+    instrument_id: str | None = None,
+    lab_strategies: bool = False,
+) -> dict[str, Any]:
+    """Deterministic parameters of the ``generation``-th agent of a slot.
 
+    With ``lab_strategies`` (``settings.agent_lab_strategies_enabled``, off by default) an
+    own-strategy slot whose instrument has a lab ladder trades the ladder's n-th lab strategy
+    instead of an EMA pair. Without it, nothing changes.
+    """
+
+    if kind is SlotKind.EMA and lab_strategies and instrument_id in LAB_PARAM_LADDER:
+        from services.research.live import lab_strategy_id
+
+        ladder = LAB_PARAM_LADDER[instrument_id]
+        entry = ladder[generation % len(ladder)]
+        return {
+            "lab_strategy": lab_strategy_id(entry["spec"]),
+            "timeframe_minutes": entry["timeframe_minutes"],
+            "spec": entry["spec"],
+        }
     if kind is SlotKind.EMA:
         fast, slow = EMA_PARAM_LADDER[generation % len(EMA_PARAM_LADDER)]
         return {"fast": fast, "slow": slow}
@@ -295,6 +353,10 @@ class TraderAgent:
 
         if slot_of(signal) != self.slot:
             return False
+        if signal.source is SignalSource.PROTO_STRATEGY:
+            wanted = self.params.get("lab_strategy", EMA_STRATEGY_ID)
+            if signal.strategy_id != wanted:
+                return False
         floor = self.params.get("min_strength")
         return floor is None or Decimal(str(signal.strength)) >= Decimal(str(floor))
 
@@ -480,8 +542,10 @@ class AgentRoster:
         recorder: Recorder | None = None,
         slots: Iterable[Slot] = INITIAL_SLOTS,
         clock: Callable[[], datetime] = _utc_now,
+        lab_strategies: bool = False,
     ) -> None:
         self._engine = engine
+        self._lab_strategies = lab_strategies
         self._recorder = recorder
         self._slots = tuple(slots)
         self._clock = clock
@@ -688,7 +752,12 @@ class AgentRoster:
             sequence=sequence,
             name=name,
             slot=slot,
-            params=params_for(slot.kind, generation),
+            params=params_for(
+                slot.kind,
+                generation,
+                instrument_id=slot.instrument_id,
+                lab_strategies=self._lab_strategies,
+            ),
             capital_brl=AGENT_STARTING_CAPITAL,
             status=AgentStatus.ACTIVE,
             generation=generation,

@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, WS_BASE } from "../api";
 import type { Shared } from "../main";
 import { Button, Panel, Tag } from "../ui";
 import { DeskBoundary, DeskDrawer, DeskFailed, useDeskSelection, useXpLane, XpStrip } from "./floorDesks";
 import { hms, TONE_LABEL } from "./floorModel";
 
-import { type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone, type WatchdogSummary } from "./floorScene";
+import { useFloorViewMode } from "./floorViewPref";
+import { canRender3d, Fallback, type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone, type WatchdogSummary } from "./floorScene";
 
 function PromotionPath({ scopes }: { scopes: PromotionScope[] | undefined }) {
   if (!scopes) return <p className="empty">Promotion data unavailable.</p>;
@@ -84,6 +85,23 @@ function DeskCards({ latest, active, selected, onSelect }: {
 
 const ACTIVE_MS = 7000;
 
+// The stylized building ("Prédio") is its own on-demand chunk, loaded only when that view is chosen.
+const FloorBuilding = lazy(() => import("./floorBuilding/FloorBuilding"));
+
+/** "Realista | Prédio": which view of the same live floor is shown; the choice is remembered on this device. */
+function ViewToggle({ mode, choose }: { mode: "realistic" | "building"; choose: (m: "realistic" | "building") => void }) {
+  return (
+    <div className="fl-toggle" role="group" aria-label="Vista do pregão">
+      <button type="button" aria-pressed={mode === "realistic"} onClick={() => choose("realistic")}>Realista</button>
+      <button type="button" aria-pressed={mode === "building"} onClick={() => choose("building")}>Prédio</button>
+    </div>
+  );
+}
+
+function BuildingUnavailable({ text }: { text: string }) {
+  return <div className="fl-scene fb-scene" role="status"><p className="fl-3d-loading">{text}</p></div>;
+}
+
 /** Bootstrap from /v1/floor/state, then stream /ws/floor; state is re-read every 5 s for accounts and controls. */
 function useFloor() {
   const [state, setState] = useState<FloorState | null>(null);
@@ -159,6 +177,8 @@ export function Floor({ market }: Shared) {
   const floor = useFloor();
   const { selected, select } = useDeskSelection();
   const xp = useXpLane();
+  const [viewMode, chooseView] = useFloorViewMode();
+  const [buildingFailed, setBuildingFailed] = useState(false);
   const closeDesk = useCallback(() => select(null), [select]);
   const pan = useRef<HTMLDivElement>(null);
   // On narrow screens the scene pans; start centred on the desks, not on the window wall.
@@ -176,13 +196,22 @@ export function Floor({ market }: Shared) {
         title="Trading floor"
         className="floor-stage"
         actions={<span className="floor-badges">
+          <ViewToggle mode={viewMode} choose={chooseView} />
           {state ? <Tag source={state.data_mode === "TESTNET" ? "testnet" : "paper"} /> : <span className="floor-stale">mode unavailable</span>}
           <span className={floor.connected ? "floor-live" : "floor-stale"}>{floor.connected ? "agent stream connected" : "agent stream reconnecting"}</span>
           <span className={market.connected ? "floor-live" : "floor-stale"}>{market.connected ? "market stream connected" : "market stream offline · REST polling"}</span>
           {!floor.stateFresh && <span className="floor-stale">floor state {state == null ? "unavailable" : "last known"}</span>}
         </span>}
       >
-        <div className="fl-pan" ref={pan}><Scene market={market} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} active={floor.active} xp={xp.lane.state} onSelect={select} selected={selected} /></div>
+        {viewMode === "building" ? (
+          buildingFailed || !canRender3d() ? <BuildingUnavailable text="Prédio indisponível: este dispositivo não roda WebGL. Use a vista Realista." /> : (
+            <Fallback onError={() => setBuildingFailed(true)}>
+              <Suspense fallback={<BuildingUnavailable text="Carregando prédio…" />}>
+                <FloorBuilding market={market} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} active={floor.active} xp={xp.lane} />
+              </Suspense>
+            </Fallback>
+          )
+        ) : <div className="fl-pan" ref={pan}><Scene market={market} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} active={floor.active} xp={xp.lane.state} onSelect={select} selected={selected} /></div>}
         <p className="fl-hint">Tap or click a desk to open it: live data, its recent actions and, with the operator token, its actions. Drag to orbit the room; the desk cards below open the same desks from the keyboard.</p>
         <DeskCards latest={floor.latest} active={floor.active} selected={selected} onSelect={select} />
       </Panel>
