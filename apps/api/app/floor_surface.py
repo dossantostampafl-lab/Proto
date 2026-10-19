@@ -284,6 +284,7 @@ async def floor_state(limit: int = 80) -> dict[str, object]:
             "start_of_day_equity": str(state.start_of_day_equity),
             "peak_equity": str(state.peak_equity),
             "gross_exposure": str(state.gross_exposure),
+            "reference_capital": str(state.reference_capital),
             "positions": {k: str(v) for k, v in state.positions.items() if v},
         }
 

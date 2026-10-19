@@ -13,6 +13,10 @@ RUN npm run build \
 
 FROM python:3.13-slim
 
+# Build provenance (non-secret): the commit this image was built from, shown by /health.
+ARG PROTO_GIT_COMMIT_SHA=""
+ENV PROTO_GIT_COMMIT_SHA=$PROTO_GIT_COMMIT_SHA
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     APP_ENV=production \

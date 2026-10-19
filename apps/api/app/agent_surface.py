@@ -127,8 +127,10 @@ async def _refresh_portfolio(instrument_id: str) -> None:
     if instrument is None:
         return
     state = await ledger_account_state(instrument.quote_asset)
+    # Sized on the account's own reference capital (R$ 10,000 in its quote currency), as the
+    # Risk Engine checks it; an unknown one sizes nothing.
     _portfolio_views[instrument_id] = PortfolioView(
-        equity=state.equity,
+        equity=min(state.equity, state.reference_capital),
         position_quantity=state.positions.get(instrument_id, Decimal("0")),
     )
 
