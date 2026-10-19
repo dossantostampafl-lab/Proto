@@ -14,6 +14,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from apps.api.app import agent_surface, e2e_drill, oms_surface, risk_surface, roster_surface
 from services.agents import build_exit
 from services.execution.catalog import PAPER_INSTRUMENTS
@@ -237,7 +239,7 @@ def test_the_drill_round_trip_sells_back_what_it_bought_and_passes(monkeypatch) 
     ]
     [sell] = _sells(executor)
     assert sell.quantity == Decimal("0.0153") and sell.reduce_only and sell.side == "SELL"
-    assert sell.instrument_id == BTC and sell.limit_price == BID
+    assert sell.instrument_id == BTC and sell.limit_price == Decimal("59760.00")
     assert _step(report, "flat")["residual"] == "0"
     # Back where it started: the agent's coins and the faucet's are untouched.
     assert executor.own() == Decimal("0.002") and executor.balance["BTC"] == FAUCET + Decimal(
@@ -426,3 +428,33 @@ def test_build_exit_is_a_reduce_only_sell_capped_by_the_holding() -> None:
     assert exit_of("0.01", "1", None).abstain_reason == "no market data"
     stale = Quote(bid=BID, ask=ASK, observed_at=now - timedelta(minutes=1))
     assert exit_of("0.01", "1", stale).abstain_reason == "stale market data"
+
+
+def test_an_exit_can_price_under_the_bid_but_stays_inside_the_risk_collar() -> None:
+    from services.agents.fusion import MAX_EXIT_SLIPPAGE_BPS
+    from services.risk.engine import RiskPolicy
+
+    instrument = PAPER_INSTRUMENTS[BTC]
+    now = datetime.now(UTC)
+    quote = Quote(bid=Decimal("80000"), ask=Decimal("80000.01"), observed_at=now)
+    exit_ = build_exit(
+        instrument=instrument,
+        quote=quote,
+        quantity=Decimal("0.1"),
+        position_quantity=Decimal("0.1"),
+        now=now,
+        signal_ids=(uuid4(),),
+        slippage_bps=Decimal("40"),
+    ).intent
+    assert exit_ is not None and exit_.limit_price == Decimal("79680")  # 40 bps under the bid
+    assert MAX_EXIT_SLIPPAGE_BPS < RiskPolicy().price_collar_bps  # never refused by the collar
+    with pytest.raises(ValueError):
+        build_exit(
+            instrument=instrument,
+            quote=quote,
+            quantity=Decimal("0.1"),
+            position_quantity=Decimal("0.1"),
+            now=now,
+            signal_ids=(uuid4(),),
+            slippage_bps=Decimal("60"),
+        )

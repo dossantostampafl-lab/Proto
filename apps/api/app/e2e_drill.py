@@ -28,7 +28,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException
 
-from services.agents.fusion import Candidate, SizingPolicy, build_exit
+from services.agents.fusion import MAX_EXIT_SLIPPAGE_BPS, Candidate, SizingPolicy, build_exit
 from services.execution import (
     ReleaseStage,
     Signal,
@@ -55,6 +55,8 @@ _TERMINAL = {"FILLED", "CANCELED", "REJECTED"}
 _REACHED_VENUE = {"ACKNOWLEDGED", "PARTIALLY_FILLED", "FILLED", "CANCELED"}
 _BOUNDARY = {"financial_connectivity": False, "real_money_execution": False}
 _EXIT_POLICY = SizingPolicy(strategy_id=STRATEGY, model_version="e2e-drill-exit-v1")
+# Exits price this far under the bid, inside the Risk Engine's 50 bps collar.
+EXIT_SLIPPAGE_BPS = MAX_EXIT_SLIPPAGE_BPS
 
 _latest: dict[str, Any] | None = None
 _lock = asyncio.Lock()
@@ -192,6 +194,9 @@ async def _sell(
         signal_ids=signal_ids,
         policy=_EXIT_POLICY,
         stage=ReleaseStage.PAPER,
+        # The testnet book trails the public reference quote; at the bare bid an IOC exit
+        # often finds no buyer there (2026-10-19: 0.1071 BTC cleanup CANCELED, 0 filled).
+        slippage_bps=EXIT_SLIPPAGE_BPS,
     )
     if candidate.intent is None:
         return candidate, None, None

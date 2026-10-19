@@ -246,6 +246,10 @@ def build_candidate(
     return Candidate(intent, None, {k: str(v) for k, v in sizing.items()})
 
 
+# Below the Risk Engine's 50 bps price collar, so a priced-down exit is never refused for it.
+MAX_EXIT_SLIPPAGE_BPS = Decimal("40")
+
+
 def build_exit(
     *,
     instrument: TradableInstrument,
@@ -256,13 +260,19 @@ def build_exit(
     signal_ids: tuple[UUID, ...],
     policy: SizingPolicy = DEFAULT_SIZING_POLICY,
     stage: ReleaseStage = ReleaseStage.PAPER,
+    slippage_bps: Decimal = Decimal("0"),
 ) -> Candidate:
     """A reduce-only SELL of at most ``quantity``: never more than ``position_quantity``.
 
     The quantity is floored to the lot and priced at the bid (floored to the tick) as an IOC
     limit, so it can only close part or all of a holding, never open a short. It still needs a
     Risk Engine permit like any other intent; ``signal_ids`` name the signals behind the exit.
+    ``slippage_bps`` prices the exit that far under the bid so it crosses a venue whose book
+    trails the reference quote (the testnet); it stays inside the Risk Engine's price collar.
     """
+
+    if not Decimal("0") <= slippage_bps <= MAX_EXIT_SLIPPAGE_BPS:
+        raise ValueError(f"slippage_bps must be in [0, {MAX_EXIT_SLIPPAGE_BPS}]")
 
     def abstain(reason: str, **sizing: object) -> Candidate:
         return Candidate(None, reason, {k: str(v) for k, v in sizing.items()})
@@ -278,7 +288,8 @@ def build_exit(
         return abstain(problem[0], **problem[1], **sizing)
     assert quote is not None
     exit_quantity = _floor_to_lot(min(requested, held), instrument)
-    limit_price = (quote.bid / instrument.tick_size).to_integral_value(
+    floor_price = quote.bid * (1 - slippage_bps / Decimal("10000"))
+    limit_price = (floor_price / instrument.tick_size).to_integral_value(
         ROUND_FLOOR
     ) * instrument.tick_size
     violation = instrument.order_violation(exit_quantity, limit_price)
