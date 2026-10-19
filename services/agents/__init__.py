@@ -1,7 +1,15 @@
 """Hybrid trading agents: deterministic fusion and sizing, AI review that can only shrink."""
 
 from .evaluation import ReplayCase, ReviewerEvaluation, evaluate_reviewer
-from .fusion import Candidate, FusionDecision, FusionPolicy, SizingPolicy, build_candidate, fuse
+from .fusion import (
+    Candidate,
+    FusionDecision,
+    FusionPolicy,
+    SizingPolicy,
+    build_candidate,
+    build_exit,
+    fuse,
+)
 from .pipeline import AgentDecision, DecisionOutcome, HybridDecisionPipeline, PortfolioView
 from .review import (
     AgentReview,
@@ -32,6 +40,7 @@ __all__ = [
     "Verdict",
     "apply_review",
     "build_candidate",
+    "build_exit",
     "evaluate_reviewer",
     "fuse",
 ]

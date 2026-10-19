@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from apps.api.app import e2e_drill, floor_surface, main, signal_surface, strategy_surface
+from apps.api.app import floor_surface, main, signal_surface, strategy_surface
 from apps.api.app.settings import Settings
 from services.execution import SignalDirection, SignalSource
 from services.execution.venue import Quote
@@ -134,119 +134,7 @@ def test_behind_the_local_proxy_the_alert_source_is_the_last_forwarded_hop(monke
     assert signal_surface._client_ip(_request("127.0.0.1", None)) == "127.0.0.1"
 
 
-# ---------- closed-loop drill ----------
-
-
-class FakeExecutor:
-    def __init__(self, statuses: list[str], consistent: bool = True) -> None:
-        self.statuses, self.consistent, self.cancelled = statuses, consistent, []
-
-    async def orders(self, limit: int = 50):
-        status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
-        return {"orders": [{"client_order_id": "c1", "status": status, "filled_quantity": "0.001"}]}
-
-    async def order_action(self, client_order_id: str, action: str):
-        self.cancelled.append((client_order_id, action))
-        self.statuses = ["CANCELED"]
-        return {}
-
-
-def _wire(monkeypatch, executor: FakeExecutor, *, approved: bool = True, proposal: bool = True):
-    from apps.api.app import agent_surface, oms_surface
-
-    monkeypatch.setattr(
-        e2e_drill,
-        "settings",
-        SimpleNamespace(oms_execution_backend="executor", live_market_source="BINANCE"),
-    )
-    monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
-    monkeypatch.setattr(oms_surface, "executor_client", lambda: executor)
-
-    async def reconcile():
-        return {"consistent": executor.consistent, "divergences": []}
-
-    monkeypatch.setattr(oms_surface, "reconcile", reconcile)
-    monkeypatch.setattr(
-        e2e_drill,
-        "live_quote",
-        lambda i, market_source: Quote(
-            bid=Decimal("100"), ask=Decimal("101"), observed_at=datetime.now(UTC)
-        ),
-    )
-    buffered = []
-    monkeypatch.setattr(agent_surface, "buffer_signal", buffered.append)
-    monkeypatch.setattr(agent_surface, "forget_signal", buffered.remove)
-
-    async def evaluate(instrument_id):
-        assert buffered and buffered[0].strategy_id == "e2e-drill"
-        decision = SimpleNamespace(
-            proposal=object() if proposal else None,
-            outcome=SimpleNamespace(value="PROPOSED" if proposal else "ABSTAINED"),
-            abstain_reason=None if proposal else "no edge",
-        )
-        risk = SimpleNamespace(approved=approved, rejections=() if approved else ("collar",))
-        order = {"client_order_id": "c1", "status": "SUBMITTED"} if approved and proposal else None
-        return decision, risk, order
-
-    monkeypatch.setattr(agent_surface, "evaluate", evaluate)
-
-    async def journal(**_):
-        return SimpleNamespace(created=True)
-
-    monkeypatch.setattr(e2e_drill, "record_operational_event", journal)
-    return buffered
-
-
-async def _no_sleep(_):
-    return None
-
-
-def test_the_drill_passes_when_the_order_reaches_the_testnet_and_the_books_reconcile(
-    monkeypatch,
-) -> None:
-    executor = FakeExecutor(["ACKNOWLEDGED", "FILLED"])
-    buffered = _wire(monkeypatch, executor)
-    report = asyncio.run(e2e_drill.run_drill(sleep=_no_sleep))
-    assert report["verdict"] == "PASSED", report
-    assert [s["step"] for s in report["steps"]] == [
-        "executor_backend",
-        "live_quote",
-        "agent_decision",
-        "risk_permit",
-        "dispatched",
-        "venue_order",
-        "reconciliation",
-    ]
-    assert report["venue_environment"] == "TESTNET" and report["real_money_execution"] is False
-    assert len(report["digest"]) == 64 and buffered == []  # the drill signal never lingers
-    assert executor.cancelled == []
-
-
-def test_a_resting_drill_order_is_cancelled_and_still_counts_as_reaching_the_venue(
-    monkeypatch,
-) -> None:
-    executor = FakeExecutor(["ACKNOWLEDGED"])
-    _wire(monkeypatch, executor)
-    report = asyncio.run(e2e_drill.run_drill(sleep=_no_sleep))
-    assert executor.cancelled == [("c1", "cancel")]
-    venue = next(s for s in report["steps"] if s["step"] == "venue_order")
-    assert venue["status"] == "CANCELED" and venue["cancelled_after_wait"] is True
-    assert report["verdict"] == "PASSED"
-
-
-def test_a_refused_permit_or_a_divergence_fails_the_drill(monkeypatch) -> None:
-    _wire(monkeypatch, FakeExecutor(["FILLED"]), approved=False)
-    refused = asyncio.run(e2e_drill.run_drill(sleep=_no_sleep))
-    assert refused["verdict"] == "FAILED" and refused["steps"][-1]["step"] == "risk_permit"
-    _wire(monkeypatch, FakeExecutor(["FILLED"], consistent=False))
-    diverged = asyncio.run(e2e_drill.run_drill(sleep=_no_sleep))
-    assert diverged["verdict"] == "FAILED" and diverged["steps"][-1] == {
-        "step": "reconciliation",
-        "ok": False,
-        "divergences": 0,
-    }
-    assert refused["digest"] != diverged["digest"]
-    e2e_drill.reset_drill_state()
+# ---------- closed-loop drill (the drill itself: tests/unit/test_e2e_drill.py) ----------
 
 
 def test_the_floor_shows_strategy_signals_and_the_drill_verdict() -> None:
