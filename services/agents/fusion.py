@@ -162,6 +162,18 @@ def _floor_to_lot(quantity: Decimal, instrument: TradableInstrument) -> Decimal:
     return lots * instrument.lot_size
 
 
+def _quote_problem(
+    quote: Quote | None, now: datetime, policy: SizingPolicy
+) -> tuple[str, dict[str, object]] | None:
+    if quote is None:
+        return "no market data", {}
+    if now - quote.observed_at > policy.max_quote_age:
+        return "stale market data", {"quote_age_s": (now - quote.observed_at).total_seconds()}
+    if not (0 < quote.bid < quote.ask):
+        return "crossed or invalid quote", {}
+    return None
+
+
 def build_candidate(
     decision: FusionDecision,
     *,
@@ -180,12 +192,9 @@ def build_candidate(
 
     if decision.direction is SignalDirection.FLAT:
         return abstain(decision.reason)
-    if quote is None:
-        return abstain("no market data")
-    if now - quote.observed_at > policy.max_quote_age:
-        return abstain("stale market data", quote_age_s=(now - quote.observed_at).total_seconds())
-    if not (0 < quote.bid < quote.ask):
-        return abstain("crossed or invalid quote")
+    if (problem := _quote_problem(quote, now, policy)) is not None:
+        return abstain(problem[0], **problem[1])
+    assert quote is not None
 
     conviction = Decimal(str(min(abs(decision.score), 1.0)))
     if decision.direction is SignalDirection.SHORT:
@@ -235,3 +244,62 @@ def build_candidate(
         created_at=now,
     )
     return Candidate(intent, None, {k: str(v) for k, v in sizing.items()})
+
+
+def build_exit(
+    *,
+    instrument: TradableInstrument,
+    quote: Quote | None,
+    quantity: Decimal,
+    position_quantity: Decimal,
+    now: datetime,
+    signal_ids: tuple[UUID, ...],
+    policy: SizingPolicy = DEFAULT_SIZING_POLICY,
+    stage: ReleaseStage = ReleaseStage.PAPER,
+) -> Candidate:
+    """A reduce-only SELL of at most ``quantity``: never more than ``position_quantity``.
+
+    The quantity is floored to the lot and priced at the bid (floored to the tick) as an IOC
+    limit, so it can only close part or all of a holding, never open a short. It still needs a
+    Risk Engine permit like any other intent; ``signal_ids`` name the signals behind the exit.
+    """
+
+    def abstain(reason: str, **sizing: object) -> Candidate:
+        return Candidate(None, reason, {k: str(v) for k, v in sizing.items()})
+
+    requested = max(quantity, Decimal("0"))
+    held = max(position_quantity, Decimal("0"))
+    sizing: dict[str, object] = {"requested_quantity": requested, "position_quantity": held}
+    if requested == 0:
+        return abstain("nothing to close", **sizing)
+    if held == 0:
+        return abstain("no position to close", **sizing)
+    if (problem := _quote_problem(quote, now, policy)) is not None:
+        return abstain(problem[0], **problem[1], **sizing)
+    assert quote is not None
+    exit_quantity = _floor_to_lot(min(requested, held), instrument)
+    limit_price = (quote.bid / instrument.tick_size).to_integral_value(
+        ROUND_FLOOR
+    ) * instrument.tick_size
+    violation = instrument.order_violation(exit_quantity, limit_price)
+    if exit_quantity <= 0 or violation is not None:
+        return abstain(violation or "below one lot", quantity=exit_quantity, **sizing)
+    intent = TradeIntent(
+        intent_id=uuid4(),
+        instrument_id=instrument.instrument_id,
+        venue=instrument.venue,
+        side="SELL",
+        quantity=exit_quantity,
+        order_type=OrderType.LIMIT,
+        limit_price=limit_price,
+        time_in_force=TimeInForce.IOC,
+        reduce_only=True,
+        strategy_id=policy.strategy_id,
+        model_version=policy.model_version,
+        signal_ids=signal_ids,
+        stage=stage,
+        created_at=now,
+    )
+    return Candidate(
+        intent, None, {k: str(v) for k, v in {**sizing, "quantity": exit_quantity}.items()}
+    )
