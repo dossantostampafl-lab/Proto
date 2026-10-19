@@ -192,6 +192,26 @@ export function drawBlob(g: Ctx, w: number, h: number) {
   g.clearRect(0, 0, w, h); g.fillStyle = grad; g.fillRect(0, 0, w, h);
 }
 
+/** An agent's name tag: code and virtual equity, and what that capital is. */
+export function drawTag(g: Ctx, w: number, h: number, code: string, equity: string, capital: string) {
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = "rgba(14,16,19,0.84)";
+  g.beginPath(); g.roundRect(3, 3, w - 6, h - 6, 16); g.fill();
+  g.strokeStyle = "rgba(240,194,122,0.75)"; g.lineWidth = 3; g.stroke();
+  text(g, `${code} · ${equity}`, w / 2, h / 2 - 4, 34, INK, 700, "center");
+  text(g, capital, w / 2, h / 2 + 30, 22, "#f0c27a", 600, "center");
+}
+
+/** A roster agent's own monitor: code, slot and virtual equity, from /v1/agents/roster only. */
+export function drawAgentScreen(g: Ctx, w: number, h: number, code: string | null, slot: string, equity: string, capital: string) {
+  background(g, w, h, code !== null);
+  g.fillStyle = "#f0c27a"; g.fillRect(0, 0, w, 8);
+  text(g, code ?? "SEAT EMPTY", 18, 46, 28, INK, 700);
+  text(g, slot, 18, 80, 20, DIM);
+  text(g, code ? equity : "—", 18, 150, 44, INK, 600);
+  text(g, capital, 18, h - 24, 19, "#f0c27a", 600);
+}
+
 /** A dusk skyline for the windows: decoration, drawn once. */
 export function drawCity(g: Ctx, w: number, h: number) {
   const sky = g.createLinearGradient(0, 0, 0, h);

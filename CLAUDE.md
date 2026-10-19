@@ -76,8 +76,9 @@ uvicorn apps.executor.main:app --port 8100   # executor (needs EXECUTOR_* and PR
 - **Contract check.** `apps/web/scripts/contract-check.mjs` enforces the provenance and boundary
   labels and forbids real-money wording in the UI. Keep it passing.
 - **Bundle budget.** At most 450 KB per JS file and 700 KB loaded up front (the fallback floor photo
-  included). The live 3D floor (three.js) is the one on-demand chunk (`Floor3D-*.js`): at most 600 KB,
-  never preloaded, 1300 KB of assets in total.
+  included). The live 3D floor loads on demand, never preloaded: JS chunks `Floor3DThree-*` (three.js,
+  ≤ 600 KB), `Floor3D-*` and `Floor3DAssets-*` (≤ 120 KB each, ≤ 800 KB together), plus its CC0 people
+  and textures in `public/floor3d/` (≤ 3 MB, ≤ 1 MB per file; sources and licences in its `ASSETS.md`).
 
 ## PRAGMA-CORE 2.0
 
