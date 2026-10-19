@@ -108,10 +108,20 @@ assert.match(floor3d, /prefers-reduced-motion: reduce/, "the 3D floor must respe
 assert.match(floor3d, /IntersectionObserver/, "the 3D floor pauses while off-screen");
 assert.match(floor3d, /visibilitychange/, "the 3D floor pauses while the tab is hidden");
 assert.match(floor3d, /instance\.dispose\(\)/, "the 3D floor disposes its GPU resources on unmount");
-assert.doesNotMatch(floor3d, /shadowMap\.enabled = true|EffectComposer/, "the 3D floor stays cheap: blob shadows, no shadow maps or post-processing");
+assert.doesNotMatch(floor3d, /EffectComposer|MeshoptDecoder|DRACOLoader|KTX2Loader/, "the 3D floor needs no post-processing and no WebAssembly decoder (the page CSP has no wasm-unsafe-eval)");
+assert.match(floor3d, /shadow\.mapSize\.set\(coarse \? 1024 : 2048/, "touch devices get the smaller shadow map");
+assert.match(floor3d, /import\("\.\/Floor3DAssets"\)/, "people and textures load on demand, after the scene chunk");
+assert.match(floor3d, /role="progressbar"/, "the 3D floor shows its asset download progress");
+// Trader agents: only what /v1/agents/roster says, labelled as virtual capital; an elimination walks out.
+assert.match(floor3d, /"\/v1\/agents\/roster"/, "agent name tags come from the roster API");
+assert.match(floor3d, /raw\.capital !== "VIRTUAL"/, "a roster that is not virtual capital is not shown");
+assert.match(floor3d, /VIRTUAL \$\{mode === "TESTNET"/, "agent tags say the capital is virtual");
+assert.match(floor3d, /AGENT ROSTER UNAVAILABLE/, "an unavailable roster says so and shows no tags");
+assert.match(floor3d, /a\.event_type === "AGENT_ELIMINATED"\) this\.walkOut\(seat\)/, "an eliminated agent walks out");
+assert.match(floor3d, /finiteDecimal\(v\)/, "agent equity is printed from the decimal string, never estimated");
 assert.match(floor3d, /if \(first \|\| !data\.busy\[a\.station\]\) continue;/, "operators carry work only for fresh live events, never for history");
 assert.match(floor3d, /select\.current\?\.\(drawerOf\(id\)\)/, "tapping a 3D desk opens the same drawer as the photo room");
-for (const label of ["LIVE PUBLIC", "LAST KNOWN / REST", "PAPER / SIM", "TESTNET · NO REAL MONEY", "MODE UNAVAILABLE", "FLOOR STATE UNAVAILABLE", "STALE", "HALTED", "ARMED", "no feed", "NOT CONFIGURED", "NO REAL MONEY"]) {
+for (const label of ["LIVE PUBLIC", "LAST KNOWN / REST", "PAPER / SIM", "TESTNET · NO REAL MONEY", "MODE UNAVAILABLE", "FLOOR STATE UNAVAILABLE", "STALE", "HALTED", "ARMED", "no feed", "NOT CONFIGURED", "NO REAL MONEY", "ROSTER UNAVAILABLE"]) {
   assert.ok(floor3d.includes(label), `3D floor must show ${label}`);
 }
 

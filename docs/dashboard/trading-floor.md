@@ -1,32 +1,49 @@
 # Trading floor view (Phase 7 preview)
 
 The dashboard opens on **Floor**: a live 3D trading room (three.js), loaded on demand only on this
-view as its own chunk. While that chunk loads the floor shows a neutral **Carregando pregão 3D…**
-state, never another scene, so nothing swaps in after load.
+view. While its chunks and assets load the floor shows a neutral **Carregando pregão 3D… NN%**
+state with a progress bar, never another scene, so nothing swaps in after load. If the assets
+cannot be downloaded the floor says so in place, with **Try again**.
 
-- **Room.** Seven desks stand on an arc in pipeline order (TradingView, Fusion, AI Reviewer, Risk
-  Engine, OMS / Executor, Reconciliation, and the XP / B3 lane desk) facing a curved video wall with
-  an LED ticker. Warm light, wood floor, glass walls with a dusk skyline, baked blob shadows.
-- **Screens.** The wall, each desk's two monitors and the floating desk labels are live canvas
-  textures fed by `/v1/floor/state`, `/ws/floor` and the public market stream. A desk's main monitor
-  shows its latest headline and tone in words; the second shows its journal. The XP / B3 desk shows
-  the lane state (`NOT CONFIGURED`, `UNAVAILABLE`, `LIVE`, `HALTED`) and no number.
-- **Agents walk.** When a fresh event arrives over a connected `/ws/floor`, the operator of the desk
-  before it in the chain stands up, carries a card in the event's tone to that desk, and walks back.
-  History (the first read, or anything that did not arrive fresh on the stream) never makes anyone
-  walk. Between events three floor staff walk from desk to desk and look at the screens; they are
-  decoration and say nothing about data. Seated operators type only while their desk is working.
-- **Lights.** A desk's beacon, LED edge and floor glow take the tone of its last action; an `alert`
-  is a pulsing red light on that desk. The floor light path into a desk lights while it works.
+- **Room.** Physically based materials with CC0 textures (wood floor, wood-veneer desks, fabric
+  chairs, brushed metal, concrete walls; sources in `apps/web/public/floor3d/ASSETS.md`), ACES
+  tone mapping, an image-based fill from a room environment, one warm key light with soft shadow
+  maps, a ceiling with light panels and reflective glass walls. The camera stands at eye height
+  (about 1.6 m) with a ~33 mm lens.
+- **Desks.** Seven pipeline desks stand on an arc in chain order (TradingView, Fusion, AI Reviewer,
+  Risk Engine, OMS / Executor, Reconciliation, and the XP / B3 lane desk) facing a curved video wall
+  with an LED ticker; each has a hanging sign with its name and tone. In front, a bench of six seats
+  holds the roster's trader agents.
+- **People.** Rigged CC0 characters (Quaternius Universal Base Characters) animated with the
+  Universal Animation Library: walk, sit down, sit idle, sit and gesture while working, stand. They
+  are dressed in the shader (shirt, trousers, shoes), with varied hair, skin and clothes.
+- **Screens.** The wall, each desk's monitors and the signs are live canvas textures fed by
+  `/v1/floor/state`, `/ws/floor` and the public market stream. A desk's main monitor shows its latest
+  headline and tone in words; the second its journal. The XP / B3 desk shows the lane state
+  (`NOT CONFIGURED`, `UNAVAILABLE`, `LIVE`, `HALTED`) and no number.
+- **Operators walk.** When a fresh event arrives over a connected `/ws/floor`, the operator of the
+  desk before it in the chain stands up, walks to that desk and back. History (the first read, or
+  anything that did not arrive fresh on the stream) never makes anyone move. Between events three
+  floor staff walk from desk to desk; they are decoration and say nothing about data.
+- **Trader agents.** Each ACTIVE agent of `GET /v1/agents/roster` sits at the bench with a name tag:
+  its code and equity in BRL as the API valued it (`AG-0007-ORION · R$198,40`, or `R$ —` when the
+  book could not be valued), and `VIRTUAL TESTNET CAPITAL` (or `PAPER`). A fresh `AGENT_ELIMINATED`
+  event (or the agent leaving the roster) makes that person stand up and walk out of the room; its
+  replacement walks in when the roster lists it. If the roster cannot be read, no agent and no tag is
+  shown and the badge says `AGENT ROSTER UNAVAILABLE`. Tapping the bench opens the Fusion desk.
+- **Lights.** A desk's beacon and floor glow take the tone of its last action; an `alert` is a
+  pulsing red light on that desk.
 - **Labels.** Badges over the canvas say the data mode (`PAPER / SIM`, `TESTNET · NO REAL MONEY` or
-  `MODE UNAVAILABLE`), whether the floor state is live, stale or unavailable, and whether the market
-  stream is live or last known.
-- **Camera.** It orbits slowly; drag to orbit, pinch (or ctrl + wheel) to zoom, tap a desk to open
-  its drawer (the XP / B3 desk opens the OMS drawer, which holds the XP section).
-- **Tablets.** Pixel ratio capped at 1.5, low-poly shared geometry, no shadow maps or
-  post-processing, about 30 fps on touch devices, the loop paused while the tab is hidden or the
-  floor is off-screen, every GPU resource disposed on unmount. With reduced motion the camera stays
-  put and agents are placed at their destination instead of walking.
+  `MODE UNAVAILABLE`), whether the floor state is live, stale or unavailable, whether the market
+  stream is live or last known, and the roster state.
+- **Camera.** It drifts slowly; drag to orbit (vertical drag raises or lowers the eye), pinch (or
+  ctrl + wheel) to zoom, tap a desk to open its drawer (the XP / B3 desk opens the OMS drawer).
+- **Tablets.** Pixel ratio capped at 1.5, a 1024 px shadow map on touch devices (2048 px
+  otherwise), about 30 fps on touch, the loop paused while the tab is hidden or the floor is
+  off-screen, every GPU resource disposed on unmount. With reduced motion the camera stays put and
+  people are placed at their destination instead of walking.
+- **CSP.** Assets are plain `.gltf` + `.bin` + `.webp` files under `/floor3d/`: no WebAssembly
+  decoder and no `blob:` URLs, so the API's Content-Security-Policy holds unchanged.
 
 If WebGL2 or OffscreenCanvas is unavailable (probed before anything is drawn), the GPU context is
 lost or the 3D chunk fails to load, the photo room is shown instead: a photograph with every screen
@@ -65,7 +82,7 @@ The wall screen shows:
 - an **Últimas ações** strip with the latest agent actions.
 
 In the photo room each desk has three monitors: two live public mids and the desk's own journal
-events. In the 3D room each desk has two: its latest headline and tone, and its journal.
+events. In the 3D room each desk has a headline monitor, a journal monitor and a spare.
 
 A missing value is shown as `—` and is never estimated.
 
