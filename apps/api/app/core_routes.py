@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException, Query, Response, WebSocket
 
@@ -51,11 +52,24 @@ _simulation_lock = asyncio.Lock()
 
 @router.get("/health")
 def health() -> dict[str, object]:
+    from . import control_state
+    from .floor_surface import data_mode
+
+    control = control_state.current().snapshot()
     return {
         "status": "ok",
+        # The simulation runtime's mode, not the system's: see `system_mode`.
         "mode": runtime.mode,
+        "system_mode": settings.system_mode,
+        # Where account balances come from: the paper ledger or the testnet executor.
+        "account_source": data_mode(),
         "version": __version__,
+        "git_commit_sha": os.getenv("PROTO_GIT_COMMIT_SHA", "").strip() or None,
+        # General simulation persistence only; controls and checkpoints are `control_plane`.
         "persistence_enabled": settings.persistence_enabled,
+        "control_plane": {"status": control["status"], "durable": control["durable"]},
+        "financial_connectivity": False,
+        "real_money_execution": False,
     }
 
 

@@ -120,17 +120,21 @@ class Checks:
                         reason=f"account_unreadable:{asset}",
                     )
                     continue
+                # The account's own reference capital (R$ 10,000 in its quote currency), never
+                # looser than the plain number; an API that does not report it keeps the old basis.
+                cap = _dec(account.get("reference_capital"))
+                cap = min(cap, REFERENCE_CAPITAL) if cap and cap > 0 else REFERENCE_CAPITAL
                 if start > 0:
                     check(
                         f"daily_loss_{asset}",
-                        (equity - start) / min(start, REFERENCE_CAPITAL)
+                        (equity - start) / min(start, cap)
                         <= -lim.max_daily_loss,
                         reason=f"daily_loss:{asset}",
                     )
                 if peak > 0:
                     check(
                         f"drawdown_{asset}",
-                        (equity - peak) / min(peak, REFERENCE_CAPITAL) <= -lim.max_drawdown,
+                        (equity - peak) / min(peak, cap) <= -lim.max_drawdown,
                         reason=f"drawdown:{asset}",
                     )
             pipeline = floor.get("pipeline") or {}

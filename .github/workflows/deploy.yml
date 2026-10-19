@@ -55,6 +55,8 @@ jobs:
           context: .
           platforms: linux/arm64
           push: true
+          build-args: |
+            PROTO_GIT_COMMIT_SHA=${{ steps.sha.outputs.sha }}
           tags: |
             ${{ env.IMAGE }}:sha-${{ steps.sha.outputs.sha }}
             ${{ env.IMAGE }}:stable

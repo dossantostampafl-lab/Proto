@@ -27,9 +27,27 @@ def canary_capital_in(brl_per_quote: Decimal) -> Decimal:
     return CANARY_CAPITAL / brl_per_quote
 
 
-def conservative_equity(current_equity: Decimal) -> Decimal:
-    """Size against the lower of reference capital and current equity, never above it."""
+def reference_capital_in(brl_per_quote: Decimal) -> Decimal:
+    """REFERENCE_CAPITAL in the account's quote currency (BRL per unit of quote: 1 for BRL).
 
-    if current_equity <= 0:
+    A USDT account is held to R$ 10,000 worth of USDT, not to 10,000 USDT. Pass the ask, as for
+    `canary_capital_in`: the higher rate gives the smaller capital.
+    """
+
+    if not brl_per_quote > 0:
+        raise ValueError("brl_per_quote must be positive")
+    return REFERENCE_CAPITAL / brl_per_quote
+
+
+def conservative_equity(
+    current_equity: Decimal, reference_capital: Decimal = REFERENCE_CAPITAL
+) -> Decimal:
+    """Size against the lower of reference capital and current equity, never above it.
+
+    `reference_capital` is in the account's quote currency (`reference_capital_in`); it may only
+    be tighter than REFERENCE_CAPITAL taken as a plain number, and 0 (unknown) sizes nothing.
+    """
+
+    if current_equity <= 0 or reference_capital <= 0:
         return Decimal("0")
-    return min(current_equity, REFERENCE_CAPITAL)
+    return min(current_equity, reference_capital, REFERENCE_CAPITAL)

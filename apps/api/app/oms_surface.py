@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from services.execution import RiskPermit, TradeIntent, VenueId
 from services.execution.catalog import PAPER_INSTRUMENTS
-from services.execution.constitution import REFERENCE_CAPITAL
+from services.execution.constitution import REFERENCE_CAPITAL, reference_capital_in
 from services.execution.venue import PaperVenueAdapter
 from services.oms import (
     InMemoryCheckpoints,
@@ -291,18 +291,44 @@ async def _outage_checkpoint(checkpoints, quote_asset: str, venue: VenueId = VEN
     return rows[0][0], min(row[1] for row in rows), max(row[2] for row in rows)
 
 
+async def _reference_capital(quote_asset: str) -> Decimal:
+    """REFERENCE_CAPITAL in `quote_asset` at the public BRL rate's ask; 0 when no rate is known."""
+
+    from .fx_rates import rates
+
+    rate = await rates().brl_per(quote_asset)
+    return reference_capital_in(rate) if rate is not None else Decimal("0")
+
+
+def _marked_elsewhere(instrument, quote_asset: str, venue: VenueId) -> bool:
+    """Whether the same base asset is marked in another quote currency of the same venue.
+
+    A venue's BTC is one holding however many quote currencies list it: bought on BTCUSDT it is
+    valued in the USDT account. Without a BTCBRL mark the BRL account must not call it unknown.
+    """
+
+    return any(
+        other.base_asset == instrument.base_asset
+        and other.quote_asset != quote_asset
+        and _quote(other_id) is not None
+        for other_id, other in _instruments_of(venue).items()
+    )
+
+
 async def account_state(quote_asset: str) -> AccountState:
     """Conservative account view in one quote currency, marked at live mid prices.
 
     A held asset without a live mark makes exposure unknown: gross exposure is
     then infinite (blocking new risk) and equity is held at its last baseline so
-    a missing quote is never mistaken for a loss. Start-of-day and peak equity
+    a missing quote is never mistaken for a loss. An asset marked in another quote
+    currency of the same venue is valued there instead. Start-of-day and peak equity
     are checkpointed, durably when persistence is enabled. An unreachable
     executor blocks new risk the same way.
     """
 
     venue = venue_for_quote(quote_asset)
     checkpoints = _checkpoint_store(venue)
+    reference = await _reference_capital(quote_asset)
     try:
         balances, openings = await _totals(venue)
     except (ExecutorUnavailable, ExecutorRefused) as exc:
@@ -315,6 +341,7 @@ async def account_state(quote_asset: str) -> AccountState:
             peak_equity=max(saved[2], baseline) if saved else baseline,
             gross_exposure=Decimal("Infinity"),
             positions={},
+            reference_capital=reference,
         )
     _last_openings[venue] = openings
     cash = balances.get(quote_asset, Decimal("0"))
@@ -337,7 +364,8 @@ async def account_state(quote_asset: str) -> AccountState:
             continue
         quote = _quote(instrument_id)
         if quote is None:
-            marked = False
+            if not _marked_elsewhere(instrument, quote_asset, venue):
+                marked = False
             continue
         exposure += quantity * (quote.bid + quote.ask) / 2
 
@@ -352,6 +380,7 @@ async def account_state(quote_asset: str) -> AccountState:
             peak_equity=max(peak, start),
             gross_exposure=Decimal("Infinity"),
             positions=positions,
+            reference_capital=reference,
         )
     equity = cash + exposure
     if day != today:
@@ -365,6 +394,7 @@ async def account_state(quote_asset: str) -> AccountState:
         peak_equity=checkpoint[2],
         gross_exposure=exposure,
         positions=positions,
+        reference_capital=reference,
     )
 
 
@@ -565,6 +595,7 @@ async def ledger_view() -> dict[str, object]:
             "start_of_day_equity": str(state.start_of_day_equity),
             "peak_equity": str(state.peak_equity),
             "gross_exposure": str(state.gross_exposure),
+            "reference_capital": str(state.reference_capital),
         }
 
     results = await asyncio.gather(

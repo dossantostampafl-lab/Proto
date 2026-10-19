@@ -67,6 +67,9 @@ class AccountState:
     peak_equity: Decimal
     gross_exposure: Decimal
     positions: Mapping[str, Decimal]  # instrument_id -> base quantity (spot, >= 0)
+    # REFERENCE_CAPITAL in this account's quote currency (`reference_capital_in`). 0: unknown
+    # (no BRL rate), which sizes nothing new.
+    reference_capital: Decimal = REFERENCE_CAPITAL
 
 
 @dataclass(frozen=True)
@@ -119,16 +122,18 @@ def account_breach(account: AccountState) -> tuple[LockdownReason | None, Decima
     reference capital: on an account holding far more than R$ 10,000 (the XP demo holds R$ 1M)
     1% is R$ 100, not 1% of the balance. For an account at or under the reference capital nothing
     changes; above it the limit is only ever tighter.
+
+    The reference capital is the account's own (`AccountState.reference_capital`): a USDT account
+    is measured against R$ 10,000 worth of USDT. When that is unknown the plain number stands, which
+    is never looser than before, and `conservative_equity` sizes nothing new meanwhile.
     """
 
+    cap = account.reference_capital if account.reference_capital > 0 else REFERENCE_CAPITAL
+    cap = min(cap, REFERENCE_CAPITAL)
     sod = account.start_of_day_equity
-    daily_loss = (
-        (sod - account.equity) / min(sod, REFERENCE_CAPITAL) if sod > 0 else Decimal("1")
-    )
+    daily_loss = (sod - account.equity) / min(sod, cap) if sod > 0 else Decimal("1")
     peak = account.peak_equity
-    drawdown = (
-        (peak - account.equity) / min(peak, REFERENCE_CAPITAL) if peak > 0 else Decimal("1")
-    )
+    drawdown = (peak - account.equity) / min(peak, cap) if peak > 0 else Decimal("1")
     if daily_loss >= MAX_DAILY_LOSS:
         return LockdownReason.DAILY_LOSS, daily_loss, drawdown
     if drawdown >= MAX_DRAWDOWN:
@@ -234,7 +239,7 @@ class RiskEngine:
         checks["drawdown"] = f"{drawdown:.6f}"
         if not reducing:
             check("no_lockdown", lockdown is None, lockdown.value if lockdown else "")
-            equity = conservative_equity(account.equity)
+            equity = conservative_equity(account.equity, account.reference_capital)
             if canary:
                 known = canary_capital is not None and canary_capital > 0
                 check("canary_capital_known", known, "no BRL rate for the quote currency")
