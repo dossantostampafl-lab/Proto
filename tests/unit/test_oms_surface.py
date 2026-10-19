@@ -8,6 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect
 
@@ -474,3 +475,50 @@ async def test_executor_status_is_readable_without_a_token(monkeypatch) -> None:
             assert body["halted_reason"] == "reconciliation divergence"
     monkeypatch.setattr(oms_surface, "executor_mode", lambda: False)
     assert (await oms_surface.executor_status())["status"] == "not_configured"
+
+
+async def test_an_operator_can_rebase_the_loss_baseline_on_testnet_only(monkeypatch) -> None:
+    configure(monkeypatch)
+    await oms_surface.components()
+    store = oms_surface._checkpoint_store()
+    today = datetime.now(UTC).date()
+    await store.put("USDT", (today, Decimal("10500"), Decimal("10600")))
+    journal = []
+
+    async def record(event_type, payload):
+        journal.append((event_type, payload))
+
+    monkeypatch.setattr(oms_surface, "_record", record)
+    reason = "testnet drill bug losses"
+    request = oms_surface.BaselineRebaseRequest(quote_asset="USDT", reason=reason)
+    body = await oms_surface.rebase_baseline(request)
+    state = await oms_surface.account_state("USDT")
+    assert body["environment"] == "PAPER"
+    assert body["before"] == {"start_of_day": "10500", "peak": "10600"}
+    assert state.start_of_day_equity == state.peak_equity == state.equity
+    assert journal[0][0] == "RISK_BASELINE_REBASED"
+
+    class Live:
+        async def health(self):
+            return {"venue_environment": "LIVE", "real_money_execution": True}
+
+    monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
+    monkeypatch.setattr(oms_surface, "_call_client", lambda venue: Live())
+    with pytest.raises(HTTPException) as refused:  # forgetting losses never touches real money
+        await oms_surface.rebase_baseline(request)
+    assert refused.value.status_code == 409
+
+
+async def test_rebase_refuses_an_account_whose_exposure_is_unknown(monkeypatch) -> None:
+    configure(monkeypatch)
+    await oms_surface.components()
+
+    async def unavailable(venue=None):
+        raise oms_surface.ExecutorUnavailable("down")
+
+    monkeypatch.setattr(oms_surface, "_totals", unavailable)
+    with pytest.raises(HTTPException) as refused:
+        await oms_surface.rebase_baseline(
+            oms_surface.BaselineRebaseRequest(quote_asset="USDT", reason="testnet drill bug losses")
+        )
+    assert refused.value.status_code == 409
