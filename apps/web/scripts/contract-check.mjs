@@ -28,8 +28,18 @@ for (const [pattern, why] of [
   [/window\.prompt/, "no prompt() credential capture"],
   [/window\.fetch\s*=/, "no global fetch monkey-patching"],
   [/document\.createElement/, "no imperative DOM outside React"],
-  [/localStorage/, "operator token must not outlive the browser session"],
 ]) assert.doesNotMatch(code, pattern, why);
+// localStorage holds one thing only: the viewer's floor view choice, in floorViewPref.ts, guarded by try/catch.
+for (const [p, s] of files) {
+  if (p.endsWith("floorViewPref.ts") || p.endsWith(".css")) continue;
+  assert.doesNotMatch(s, /localStorage/, `${p}: operator token must not outlive the browser session (only floorViewPref.ts may use localStorage)`);
+}
+const viewPref = files.find(([p]) => p.endsWith("floorViewPref.ts"))?.[1] ?? "";
+assert.match(viewPref, /const KEY = "proto\.floor\.view";/, "the floor view choice has its own storage key");
+assert.equal((viewPref.match(/localStorage\.\w+\(/g) ?? []).length, 2, "floorViewPref.ts only reads and writes the view key");
+assert.equal((viewPref.match(/localStorage\.(getItem|setItem)\(KEY/g) ?? []).length, 2, "floorViewPref.ts touches no key but its own");
+assert.equal((viewPref.match(/try \{ (return )?window\.localStorage/g) ?? []).length, 2, "every storage access is wrapped in try/catch");
+assert.doesNotMatch(viewPref, /token/i, "the stored preference never involves the operator token");
 
 // Provenance and the financial boundary stay visible.
 for (const label of ["LIVE PUBLIC", "SYNTHETIC RESEARCH", "PAPER / SIM", "FINANCIAL CONNECTIVITY OFF", "REAL MONEY EXECUTION OFF", "Display risk score"]) {
@@ -124,6 +134,33 @@ assert.match(floor3d, /select\.current\?\.\(drawerOf\(id\)\)/, "tapping a 3D des
 for (const label of ["LIVE PUBLIC", "LAST KNOWN / REST", "PAPER / SIM", "TESTNET · NO REAL MONEY", "MODE UNAVAILABLE", "FLOOR STATE UNAVAILABLE", "STALE", "HALTED", "ARMED", "no feed", "NOT CONFIGURED", "NO REAL MONEY", "ROSTER UNAVAILABLE"]) {
   assert.ok(floor3d.includes(label), `3D floor must show ${label}`);
 }
+
+// "Realista | Prédio": the stylized building is a second view of the same live floor, in its own
+// on-demand chunk, with the same truthful labels; it never invents a value.
+const building = files.filter(([p]) => p.includes("floorBuilding")).map(([, s]) => s).join("\n");
+assert.match(floorView, /lazy\(\(\) => import\("\.\/floorBuilding\/FloorBuilding"\)\)/, "the building view loads on demand");
+assert.match(floorView, />Realista<\/button>/, "the floor offers the realistic view");
+assert.match(floorView, />Prédio<\/button>/, "the floor offers the building view");
+assert.match(floorView, /useFloorViewMode\(\)/, "the view choice is remembered");
+assert.match(floorView, /<Scene market=\{market\}/, "the realistic room stays available");
+assert.match(building, /"\/v1\/agents\/roster"/, "building desks come from the roster API");
+assert.match(building, /"\/v1\/oms\/ledger"/, "building limits come from the OMS ledger");
+assert.match(building, /raw\.capital !== "VIRTUAL"/, "a roster that is not virtual capital is not shown");
+assert.match(building, /capital virtual \(testnet\)/, "agent tags say the capital is virtual");
+assert.match(building, /desde que você abriu/, "session-only curves say so");
+assert.match(building, /LANE_LABEL\[xp\.state\]/, "the XP floor shows the real lane state");
+for (const label of ["AGENT ROSTER UNAVAILABLE", "LEDGER UNAVAILABLE", "FLOOR STATE UNAVAILABLE", "MODE UNAVAILABLE", "TESTNET · NO REAL MONEY", "NOT CONFIGURED", "STALE", "R$ —", "não medido"]) {
+  assert.ok(building.includes(label), `building view must show ${label}`);
+}
+assert.match(building, /Math\.min\(window\.devicePixelRatio \|\| 1, 1\.5\)/, "the building caps the pixel ratio at 1.5");
+assert.match(building, /OrthographicCamera/, "the building uses an orthographic camera");
+assert.match(building, /InstancedMesh/, "desks and monitors are instanced");
+assert.doesNotMatch(building, /shadowMap|castShadow|MeshStandardMaterial|MeshPhysicalMaterial/, "the building uses no shadow maps and only cheap materials");
+assert.match(building, /prefers-reduced-motion: reduce/, "the building respects reduced motion");
+assert.match(building, /IntersectionObserver/, "the building pauses while off-screen");
+assert.match(building, /visibilitychange/, "the building pauses while the tab is hidden");
+assert.match(building, /instance\.dispose\(\)/, "the building disposes its GPU resources on unmount");
+assert.match(building, /Pausar animação/, "the building animation can be paused");
 
 // Every desk is a real control over the photo and opens a drawer of live, read-only data.
 const desks = ["floorDesks.tsx", "deskData.ts"].map(name => files.find(([p]) => p.endsWith(name))?.[1] ?? "").join("\n");

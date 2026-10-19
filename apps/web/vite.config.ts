@@ -8,7 +8,8 @@ export default defineConfig({
   },
   // The live 3D floor is loaded on demand in three chunks: Floor3D (the scene code), Floor3DThree
   // (three.js itself) and Floor3DAssets (the glTF loader). None is preloaded;
-  // scripts/bundle-budget-check.mjs holds each to its own budget.
+  // scripts/bundle-budget-check.mjs holds each to its own budget. The stylized building view is a
+  // fourth on-demand chunk, FloorBuilding (src/views/floorBuilding/), that reuses Floor3DThree.
   build: {
     chunkSizeWarningLimit: 600,
     rolldownOptions: {
