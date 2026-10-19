@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
+from test_oms_surface import _reset, configure, live_snapshot  # noqa: F401
 
 from apps.api.app import agent_surface, fx_rates, main, oms_surface
 from services.execution import LedgerEntry, LedgerEntryKind, VenueId
@@ -18,8 +19,6 @@ from services.execution.constitution import (
 from services.oms.ledger import entry_id
 from services.risk import AccountState, LockdownReason, account_breach
 from services.watchdog.checks import Checks, Observation
-from tests.conftest import REAL_REFERENCE_CAPITAL
-from tests.unit.test_oms_surface import _reset, configure, live_snapshot  # noqa: F401
 
 
 def _account(equity: str, sod: str, peak: str, reference: Decimal) -> AccountState:
@@ -91,9 +90,10 @@ class _Rates:
         return Decimal("1") if quote_asset == "BRL" else self.rate
 
 
-async def test_account_state_reports_the_reference_in_its_quote_currency(monkeypatch) -> None:
+async def test_account_state_reports_the_reference_in_its_quote_currency(
+    monkeypatch, real_reference_capital
+) -> None:
     configure(monkeypatch)
-    monkeypatch.setattr(oms_surface, "_reference_capital", REAL_REFERENCE_CAPITAL)
     monkeypatch.setattr(fx_rates, "_rates", _Rates(Decimal("5")))
     await oms_surface.components()
     assert (await oms_surface.account_state("USDT")).reference_capital == Decimal("2000")
