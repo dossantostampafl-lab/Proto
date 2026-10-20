@@ -26,6 +26,7 @@ neither the API, nor the executor, nor the OMS, risk or venue code; a test enfor
 | Executor reachable | its status fails for the whole outage grace (when configured) | `executor_unreachable` |
 | Reconciliation | the executor reports a divergence | `reconciliation_divergence` |
 | Reconciliation age | its last reconciliation is older than 3 minutes | `reconciliation_stale` |
+| XP node (optional) | `WATCHDOG_XP_EXECUTOR_URL` set: a divergence on the XP (B3) executor, or its reconciliation older than 3 minutes during the B3 session (10:00-17:55 Brasilia, weekdays). An unreachable node (PC off) is only reported | `xp_reconciliation_divergence`, `xp_reconciliation_stale`: halt the XP executor only |
 
 `WATCHDOG_DAILY_LOSS_FRACTION` and `WATCHDOG_DRAWDOWN_FRACTION` can make the loss checks stricter
 (a fraction of the limit, at most 1). A looser value is refused.

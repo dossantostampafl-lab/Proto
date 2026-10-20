@@ -63,7 +63,9 @@ def test_remove_turns_xp_routing_off_again(tmp_path) -> None:
     assert not (tmp_path / "xp.env").exists()
 
 
-def xp_env_args(tmp_path: Path, content: str | None) -> subprocess.CompletedProcess:
+def xp_env_args(
+    tmp_path: Path, content: str | None, role: str = "api"
+) -> subprocess.CompletedProcess:
     deploy = (OCI / "deploy/proto-deploy.sh").read_text()
     function = re.search(r"xp_env_args\(\) \{\n(.*?)\n\}\n", deploy, re.S)
     assert function, "xp_env_args() not found"
@@ -71,7 +73,8 @@ def xp_env_args(tmp_path: Path, content: str | None) -> subprocess.CompletedProc
     if content is not None:
         file.write_text(content)
     script = (
-        'log() { echo "proto-deploy[api]: $*"; }\n'
+        f'role="{role}"\n'
+        'log() { echo "proto-deploy[$role]: $*"; }\n'
         f'xp_env_file="{file.as_posix()}"\n'
         f"xp_env_args() {{\n{function.group(1)}\n}}\nxp_env_args\n"
     )
@@ -108,9 +111,31 @@ def test_a_malformed_file_is_ignored_and_never_leaks_text_into_the_podman_argume
     assert b"ignoring" in run.stderr
 
 
-def test_only_the_api_container_reads_the_xp_file() -> None:
+def test_the_api_and_the_watchdog_read_the_xp_file_and_the_executor_never() -> None:
     deploy = (OCI / "deploy/proto-deploy.sh").read_text()
-    api = deploy.split("    api)\n      mapfile", 1)[1].split(" ;;", 1)[0]
-    assert 'xp_args[@]+"${xp_args[@]}"' in api
-    assert "xp_args" not in deploy.split("    executor)\n      podman run", 1)[1]
-    assert "xp_args" not in deploy.split("    watchdog)\n      podman run", 1)[1]
+    for role in ("api", "watchdog"):
+        block = deploy.split(f"    {role})\n      mapfile", 1)[1].split(" ;;", 1)[0]
+        assert 'xp_args[@]+"${xp_args[@]}"' in block
+    executor = deploy.split("    executor)\n      podman run", 1)[1].split(" ;;", 1)[0]
+    assert "xp_args" not in executor
+
+
+def test_on_the_watchdog_instance_the_halt_only_token_is_written(tmp_path) -> None:
+    (tmp_path / "role").write_text("watchdog\n")
+    run = set_node(tmp_path, "100.101.102.103")
+    assert run.returncode == 0, run.stderr
+    assert (tmp_path / "xp.env").read_text() == (
+        "WATCHDOG_XP_EXECUTOR_URL=http://100.101.102.103:8101\n"
+        f"WATCHDOG_XP_EXECUTOR_TOKEN={TOKEN}\n"
+    )
+
+
+def test_the_watchdog_reads_its_own_keys_only(tmp_path) -> None:
+    api_file = f"XP_EXECUTOR_URL=http://100.100.100.100:8101\nXP_EXECUTOR_API_TOKEN={TOKEN}\n"
+    assert xp_env_args(tmp_path, api_file, role="watchdog").stdout == b""
+    watchdog_file = (
+        "WATCHDOG_XP_EXECUTOR_URL=http://100.100.100.100:8101\n"
+        f"WATCHDOG_XP_EXECUTOR_TOKEN={TOKEN}\n"
+    )
+    lines = xp_env_args(tmp_path, watchdog_file, role="watchdog").stdout.decode().split()
+    assert lines[0] == "--env-file" and len(lines) == 2

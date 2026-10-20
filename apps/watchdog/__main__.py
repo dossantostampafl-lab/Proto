@@ -28,6 +28,11 @@ async def main() -> None:
         executor = (
             httpx.AsyncClient(base_url=settings.executor_url) if settings.executor_url else None
         )
+        xp = (
+            httpx.AsyncClient(base_url=settings.xp_executor_url)
+            if settings.xp_executor_url
+            else None
+        )
         try:
             watchdog = Watchdog(
                 watchdog_id=settings.id,
@@ -37,6 +42,10 @@ async def main() -> None:
                 executor_token=settings.executor_token.get_secret_value()
                 if settings.executor_token
                 else None,
+                xp_executor=xp,
+                xp_executor_token=settings.xp_executor_token.get_secret_value()
+                if settings.xp_executor_token
+                else None,
                 limits=Limits(
                     daily_loss_fraction=settings.daily_loss_fraction,
                     drawdown_fraction=settings.drawdown_fraction,
@@ -45,8 +54,9 @@ async def main() -> None:
             )
             await watchdog.run(settings.interval_seconds, stop)
         finally:
-            if executor is not None:
-                await executor.aclose()
+            for client in (executor, xp):
+                if client is not None:
+                    await client.aclose()
 
 
 if __name__ == "__main__":

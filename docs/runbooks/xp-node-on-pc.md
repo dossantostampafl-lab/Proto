@@ -85,6 +85,15 @@ refuse a non-demo account. Everything is the XP **demo** account (`XPMT5-DEMO`).
    It writes `/etc/proto/xp.env` (root only) and recreates the API container (`proto-deploy
    --force`). It refuses a public address and a weak token. `proto-deploy.sh` ignores a malformed
    file, so a typo cannot take the API down. To turn XP off again: `sudo bash set-xp-node.sh --remove`.
+4. **Let the watchdog watch the node** (its own instance, its own halt-only token). Create a second
+   auth key tagged `tag:proto-watchdog` and add it to the ACL source:
+   `"src": ["tag:proto-api", "tag:proto-watchdog"]`. Open a Bastion session to `proto-watchdog`,
+   install Tailscale (`--hostname=proto-watchdog --advertise-tags=tag:proto-watchdog`), then run
+   the same `set-xp-node.sh` there with the token from
+   `.\infra\xp-node\show-xp-node-token.ps1 -Watchdog`. On that instance it writes
+   `WATCHDOG_XP_EXECUTOR_URL` and `WATCHDOG_XP_EXECUTOR_TOKEN` and recreates the watchdog.
+   That token reads the node's status and halts it; it cannot place, release or cancel anything.
+   An existing node gets this token the next time `start-xp-node.ps1` runs.
 
 ## Check it end to end
 
@@ -105,7 +114,9 @@ refuse a non-demo account. Everything is the XP **demo** account (`XPMT5-DEMO`).
 
 ## Limits to know
 
-- The watchdog does not probe the XP executor yet. Acceptable for a demo account only.
+- The watchdog probes the XP executor (Part 2 step 4). A switched-off PC is reported, never a halt; a
+  divergence halts the XP executor at once, a stale reconciliation only during the B3 session. It
+  never halts the API or Binance for an XP problem.
 - B3 quotes are kept in the API's memory; a read endpoint for them is a separate change.
 - Whether the MT5 BRL balance moves when shares are bought decides if reconciliation stays
   consistent after a fill; that is proven only with a fill during a session.

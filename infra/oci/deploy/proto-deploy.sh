@@ -68,19 +68,23 @@ ensure_db() {
   exit 1
 }
 
-# Optional XP (B3) executor for the API: a root-only file with XP_EXECUTOR_URL and
-# XP_EXECUTOR_API_TOKEN, written by deploy/set-xp-node.sh. Absent file = XP routing off, exactly as
-# before. A malformed file is ignored with a warning instead of passed on: the API refuses to start
-# on an invalid XP setting, and a bad optional file must never take the API down.
+# Optional XP (B3) node: a root-only file written by deploy/set-xp-node.sh. On the API instance it
+# holds XP_EXECUTOR_URL and XP_EXECUTOR_API_TOKEN; on the watchdog instance WATCHDOG_XP_EXECUTOR_URL
+# and WATCHDOG_XP_EXECUTOR_TOKEN (the node's halt-only token). Absent file = XP off, exactly as
+# before. A malformed file is ignored with a warning instead of passed on: both services refuse to
+# start on an invalid XP setting, and a bad optional file must never take one down.
 xp_env_file="${PROTO_XP_ENV:-/etc/proto/xp.env}"
 xp_env_args() {
   [ -s "$xp_env_file" ] || return 0
-  local url token
-  url="$(sed -n 's/^XP_EXECUTOR_URL=//p' "$xp_env_file" | head -n1)"
-  token="$(sed -n 's/^XP_EXECUTOR_API_TOKEN=//p' "$xp_env_file" | head -n1)"
-  case "$url" in http://* | https://*) ;; *) log "ignoring $xp_env_file: XP_EXECUTOR_URL missing" >&2; return 0 ;; esac
+  local url token url_key=XP_EXECUTOR_URL token_key=XP_EXECUTOR_API_TOKEN
+  if [ "${role:-api}" = watchdog ]; then
+    url_key=WATCHDOG_XP_EXECUTOR_URL token_key=WATCHDOG_XP_EXECUTOR_TOKEN
+  fi
+  url="$(sed -n "s/^${url_key}=//p" "$xp_env_file" | head -n1)"
+  token="$(sed -n "s/^${token_key}=//p" "$xp_env_file" | head -n1)"
+  case "$url" in http://* | https://*) ;; *) log "ignoring $xp_env_file: $url_key missing" >&2; return 0 ;; esac
   if [ "${#token}" -lt 32 ]; then
-    log "ignoring $xp_env_file: XP_EXECUTOR_API_TOKEN shorter than 32 characters" >&2
+    log "ignoring $xp_env_file: $token_key shorter than 32 characters" >&2
     return 0
   fi
   printf '%s\n' --env-file "$xp_env_file"
@@ -103,7 +107,9 @@ start() {  # start <image id>
         -e EXECUTOR_ENVIRONMENT=TESTNET -e EXECUTOR_ACCOUNT=main \
         "$image" uvicorn apps.executor.main:app --host "$EXECUTOR_IP" --port 8100 >/dev/null ;;
     watchdog)
+      mapfile -t xp_args < <(xp_env_args)
       podman run -d --name proto-watchdog --restart=always --network host --env-file "$secrets" \
+        ${xp_args[@]+"${xp_args[@]}"} \
         -e WATCHDOG_ID=oci-watchdog-1 -e "WATCHDOG_API_URL=http://${API_IP}:8000" \
         -e "WATCHDOG_EXECUTOR_URL=http://${EXECUTOR_IP}:8100" \
         "$image" python -m apps.watchdog >/dev/null ;;
