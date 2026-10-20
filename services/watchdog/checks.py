@@ -8,9 +8,10 @@ any check fails. It may only halt. Releasing a halt stays an operator action.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from services.execution.constitution import MAX_DAILY_LOSS, MAX_DRAWDOWN, REFERENCE_CAPITAL
 
@@ -53,6 +54,19 @@ class Observation:
     market_ready: bool | None  # GET /live/ready
     executor_configured: bool = False
     executor: dict[str, Any] | None = None  # GET executor /v1/watchdog/status
+    # The XP (B3) executor on the operator's PC, over Tailscale: same status route.
+    xp_configured: bool = False
+    xp: dict[str, Any] | None = None
+
+
+# B3 regular session (Brasilia), kept here on purpose: the watchdog depends on no Risk Engine code.
+_B3_TZ = ZoneInfo("America/Sao_Paulo")
+_B3_OPEN, _B3_CLOSE = time(10, 0), time(17, 55)
+
+
+def _b3_session(at: datetime) -> bool:
+    local = at.astimezone(_B3_TZ)
+    return local.weekday() < 5 and _B3_OPEN <= local.time() < _B3_CLOSE
 
 
 def _dec(value: object) -> Decimal | None:
@@ -173,4 +187,33 @@ class Checks:
                     age is None or age > lim.max_reconcile_age,
                     reason="reconciliation_stale",
                 )
+        return trips, status
+
+    def evaluate_xp(self, obs: Observation) -> tuple[list[str], dict[str, str]]:
+        """XP (B3) node checks: trips halt the XP executor only, never the API or Binance.
+
+        The node is the operator's PC: off at night and on weekends by design, and the API already
+        refuses B3 risk while it is unreachable. So an unreachable node is reported, not tripped.
+        A divergence trips at once; a stale reconciliation only during the B3 session, when an
+        order could actually be placed.
+        """
+
+        if not obs.xp_configured:
+            return [], {}
+        xp = obs.xp
+        if xp is None or not xp.get("ready"):
+            return [], {"xp_executor": "unreachable"}
+        trips: list[str] = []
+        status = {"xp_executor": "halted" if xp.get("halted") else "ok"}
+        if xp.get("consistent") is False:
+            trips.append("xp_reconciliation_divergence")
+        last = xp.get("last_reconcile_at")
+        try:
+            age = obs.at - datetime.fromisoformat(str(last)) if last else None
+        except ValueError:
+            age = None
+        stale = age is None or age > self.limits.max_reconcile_age
+        if stale and _b3_session(obs.at):
+            trips.append("xp_reconciliation_stale")
+        status["xp_reconciliation"] = "trip" if trips else "ok"
         return trips, status

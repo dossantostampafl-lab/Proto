@@ -21,6 +21,10 @@ class WatchdogSettings(BaseSettings):
     executor_url: str | None = None
     # Same value as the executor's EXECUTOR_WATCHDOG_TOKEN; never the executor's API token.
     executor_token: SecretStr | None = None
+    # The XP (B3) node on the operator's PC, over Tailscale (docs/runbooks/xp-node-on-pc.md),
+    # and that node's EXECUTOR_WATCHDOG_TOKEN. Optional: without it the node is not watched.
+    xp_executor_url: str | None = None
+    xp_executor_token: SecretStr | None = None
     interval_seconds: float = Field(default=5.0, ge=1.0, le=60.0, allow_inf_nan=False)
     # How long the API or the executor may stay unreachable before it counts as an outage. It
     # covers a deploy restart (image pull, migrations, warm-up); a real outage still halts.
@@ -33,7 +37,7 @@ class WatchdogSettings(BaseSettings):
     def unreachable_cycles(self) -> int:
         return max(1, math.ceil(self.outage_grace_seconds / self.interval_seconds))
 
-    @field_validator("api_token", "executor_token")
+    @field_validator("api_token", "executor_token", "xp_executor_token")
     @classmethod
     def long_secret(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and len(value.get_secret_value()) < _MIN_SECRET:
@@ -44,4 +48,6 @@ class WatchdogSettings(BaseSettings):
     def executor_pair(self) -> WatchdogSettings:
         if bool(self.executor_url) != (self.executor_token is not None):
             raise ValueError("WATCHDOG_EXECUTOR_URL and WATCHDOG_EXECUTOR_TOKEN go together")
+        if bool(self.xp_executor_url) != (self.xp_executor_token is not None):
+            raise ValueError("WATCHDOG_XP_EXECUTOR_URL and WATCHDOG_XP_EXECUTOR_TOKEN go together")
         return self

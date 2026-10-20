@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-# Point this API instance at the XP (B3) node: the operator's PC, reached over Tailscale.
-# Run as root on the API instance (OCI Bastion SSH session), once, and again if the PC's address
-# or the node's token changes:
+# Point this instance at the XP (B3) node: the operator's PC, reached over Tailscale.
+# Run as root on the API instance and on the watchdog instance (OCI Bastion SSH session), once, and
+# again if the PC's address or the node's tokens change:
 #
 #   sudo set-xp-node.sh <tailscale-ip-of-the-pc> [port]      # token is read from stdin, hidden
 #   sudo set-xp-node.sh --remove                              # XP routing off again
 #
-# It writes /etc/proto/xp.env (root only) with XP_EXECUTOR_URL and XP_EXECUTOR_API_TOKEN and
-# recreates the API container so the file is read. proto-deploy.sh ignores a malformed file, so a
+# It writes /etc/proto/xp.env (root only) and recreates this instance's container so the file is
+# read. On the API (role api): XP_EXECUTOR_URL and XP_EXECUTOR_API_TOKEN, the node's API token. On
+# the watchdog (role watchdog): WATCHDOG_XP_EXECUTOR_URL and WATCHDOG_XP_EXECUTOR_TOKEN, the node's
+# halt-only watchdog token (show-xp-node-token.ps1 -Watchdog). proto-deploy.sh ignores a malformed file, so a
 # typo here can never stop the API from starting. Nothing is written to the Vault or to Terraform.
 set -euo pipefail
 
 etc="${PROTO_ETC:-/etc/proto}"
 file="${etc}/xp.env"
+role="$(cat "${etc}/role" 2>/dev/null || echo api)"
+if [ "$role" = watchdog ]; then
+  url_key=WATCHDOG_XP_EXECUTOR_URL token_key=WATCHDOG_XP_EXECUTOR_TOKEN label="XP node watchdog token"
+else
+  url_key=XP_EXECUTOR_URL token_key=XP_EXECUTOR_API_TOKEN label="XP node token"
+fi
 
 if [ "${1:-}" = "--remove" ]; then
   rm -f "$file"
@@ -29,7 +37,7 @@ else
     exit 2
   fi
   [[ "$port" =~ ^[0-9]{2,5}$ ]] || { echo "bad port" >&2; exit 2; }
-  read -rsp "XP node token (hidden): " token || true
+  read -rsp "${label} (hidden): " token || true
   echo
   if [ "${#token}" -lt 32 ] || [[ "$token" =~ [[:space:]] ]]; then
     echo "refusing: the token must be 32+ characters without spaces" >&2
@@ -38,7 +46,7 @@ else
   umask 077
   mkdir -p "$etc"
   tmp="$(mktemp "${etc}/.xp.env.XXXXXX")"
-  printf 'XP_EXECUTOR_URL=http://%s:%s\nXP_EXECUTOR_API_TOKEN=%s\n' "$ip" "$port" "$token" >"$tmp"
+  printf '%s=http://%s:%s\n%s=%s\n' "$url_key" "$ip" "$port" "$token_key" "$token" >"$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$file"
   echo "wrote $file for http://$ip:$port"

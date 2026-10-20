@@ -42,11 +42,14 @@ class Watchdog:
     api_token: str
     executor: httpx.AsyncClient | None = None  # base_url = executor, private network
     executor_token: str | None = None
+    xp_executor: httpx.AsyncClient | None = None  # base_url = XP node, over Tailscale
+    xp_executor_token: str | None = None
     limits: Limits = field(default_factory=Limits)
     clock: Callable[[], datetime] = _utc_now
     _checks: Checks = field(init=False)
     _api_halted: bool = field(default=False, init=False)
     _executor_halted: bool = field(default=False, init=False)
+    _xp_halted: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         self._checks = Checks(self.limits)
@@ -62,15 +65,8 @@ class Watchdog:
         health = await self._get(self.api, "/health")
         floor = await self._get(self.api, "/v1/floor/state", params={"limit": 1})
         market = await self._get(self.api, "/live/ready")
-        executor: dict[str, Any] | None = None
-        if self.executor is not None:
-            response = await self._get(
-                self.executor,
-                "/v1/watchdog/status",
-                headers={"Authorization": f"Bearer {self.executor_token}"},
-            )
-            if response is not None and response.status_code == 200:
-                executor = response.json()
+        executor = await self._status(self.executor, self.executor_token)
+        xp = await self._status(self.xp_executor, self.xp_executor_token)
         return Observation(
             at=self.clock(),
             api_health=health is not None and health.status_code == 200,
@@ -78,7 +74,21 @@ class Watchdog:
             market_ready=None if market is None else market.status_code == 200,
             executor_configured=self.executor is not None,
             executor=executor,
+            xp_configured=self.xp_executor is not None,
+            xp=xp,
         )
+
+    async def _status(
+        self, client: httpx.AsyncClient | None, token: str | None
+    ) -> dict[str, Any] | None:
+        if client is None:
+            return None
+        response = await self._get(
+            client, "/v1/watchdog/status", headers={"Authorization": f"Bearer {token}"}
+        )
+        if response is not None and response.status_code == 200:
+            return response.json()
+        return None
 
     async def _halt_api(self, reasons: list[str], obs: Observation) -> None:
         controls = (obs.floor or {}).get("controls") or {}
@@ -119,6 +129,23 @@ class Watchdog:
             self._executor_halted = False
             logger.error("executor halt failed: %s", exc)
 
+    async def _halt_xp(self, reasons: list[str], obs: Observation) -> None:
+        if self.xp_executor is None:
+            return
+        if self._xp_halted and (obs.xp or {}).get("halted"):
+            return
+        try:
+            response = await self.xp_executor.post(
+                "/v1/watchdog/halt",
+                json={"watchdog_id": self.watchdog_id, "reasons": reasons},
+                headers={"Authorization": f"Bearer {self.xp_executor_token}"},
+                timeout=5.0,
+            )
+            self._xp_halted = response.status_code == 200
+        except httpx.HTTPError as exc:
+            self._xp_halted = False
+            logger.error("xp executor halt failed: %s", exc)
+
     async def _heartbeat(self, result: CycleResult) -> None:
         try:
             await self.api.post(
@@ -147,7 +174,22 @@ class Watchdog:
         else:
             # A clear cycle ends the incident; halts stay until an operator releases them.
             self._api_halted = self._executor_halted = False
-        result = CycleResult(obs.at, trips, status, self._api_halted, self._executor_halted)
+        # The XP node is its own incident: it halts the XP executor only.
+        xp_trips, xp_status = self._checks.evaluate_xp(obs)
+        if xp_trips:
+            logger.error("watchdog tripped on the XP node: %s", xp_trips)
+            await self._halt_xp(xp_trips, obs)
+        else:
+            self._xp_halted = False
+        if self.xp_executor is not None:
+            xp_status["xp_halted_by_watchdog"] = str(self._xp_halted).lower()
+        result = CycleResult(
+            obs.at,
+            trips + xp_trips,
+            {**status, **xp_status},
+            self._api_halted,
+            self._executor_halted,
+        )
         await self._heartbeat(result)
         return result
 

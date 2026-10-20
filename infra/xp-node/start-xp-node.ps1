@@ -54,6 +54,13 @@ if (-not (Test-Path $secretsFile)) {
     @{ executor_token = $token; bridge_token = $bridge } | ConvertTo-Json | Set-Content $secretsFile -Encoding ascii
 }
 $secrets = Get-Content $secretsFile -Raw | ConvertFrom-Json
+if (-not $secrets.watchdog_token) {
+    # Halt-only token for the Oracle watchdog (show-xp-node-token.ps1 -Watchdog). Added once to an
+    # existing node without touching its executor and bridge tokens.
+    $secrets | Add-Member -NotePropertyName watchdog_token -NotePropertyValue (
+        [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
+    $secrets | ConvertTo-Json | Set-Content $secretsFile -Encoding ascii
+}
 
 Write-Host "XP node: demo login $Login on $Server"
 Write-Host "  bridge   http://127.0.0.1:8200   (this PC only)"
@@ -98,6 +105,7 @@ Write-Host "bridge: $($health.account_mode) on $($health.server)"
 
 $executorEnv = @{
     EXECUTOR_VENUE = "XP_B3"; EXECUTOR_API_TOKEN = $secrets.executor_token
+    EXECUTOR_WATCHDOG_TOKEN = $secrets.watchdog_token
     EXECUTOR_BRIDGE_URL = "http://127.0.0.1:8200"; EXECUTOR_BRIDGE_TOKEN = $secrets.bridge_token
     EXECUTOR_SYMBOLS = $Symbols; EXECUTOR_PERMIT_PUBLIC_KEY = $PermitPublicKey
     EXECUTOR_DATABASE_URL = ("sqlite+aiosqlite:///" + ((Join-Path $state "xp-node\executor-xp.db") -replace '\\', '/'))
@@ -108,4 +116,5 @@ if (-not (Wait-Health "http://${BindIp}:${ExecutorPort}/health")) {
 $ex = Wait-Health "http://${BindIp}:${ExecutorPort}/health"
 if (-not $ex) { throw "The XP executor did not come up." }
 Write-Host "XP executor: $($ex.status) ($($ex.venue_environment))"
-Write-Host "Next: run show-xp-node-token.ps1 and give the token to set-xp-node.sh on the API instance."
+Write-Host "Next: run show-xp-node-token.ps1 for set-xp-node.sh on the API instance, and"
+Write-Host "      show-xp-node-token.ps1 -Watchdog for set-xp-node.sh on the watchdog instance."
