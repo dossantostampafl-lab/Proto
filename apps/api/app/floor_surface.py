@@ -16,12 +16,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, WebSocket
 
 from .settings import settings
 from .websockets import hub
+
+_BRT = ZoneInfo("America/Sao_Paulo")
 
 logger = logging.getLogger("proto.floor")
 
@@ -254,6 +258,67 @@ async def publish(event: dict[str, Any]) -> None:
 
 def data_mode() -> str:
     return "TESTNET" if settings.oms_execution_backend == "executor" else "PAPER"
+
+
+_SIGNAL_EVENTS = frozenset({"TRADINGVIEW_SIGNAL_ACCEPTED", "PROTO_STRATEGY_SIGNAL"})
+
+
+def summarize(events: Iterable[Any], *, day: str, window: int) -> dict[str, object]:
+    """Counts of journaled events: orders filled (all and today), refusals and signals today.
+
+    Read from the operational journal's in-memory window, never estimated: when the window is
+    full the totals cover only it, and `window_full` says so (the UI prints them as "at least").
+    `day` is the Brasilia date (YYYY-MM-DD) that "today" means.
+    """
+
+    total = today = refused_today = signals_today = seen = 0
+    by_venue: dict[str, int] = {}
+    since: str | None = None
+    for event in events:
+        seen += 1
+        since = since or event.timestamp
+        local_day = datetime.fromisoformat(event.timestamp).astimezone(_BRT).date().isoformat()
+        is_today = local_day == day
+        if event.event_type == "ORDER_FILLED":
+            total += 1
+            today += is_today
+            venue = str(event.payload.get("instrument_id", "")).split(":", 1)[0] or "UNKNOWN"
+            by_venue[venue] = by_venue.get(venue, 0) + 1
+        elif event.event_type == "ORDER_REFUSED":
+            refused_today += is_today
+        elif event.event_type in _SIGNAL_EVENTS:
+            signals_today += is_today
+    return {
+        "orders_filled_total": total,
+        "orders_filled_today": today,
+        "orders_refused_today": refused_today,
+        "signals_today": signals_today,
+        "orders_filled_by_venue": by_venue,
+        "day": day,
+        "timezone": "America/Sao_Paulo",
+        "window_events": seen,
+        "window_full": seen >= window,
+        "since": since,
+    }
+
+
+@router.get("/v1/floor/summary")
+def floor_summary() -> dict[str, object]:
+    """Read-only totals for the control-room view, from the operational journal."""
+
+    from services.events.journal import DEFAULT_WINDOW
+
+    from .event_state import operational_journal
+
+    day = datetime.now(_BRT).date().isoformat()
+    events = operational_journal.journal.recent(DEFAULT_WINDOW)
+    return {
+        **summarize(events, day=day, window=DEFAULT_WINDOW),
+        "data_mode": data_mode(),
+        "journal": operational_journal.integrity.value,
+        "financial_connectivity": False,
+        "real_money_execution": False,
+    }
 
 
 @router.get("/v1/floor/state")
