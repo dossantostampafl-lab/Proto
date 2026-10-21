@@ -158,6 +158,12 @@ INITIAL_SLOTS: tuple[Slot, ...] = tuple(
     for kind in (SlotKind.EMA, SlotKind.TRADINGVIEW)
 )
 
+# Own-strategy agents on B3 (XP demo account), added only with settings.agent_b3_enabled and XP
+# routing configured: the two most liquid fractional symbols of the catalog.
+B3_SLOTS: tuple[Slot, ...] = tuple(
+    Slot(SlotKind.EMA, f"XP_B3:{symbol}") for symbol in ("PETR4F", "VALE3F")
+)
+
 
 def slot_of(signal: Signal) -> Slot | None:
     """The slot a signal belongs to, or None when no agent trades that kind of signal.

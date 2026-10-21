@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     # Strategy lab (docs/research/strategy-lab-2026-10-19.md): newly spawned own-strategy agents
     # trade the lab ladder's strategy instead of an EMA pair. Signals only; off keeps the EMA.
     agent_lab_strategies_enabled: bool = False
+    # Two own-strategy agents on B3 (XP_B3:PETR4F, XP_B3:VALE3F), virtual R$200 each, trading
+    # one-share fractional lots on the XP demo account. Effective only while XP routing is
+    # configured; off, or without the XP node, the roster is exactly as before.
+    agent_b3_enabled: bool = False
     # Seed a lab strategy's bars from Binance public klines (read-only market data) instead of
     # waiting for live mids to fill its history. Required by agent_lab_strategies_enabled.
     agent_lab_warmup_klines: bool = False

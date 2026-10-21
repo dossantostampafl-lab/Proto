@@ -38,6 +38,13 @@ The capital is a sizing budget inside the paper or testnet account. It is not mo
     start otherwise), which seeds its bars from Binance public klines instead of waiting weeks
     for live mids. Evidence and caveats:
     `docs/research/strategy-lab-2026-10-19.md`.
+  - With `AGENT_B3_ENABLED=true` and XP routing configured (`/etc/proto/xp.env`), two more
+    own-strategy agents join the roster: `XP_B3:PETR4F` and `XP_B3:VALE3F`, R$200 each, on the
+    XP **demo** account. They run the same EMA cross on the MT5 terminal's quotes, which go
+    stale outside the session, and the Risk Engine refuses B3 orders outside 10:00-17:55
+    (Brasilia). Fractional lots are whole shares, so their trades are a few shares (R$200 at
+    R$38 is 5 shares at most). Without the XP node, or with the flag off, the roster keeps its
+    six Binance slots. The image turns the flag on; it only takes effect where XP is set.
 
 ## Routing and attribution
 
