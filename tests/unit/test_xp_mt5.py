@@ -213,3 +213,14 @@ def test_a_bridge_outage_is_an_unknown_outcome_never_a_rejection() -> None:
     assert bridge_client("http://10.20.2.12:8200/", "t").base_url == httpx.URL(
         "http://10.20.2.12:8200"
     )
+
+
+def test_mt5_server_times_are_brasilia_wall_clock_not_utc() -> None:
+    """XP's MT5 writes 10:05 Brasilia as an epoch that reads 10:05 UTC: it is 13:05 UTC."""
+
+    from datetime import UTC, datetime
+
+    from apps.mt5_bridge import service
+
+    wall_as_epoch = datetime(2026, 10, 21, 10, 5, tzinfo=UTC).timestamp()
+    assert service._time(wall_as_epoch) == "2026-10-21T13:05:00+00:00"

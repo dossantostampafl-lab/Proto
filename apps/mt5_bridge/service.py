@@ -15,6 +15,7 @@ token. It translates and never decides:
 from __future__ import annotations
 
 import hmac
+import os
 import re
 import sqlite3
 import threading
@@ -22,6 +23,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -95,10 +97,17 @@ def _account_mode(account: dict[str, Any] | None) -> str:
     )
 
 
+# MT5 reports tick and order times as the trade server's wall clock written as epoch seconds,
+# not as UTC. XP's server runs on Brasilia time: read it there, or every quote looks hours old.
+SERVER_TIMEZONE = ZoneInfo(os.environ.get("MT5_SERVER_TIMEZONE", "America/Sao_Paulo"))
+
+
 def _time(value: Any) -> str:
     seconds = float(value or 0)
-    stamp = datetime.fromtimestamp(seconds, UTC) if seconds else datetime.now(UTC)
-    return stamp.isoformat()
+    if not seconds:
+        return datetime.now(UTC).isoformat()
+    wall = datetime.fromtimestamp(seconds, UTC).replace(tzinfo=None)
+    return wall.replace(tzinfo=SERVER_TIMEZONE).astimezone(UTC).isoformat()
 
 
 def create_app(terminal: g.Mt5Gateway, *, token: str, store_path: Path) -> FastAPI:
@@ -288,7 +297,6 @@ def create_app(terminal: g.Mt5Gateway, *, token: str, store_path: Path) -> FastA
 
 
 def main() -> None:  # pragma: no cover - runs on the Windows VM
-    import os
 
     import uvicorn
 
