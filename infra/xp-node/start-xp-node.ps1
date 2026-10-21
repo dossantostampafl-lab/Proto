@@ -38,7 +38,7 @@ New-Item -ItemType Directory -Force $state | Out-Null
 if (-not $BindIp) {
     # The installer does not always put tailscale.exe on PATH (a scheduled task sees none).
     $ts = (Get-Command tailscale -ErrorAction SilentlyContinue).Source
-    if (-not $ts) { $ts = Join-Path $env:ProgramFiles "Tailscale	ailscale.exe" }
+    if (-not $ts) { $ts = Join-Path (Join-Path $env:ProgramFiles "Tailscale") "tailscale.exe" }
     if (-not (Test-Path $ts)) { throw "Tailscale is not installed. Install it from https://tailscale.com/download, sign in, and run again." }
     $BindIp = (& $ts ip -4 | Select-Object -First 1).Trim()
     if (-not $BindIp) { throw "Tailscale has no IPv4 address: run 'tailscale up' first." }

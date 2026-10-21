@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 $start = Join-Path $PSScriptRoot "start-xp-node.ps1"
 $stopScript = {
     Get-CimInstance Win32_Process | Where-Object {
-        $_.Name -eq "python.exe" -and $_.CommandLine -match "apps\.mt5_bridge|apps\.executor\.main"
+        $_.Name -like "python*.exe" -and $_.CommandLine -match "apps\.mt5_bridge|apps\.executor\.main"
     } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 }.ToString()
 $stopFile = Join-Path $env:USERPROFILE "proto-state\stop-xp-node.ps1"
