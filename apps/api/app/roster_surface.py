@@ -19,8 +19,11 @@ from fastapi import APIRouter
 
 from services.agents.roster import (
     AGENT_STARTING_CAPITAL,
+    B3_SLOTS,
+    INITIAL_SLOTS,
     AgentEliminated,
     AgentRoster,
+    Slot,
     SlotKind,
     TraderAgent,
     elimination_floor,
@@ -53,12 +56,21 @@ async def _journal(event_type: str, payload: dict[str, Any], key: str) -> None:
     )
 
 
+def roster_slots() -> tuple[Slot, ...]:
+    """The Binance slots, plus the B3 ones when B3 agents are on and the XP node is configured."""
+
+    if settings.agent_b3_enabled and settings.xp_routing_enabled:
+        return INITIAL_SLOTS + B3_SLOTS
+    return INITIAL_SLOTS
+
+
 def roster() -> AgentRoster:
     global _roster
     if _roster is None:
         _roster = AgentRoster(
             control_state.current().engine,
             recorder=_journal,
+            slots=roster_slots(),
             lab_strategies=settings.agent_lab_strategies_enabled,
         )
     return _roster

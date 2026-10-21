@@ -31,6 +31,22 @@ _MAX_QUOTE_AGE_SECONDS = 10.0
 _INSTRUMENTS = tuple(
     i for i in sorted(PAPER_INSTRUMENTS) if i.startswith("BINANCE_SPOT:") and i.endswith("USDT")
 )
+
+
+def instruments() -> tuple[str, ...]:
+    """Binance pairs, plus the B3 agents' symbols while B3 agents and XP routing are on.
+
+    B3 quotes come from the MT5 terminal with its own timestamps: outside the session they go
+    stale and feed nothing, and the Risk Engine refuses B3 orders outside 10:00-17:55 anyway.
+    """
+
+    if settings.agent_b3_enabled and settings.xp_routing_enabled:
+        from services.agents.roster import B3_SLOTS
+
+        return _INSTRUMENTS + tuple(slot.instrument_id for slot in B3_SLOTS)
+    return _INSTRUMENTS
+
+
 _BOUNDARY = {
     "order_authority": False,
     "financial_connectivity": False,
@@ -88,7 +104,7 @@ async def tick(now: datetime | None = None) -> int:
 
     now = now or datetime.now(UTC)
     accepted = 0
-    for instrument_id in _INSTRUMENTS:
+    for instrument_id in instruments():
         quote = live_quote(instrument_id, market_source=settings.live_market_source)
         if quote is None or (now - quote.observed_at).total_seconds() > _MAX_QUOTE_AGE_SECONDS:
             continue
@@ -177,7 +193,7 @@ def strategy_status() -> dict[str, object]:
         "running": _task is not None and not _task.done(),
         "strategy_id": STRATEGY_ID,
         "market_source": settings.live_market_source,
-        "instruments": list(_INSTRUMENTS),
+        "instruments": list(instruments()),
         "books": strategy.status(),
         "lab_strategies": {k: v.status() for k, v in sorted(_lab_strategies.items())},
         **_counters,
