@@ -11,7 +11,8 @@ services:
     read_only: true
     init: true
     user: "10001:10001"
-    network_mode: bridge
+    networks:
+      - research-outbound
     cap_drop:
       - ALL
     security_opt:
@@ -28,3 +29,7 @@ services:
 secrets:
   finrobot_llm_key:
     file: ${PROTO_RESEARCH_LLM_KEY_FILE:?Set a local secret-file path outside the repository}
+
+networks:
+  research-outbound:
+    driver: bridge
