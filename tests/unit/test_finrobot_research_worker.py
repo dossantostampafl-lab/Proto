@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -9,7 +10,11 @@ from types import ModuleType
 
 import pytest
 
-from apps.research_worker import __main__ as runner
+_RUNNER_PATH = Path(__file__).resolve().parents[2] / "apps" / "research_worker" / "__main__.py"
+_SPEC = importlib.util.spec_from_file_location("proto_research_adapter", _RUNNER_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+runner = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(runner)
 
 
 def test_original_pipeline_mapping_uses_verified_sdk_names() -> None:
