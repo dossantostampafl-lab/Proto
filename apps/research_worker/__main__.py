@@ -84,10 +84,10 @@ async def run_research(
 
     # Deliberately lazy import: the PROTO runtime never imports or initializes
     # the third-party model, data providers or remote services.
-    from finrobot import FinRobot  # type: ignore[import-not-found]
-
     provider = model.split(":", 1)[0]
     try:
+        from finrobot import FinRobot  # type: ignore[import-not-found]
+
         async with FinRobot(
             model=model,
             provider_keys={provider: llm_key},
