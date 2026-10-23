@@ -1,0 +1,26 @@
+# Optional research-only sidecar. NEVER add broker/OMS/executor secrets.
+# The original FinRobot package is installed at an immutable upstream SHA.
+FROM python:3.13-slim
+
+ARG FINROBOT_SHA=2717499b8e30f242640af08c4ad9afd1113c2d45
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --no-cache-dir \
+    "finrobot @ git+https://github.com/AI4Finance-Foundation/FinRobot.git@${FINROBOT_SHA}#subdirectory=finrobot_desktop"
+
+RUN groupadd --gid 10001 research \
+    && useradd --uid 10001 --gid 10001 --create-home research
+
+WORKDIR /opt/proto
+COPY apps/research_worker /opt/proto/apps/research_worker
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/home/research \
+    FINROBOT_CACHE_DB_PATH=/work/finrobot_cache.sqlite3
+
+USER 10001:10001
+
+ENTRYPOINT ["python", "-m", "apps.research_worker"]
