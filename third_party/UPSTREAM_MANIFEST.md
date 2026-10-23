@@ -13,6 +13,22 @@ The four copied Markdown files are original **instructions**, not standalone
 agents; the upstream FinRobot agent factory and financial data pipelines have
 **not** been copied or executed in PROTO.
 
+## A1 optional runtime adapter (separate branch, NOT deployed)
+
+The original FinRobot Python SDK is referenced in `Dockerfile.research` by
+its pinned upstream commit `2717499b8e30f242640af08c4ad9afd1113c2d45`
+and installed using the upstream package's `finrobot_desktop/pyproject.toml`.
+
+- PROTO-authored glue: `apps/research_worker/__main__.py`.
+- Original upstream implementation: `finrobot/sdk.py`, factory/pipelines and
+  compute modules at the pinned commit (not copied into PROTO).
+- Execution mode: operator-launched ephemeral container, no API/web/executor
+  integration, no activated resident agents or live feeds.
+- Validation: `tests/unit/test_finrobot_research_worker.py` (offline SDK stub),
+  plus pending optional container smoke checks.
+- Data-source and LLM secrets are not supplied by this repository.
+- No claim of end-to-end vendor API success or production readiness.
+
 ## Accepted for further isolated evaluation, not imported
 
 | Repository | Immutable reference | Purpose | Decision |
