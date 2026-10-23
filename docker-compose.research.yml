@@ -1,0 +1,35 @@
+# Opt-in ONLY: docker compose -f docker-compose.research.yml --profile research run
+# This is a separate Compose project/network, not the API/executor stack.
+name: proto-research
+
+services:
+  finrobot-research:
+    profiles: ["research"]
+    build:
+      context: .
+      dockerfile: Dockerfile.research
+    read_only: true
+    init: true
+    user: "10001:10001"
+    networks:
+      - research-outbound
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+      - /work:rw,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=0700
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 1.5
+    secrets:
+      - finrobot_llm_key
+
+secrets:
+  finrobot_llm_key:
+    file: ${PROTO_RESEARCH_LLM_KEY_FILE:?Set a local secret-file path outside the repository}
+
+networks:
+  research-outbound:
+    driver: bridge

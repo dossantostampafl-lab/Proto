@@ -1,0 +1,32 @@
+name: Research Worker
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile.research"
+      - "docker-compose.research.yml"
+      - "apps/research_worker/**"
+      - "tests/unit/test_finrobot_research_worker.py"
+      - ".github/workflows/research-worker.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  original-finrobot-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build optional upstream-pinned research sidecar
+        run: docker build --progress plain -f Dockerfile.research -t proto-finrobot-research:pr .
+      - name: Verify pinned original SDK imports without provider credentials
+        run: |
+          docker run --rm --network none --read-only \
+            --entrypoint python proto-finrobot-research:pr \
+            -c "from finrobot.sdk import FinRobot; from finrobot.engine.agents.factory import SUB_AGENT_ROLES; assert 'data' in SUB_AGENT_ROLES; print('ORIGINAL_SDK_IMPORT_OK')"
+      - name: Verify PROTO read-only request validation offline
+        run: |
+          docker run --rm --network none --read-only \
+            proto-finrobot-research:pr \
+            --ticker AAPL --pipeline earnings --model anthropic:claude-sonnet-4-6 --validate-only
