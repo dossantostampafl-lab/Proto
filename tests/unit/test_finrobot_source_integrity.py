@@ -29,5 +29,5 @@ def test_finrobot_vendored_file_is_upstream_identical(
 ) -> None:
     path = _VENDOR / relative_path
     content = path.read_bytes()
-    git_blob = b"blob " + str(len(content)).encode("ascii") + b"\\0" + content
+    git_blob = b"blob " + str(len(content)).encode("ascii") + b"\0" + content
     assert hashlib.sha1(git_blob, usedforsecurity=False).hexdigest() == expected_sha
