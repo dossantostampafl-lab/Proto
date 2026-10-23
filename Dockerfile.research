@@ -18,7 +18,7 @@ WORKDIR /opt/proto
 COPY apps/research_worker /opt/proto/apps/research_worker
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    HOME=/home/research \
+    HOME=/work \
     FINROBOT_CACHE_DB_PATH=/work/finrobot_cache.sqlite3
 
 USER 10001:10001
