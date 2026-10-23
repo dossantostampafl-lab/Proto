@@ -16,6 +16,7 @@ _VENDOR = Path(__file__).resolve().parents[2] / "third_party" / "finrobot"
 
 _UPSTREAM_GIT_BLOBS = {
     "LICENSE": "6cc0d28c44e482825bba73c84761e3d65f138f42",
+    "NOTICE": "4ad1671f14994630695c91b14ee7cfa14cacb6af",
     "agents/instructions/data_agent.md": "333559ee755fab7de14c05608cfaf16817144c57",
     "agents/instructions/modeling_agent.md": "10fa0907d88782d5f1396d734c95d9b10720bc4c",
     "agents/instructions/synthesis_agent.md": "ffe0c2e5e34d7785689869fa7fdea7d546d31e8b",
