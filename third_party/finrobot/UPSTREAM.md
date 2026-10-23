@@ -7,12 +7,13 @@ Status: **VENDORED / INATIVO**. Estes arquivos são cópias fiéis de fontes ope
 - Repositório: https://github.com/AI4Finance-Foundation/FinRobot
 - Commit: `2717499b8e30f242640af08c4ad9afd1113c2d45`
 - Licença original: `LICENSE` (Apache License 2.0, cópia integral preservada neste diretório)
-- Sem patches nem edição nos arquivos importados nesta etapa.
+- Sem patches nem edição nos arquivos importados nesta etapa. O `NOTICE` original também é preservado, inclusive sua política de marca registrada.
 - Código executável original do criador de agentes, **não importado nesta etapa**: [factory.py](https://github.com/AI4Finance-Foundation/FinRobot/blob/2717499b8e30f242640af08c4ad9afd1113c2d45/finrobot_desktop/finrobot/engine/agents/factory.py). Esse módulo depende de outras partes do FinRobot e de `pydantic_ai`; não é um componente isoladamente executável.
 
 | Arquivo local | Caminho original no commit acima | Git blob SHA-1 |
 |---|---|---|
 | `LICENSE` | `LICENSE` | `6cc0d28c44e482825bba73c84761e3d65f138f42` |
+| `NOTICE` | `NOTICE` | `4ad1671f14994630695c91b14ee7cfa14cacb6af` |
 | `agents/instructions/data_agent.md` | `finrobot_desktop/finrobot/engine/agents/instructions/data_agent.md` | `333559ee755fab7de14c05608cfaf16817144c57` |
 | `agents/instructions/modeling_agent.md` | `finrobot_desktop/finrobot/engine/agents/instructions/modeling_agent.md` | `10fa0907d88782d5f1396d734c95d9b10720bc4c` |
 | `agents/instructions/synthesis_agent.md` | `finrobot_desktop/finrobot/engine/agents/instructions/synthesis_agent.md` | `ffe0c2e5e34d7785689869fa7fdea7d546d31e8b` |
