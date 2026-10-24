@@ -43,8 +43,8 @@ function globeTexture(): THREE.Texture {
 
 function floorTexture(): THREE.Texture {
   const { c, g } = canvas(256, 256);
-  g.fillStyle = "#0b1a33"; g.fillRect(0, 0, 256, 256);
-  g.strokeStyle = "rgba(59,130,246,0.18)"; g.lineWidth = 2; g.strokeRect(0, 0, 256, 256);
+  g.fillStyle = "#13284d"; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = "rgba(96,165,250,0.28)"; g.lineWidth = 2; g.strokeRect(0, 0, 256, 256);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(16, 12);
   return t;
@@ -93,7 +93,7 @@ export class ControlEngine {
     this.animate = !reduced;
     const own = <T extends { dispose: () => void }>(x: T): T => { this.disposables.push(x); return x; };
 
-    this.scene.add(new THREE.HemisphereLight(0x93c5fd, 0x0b1a33, 1.1));
+    this.scene.add(new THREE.HemisphereLight(0xbfdbfe, 0x1e3a8a, 1.5));
     const key = new THREE.DirectionalLight(0xffffff, 0.9); key.position.set(10, 30, 15); this.scene.add(key);
 
     const floor = new THREE.Mesh(own(new THREE.PlaneGeometry(64, 48)), own(new THREE.MeshLambertMaterial({ map: own(floorTexture()) })));
@@ -111,7 +111,7 @@ export class ControlEngine {
     // Ring of consoles with blue screens facing the globe; the entrance faces the camera.
     const consoleGeo = own(new THREE.BoxGeometry(1.5, 0.7, 0.7));
     const screenGeo = own(new THREE.PlaneGeometry(1.2, 0.5));
-    const consoleMat = own(new THREE.MeshLambertMaterial({ color: 0x1e293b }));
+    const consoleMat = own(new THREE.MeshLambertMaterial({ color: 0x334155 }));
     const screenMat = own(new THREE.MeshBasicMaterial({ color: 0x60a5fa }));
     const n = 22;
     for (let i = 0; i < n; i++) {
@@ -137,7 +137,7 @@ export class ControlEngine {
     const deskGeo = own(new THREE.BoxGeometry(2.2, 0.75, 1.1));
     const monGeo = own(new THREE.BoxGeometry(1.1, 0.6, 0.06));
     const chairGeo = own(new THREE.BoxGeometry(0.6, 0.5, 0.6));
-    const deskMat = own(new THREE.MeshLambertMaterial({ color: 0x172554 }));
+    const deskMat = own(new THREE.MeshLambertMaterial({ color: 0x334155 }));
     const monMat = own(new THREE.MeshBasicMaterial({ color: 0x93c5fd }));
     const chairMat = own(new THREE.MeshLambertMaterial({ color: 0x0f172a }));
     const addDesk = (x: number, z: number, floorId: "binance" | "xp") => {
@@ -146,8 +146,9 @@ export class ControlEngine {
       const ch = new THREE.Mesh(chairGeo, chairMat); ch.position.set(x, 0.25, z + 0.95); this.scene.add(ch);
       this.desks.push({ at: new THREE.Vector3(x, 0, z + 1.5), floor: floorId });
     };
-    for (const x of [-20, -16.5]) for (const z of [-8, -4.5, -1, 2.5]) addDesk(x, z, "binance");
-    for (const x of [16.5, 20]) for (const z of [-8, -4.5, -1, 2.5]) addDesk(x, z, "binance");
+    // Seat order alternates left and right islands, inner column first and rows spread apart, so a
+    // small roster fills the room evenly and its name tags do not stack on one another.
+    for (const x of [16.5, 20]) for (const z of [-8, 2.5, -4.5, -1]) { addDesk(-x, z, "binance"); addDesk(x, z, "binance"); }
     for (const x of [-6, -2.5, 1, 4.5]) addDesk(x, 15, "xp");
 
     // Glass partitions with an amber strip, and potted plants.

@@ -39,6 +39,18 @@ function b3Open(now: Date): boolean {
   return !["Sat", "Sun"].includes(get("weekday")) && minutes >= B3_OPEN && minutes < B3_CLOSE;
 }
 
+const AGENT_ID = /\bAG-\d{4}-[A-Z]+\b/gi;
+/** The latest action on this agent's symbol that is not about another agent (a "joined" line names one). */
+export function lastFor(a: Agent, actions: FloorAction[]): FloorAction | null {
+  for (let i = actions.length - 1; i >= 0; i--) {
+    const act = actions[i];
+    if (act.symbol !== a.symbol) continue;
+    const named = act.headline.match(AGENT_ID);
+    if (!named || named.some(id => id.toUpperCase() === a.id.toUpperCase())) return act;
+  }
+  return null;
+}
+
 /** One truthful status line per agent, from its book and the latest pipeline action on its symbol. */
 export function statusLine(a: Agent, last: FloorAction | null, b3: boolean, xpLive: boolean): string {
   if (a.status === "ELIMINATED") return "eliminado · em descanso";
@@ -46,7 +58,7 @@ export function statusLine(a: Agent, last: FloorAction | null, b3: boolean, xpLi
   if (a.floor === "xp" && !b3) return "fora do pregão";
   const held = finiteDecimal(a.position);
   if (held !== null && !/^0*(\.0*)?$/.test(held)) return `posicionado · ${held} ${a.symbol.replace(/USDT$|F$/, "")}`;
-  if (last) return last.headline.toLowerCase().slice(0, 40);
+  if (last) return last.headline.length > 44 ? `${last.headline.slice(0, 43)}…` : last.headline;
   return a.kind === "tradingview" ? "aguardando alerta…" : "aguardando cruzamento…";
 }
 
@@ -145,11 +157,6 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const agents = roster?.agents ?? [];
   const b3 = b3Open(now);
   const busySymbols = useMemo(() => new Set(STATIONS.filter(s => active(s.id)).map(s => latest[s.id]?.symbol).filter((s): s is string => Boolean(s))), [active, latest]);
-  const lastBySymbol = useMemo(() => {
-    const m = new Map<string, FloorAction>();
-    for (const a of actions) if (a.symbol) m.set(a.symbol, a);
-    return m;
-  }, [actions]);
   const sceneAgents: ControlAgent[] = agents.map(a => ({ id: a.id, floor: a.floor, active: a.status === "ACTIVE", busy: busySymbols.has(a.symbol) }));
   const sceneKey = JSON.stringify(sceneAgents);
 
@@ -161,11 +168,15 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
     engine.current = instance;
     instance.onFirstFrame = () => setReady(true);
     instance.onAnchors = (anchors: Record<string, Anchor>) => {
+      const width = box.clientWidth;
       for (const [id, node] of tags.current) {
         const a = anchors[id];
         if (!a || !a.visible) { node.style.visibility = "hidden"; continue; }
+        // Keep the tag inside the room: a robot near the edge gets its tag nudged inwards.
+        const half = node.offsetWidth / 2 + 6;
+        const x = Math.min(Math.max(a.x, half), Math.max(half, width - half));
         node.style.visibility = "visible";
-        node.style.transform = `translate(${a.x.toFixed(1)}px, ${a.y.toFixed(1)}px) translate(-50%, -100%)`;
+        node.style.transform = `translate(${x.toFixed(1)}px, ${a.y.toFixed(1)}px) translate(-50%, -100%)`;
       }
     };
     const lost = (e: Event) => { e.preventDefault(); setFailed(true); };
@@ -217,6 +228,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
           <li className={b3 ? "live" : "stale"}>B3 {b3 ? "PREGÃO ABERTO" : "FECHADA"}</li>
         </ul>
         <time>{date}</time>
+        <button type="button" className="fc-pause" aria-pressed={paused} disabled={reduced} title={reduced ? "Movimento reduzido pelo sistema" : undefined} onClick={() => setPaused(p => !p)}>{paused ? "Retomar animação" : "Pausar animação"}</button>
       </header>
       <Kpis summary={summary} ledger={ledger} />
       <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} />
@@ -224,13 +236,12 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
         {agents.map(a => (
           <div key={a.id} ref={ref(a.id)} className={`fc-tag${a.status === "ACTIVE" ? "" : " out"}`}>
             <b><i className={busySymbols.has(a.symbol) ? "busy" : ""} />{a.name ?? a.id}</b>
-            <small>{statusLine(a, lastBySymbol.get(a.symbol) ?? null, b3, xpLive)}</small>
+            <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
             <em>{brl(a.equity)}</em>
           </div>
         ))}
       </div>
       <Queue actions={actions} agents={agents} />
-      <button type="button" className="fc-pause" aria-pressed={paused} disabled={reduced} title={reduced ? "Movimento reduzido pelo sistema" : undefined} onClick={() => setPaused(p => !p)}>{paused ? "Retomar animação" : "Pausar animação"}</button>
       {!ready && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
       {failed && <p className="fl-3d-loading" role="alert">Controle 3D indisponível neste dispositivo (WebGL). Use a vista Realista.</p>}
     </div>
