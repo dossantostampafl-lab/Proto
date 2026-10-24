@@ -10,13 +10,14 @@ import { type Health, type LiveStatus, type Market, post, type Runtime, type Sym
 import { usePoll, useMarket } from "./hooks";
 import { CommandContext, Dot, type LogEntry, pct, tone, usd } from "./ui";
 import { Command } from "./views/Command";
+import { Agents } from "./views/Agents";
 import { Floor } from "./views/Floor";
 import { Lab } from "./views/Lab";
 import { Replay } from "./views/Replay";
 import { System } from "./views/System";
 import { Trade } from "./views/Trade";
 
-const VIEWS = ["Floor", "Command", "Trade", "Lab", "Replay", "System"] as const;
+const VIEWS = ["Floor", "Command", "Agents", "Trade", "Lab", "Replay", "System"] as const;
 type View = (typeof VIEWS)[number];
 
 export type Shared = {
@@ -127,6 +128,7 @@ function App() {
         <main key={view} className="view">
           {view === "Floor" && <Floor {...shared} />}
           {view === "Command" && <Command {...shared} />}
+          {view === "Agents" && <Agents />}
           {view === "Trade" && <Trade {...shared} />}
           {view === "Lab" && <Lab {...shared} />}
           {view === "Replay" && <Replay />}

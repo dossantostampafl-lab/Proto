@@ -1,0 +1,31 @@
+/* Agents dashboard. Theme tokens only, so it reads as one system with the other views. */
+.agent-dash { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.agent-dash .panel { min-width: 0; overflow-wrap: anywhere; }
+.agent-dash .agent-span { grid-column: 1 / -1; }
+.agent-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.agent-kpis { margin-top: 4px; }
+.agent-read { font: 400 12px var(--mono); color: var(--warn); }
+.agent-note { color: var(--muted); font-size: 13px; }
+.agent-src { display: block; margin-top: 10px; color: var(--muted); font: 400 11px var(--mono); }
+.agent-src a { color: var(--accent); }
+.agent-dash .up { color: var(--up); }
+.agent-dash .down { color: var(--down); }
+.agent-dash .warn { color: var(--warn); }
+.agent-dash .muted { color: var(--muted); }
+.agent-table tr.selected td { background: rgba(169, 179, 190, 0.10); }
+.agent-pick { background: none; border: 0; padding: 0; color: var(--text); font: 600 12px var(--mono); cursor: pointer; text-decoration: underline dotted var(--line-strong); }
+.agent-pick[aria-pressed="true"] { color: var(--accent); }
+.agent-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 14px 0 0; font-size: 13px; }
+.agent-dl dt { color: var(--muted); font: 400 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; padding-top: 2px; }
+.agent-dl dd { margin: 0; }
+.agent-decisions { list-style: none; margin: 0; padding: 0; max-height: 460px; overflow: auto; }
+.agent-decisions li { border-bottom: 1px dashed var(--line); }
+.agent-decisions summary { display: grid; grid-template-columns: 130px 150px minmax(0, 1fr) auto; gap: 10px; padding: 8px 0; cursor: pointer; font: 400 12px var(--mono); }
+.agent-decisions summary b { font-weight: 600; }
+.agent-decisions time { color: var(--muted); }
+.agent-decisions details[open] { padding-bottom: 10px; }
+@media (max-width: 900px) {
+  .agent-dash { grid-template-columns: minmax(0, 1fr); }
+  .agent-decisions summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .agent-dl { grid-template-columns: minmax(0, 1fr); }
+}
