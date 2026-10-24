@@ -1,0 +1,11 @@
+.agent-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.agent-evidence > :first-child { grid-column: 1 / -1; }
+.agent-evidence .panel { min-width: 0; padding: 20px; overflow-wrap: anywhere; }
+.agent-evidence select { display: block; width: 100%; margin: 12px 0; padding: 10px; color: #E8F6FF; background: #060E1A; border: 1px solid #6F8AA6; }
+.agent-evidence dt { margin-top: 12px; color: #6F8AA6; }
+.agent-evidence dd { margin: 4px 0; }
+.agent-evidence pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-evidence summary { cursor: pointer; padding: 10px 0; }
+.agent-evidence a { color: #00F0FF; }
+.agent-evidence :focus-visible { outline: 2px solid #00F0FF; outline-offset: 3px; }
+@media (max-width: 900px) { .agent-evidence { grid-template-columns: minmax(0, 1fr); } }
