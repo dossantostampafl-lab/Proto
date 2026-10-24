@@ -1,14 +1,18 @@
 // The one value this dashboard keeps across browser sessions: which trading-floor view the viewer
-// picked ("Realista" or "Prédio"). Nothing else (no operator credential) is stored here, and a
+// picked ("Realista", "Prédio" or "Controle"). Nothing else (no operator credential) is stored here, and a
 // blocked or missing storage simply falls back to the realistic room.
 import { useCallback, useState } from "react";
 
-export type FloorViewMode = "realistic" | "building";
+export type FloorViewMode = "realistic" | "building" | "control";
 const KEY = "proto.floor.view";
 
-function read(): FloorViewMode {
-  try { return window.localStorage.getItem(KEY) === "building" ? "building" : "realistic"; } catch { return "realistic"; }
+const pick = (v: string | null): FloorViewMode => (v === "building" || v === "control" ? v : "realistic");
+
+function stored(): string | null {
+  try { return window.localStorage.getItem(KEY); } catch { return null; }
 }
+
+const read = (): FloorViewMode => pick(stored());
 
 export function useFloorViewMode(): [FloorViewMode, (mode: FloorViewMode) => void] {
   const [mode, setMode] = useState<FloorViewMode>(read);

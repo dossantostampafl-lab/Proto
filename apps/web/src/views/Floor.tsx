@@ -5,7 +5,7 @@ import { Button, Panel, Tag } from "../ui";
 import { DeskBoundary, DeskDrawer, DeskFailed, useDeskSelection, useXpLane, XpStrip } from "./floorDesks";
 import { hms, TONE_LABEL } from "./floorModel";
 
-import { useFloorViewMode } from "./floorViewPref";
+import { type FloorViewMode, useFloorViewMode } from "./floorViewPref";
 import { canRender3d, Fallback, type FloorAction, type FloorState, isHalted, type PromotionScope, Scene, STAGES, STATIONS, type StationId, TONE_COLOR, type Tone, type WatchdogSummary } from "./floorScene";
 
 function PromotionPath({ scopes }: { scopes: PromotionScope[] | undefined }) {
@@ -87,13 +87,16 @@ const ACTIVE_MS = 7000;
 
 // The stylized building ("Prédio") is its own on-demand chunk, loaded only when that view is chosen.
 const FloorBuilding = lazy(() => import("./floorBuilding/FloorBuilding"));
+// The mission-control room ("Controle") is a third on-demand chunk, loaded only when chosen.
+const FloorControl = lazy(() => import("./floorControl/FloorControl"));
 
-/** "Realista | Prédio": which view of the same live floor is shown; the choice is remembered on this device. */
-function ViewToggle({ mode, choose }: { mode: "realistic" | "building"; choose: (m: "realistic" | "building") => void }) {
+/** "Realista | Prédio | Controle": which view of the same live floor is shown; the choice is remembered on this device. */
+function ViewToggle({ mode, choose }: { mode: FloorViewMode; choose: (m: FloorViewMode) => void }) {
   return (
     <div className="fl-toggle" role="group" aria-label="Vista do pregão">
       <button type="button" aria-pressed={mode === "realistic"} onClick={() => choose("realistic")}>Realista</button>
       <button type="button" aria-pressed={mode === "building"} onClick={() => choose("building")}>Prédio</button>
+      <button type="button" aria-pressed={mode === "control"} onClick={() => choose("control")}>Controle</button>
     </div>
   );
 }
@@ -203,7 +206,15 @@ export function Floor({ market }: Shared) {
           {!floor.stateFresh && <span className="floor-stale">floor state {state == null ? "unavailable" : "last known"}</span>}
         </span>}
       >
-        {viewMode === "building" ? (
+        {viewMode === "control" ? (
+          buildingFailed || !canRender3d() ? <BuildingUnavailable text="Controle indisponível: este dispositivo não roda WebGL. Use a vista Realista." /> : (
+            <Fallback onError={() => setBuildingFailed(true)}>
+              <Suspense fallback={<BuildingUnavailable text="Carregando sala de controle…" />}>
+                <FloorControl market={market} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} active={floor.active} xp={xp.lane} />
+              </Suspense>
+            </Fallback>
+          )
+        ) : viewMode === "building" ? (
           buildingFailed || !canRender3d() ? <BuildingUnavailable text="Prédio indisponível: este dispositivo não roda WebGL. Use a vista Realista." /> : (
             <Fallback onError={() => setBuildingFailed(true)}>
               <Suspense fallback={<BuildingUnavailable text="Carregando prédio…" />}>
