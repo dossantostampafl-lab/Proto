@@ -159,9 +159,9 @@ def screen_texture(path: Path, seed: int) -> None:
 
 def floor_texture(path: Path) -> None:
     w = 1024
-    img = Image.new("RGB", (w, w), (20, 52, 118))
+    img = Image.new("RGB", (w, w), (11, 28, 70))
     d = ImageDraw.Draw(img)
-    d.rectangle([0, 0, w - 1, w - 1], outline=(52, 96, 170), width=4)
+    d.rectangle([0, 0, w - 1, w - 1], outline=(40, 82, 156), width=4)
     d.line([(w // 2, 0), (w // 2, w)], fill=(34, 70, 140), width=3)
     d.line([(0, w // 2), (w, w // 2)], fill=(34, 70, 140), width=3)
     noise = Image.effect_noise((w, w), 12).convert("RGB")
@@ -280,7 +280,7 @@ def build_room(k: Kit) -> list[dict]:
         screens.append(p)
 
     # Materials.
-    fl = k.principled("floor", "#123a7a", rough=0.14, coat=0.7)
+    fl = k.principled("floor", "#0b1f4a", rough=0.07, coat=1.0)
     nt = fl.node_tree
     tex = nt.nodes.new("ShaderNodeTexImage")
     tex.image = bpy.data.images.load(str(floor_png))
@@ -514,7 +514,7 @@ def build_room(k: Kit) -> list[dict]:
                     k.obj("cyl", "black", (x, cy, 0.25), (0.12, 0.12, 0.5))
                     # Anonymous seated silhouettes approximate the dense occupancy
                     # of the approved preview; no identifiable faces or live values.
-                    if (c + 2 * p + (1 if side > 0 else 0)) % 3 != 0:
+                    if (c + 2 * p + (1 if side > 0 else 0)) % 5 != 0:
                         k.obj("sphere", "operator", (x, cy - side * 0.18, 1.10), (0.37, 0.31, 0.51))
                         k.obj("sphere", "operatorFace", (x, cy - side * 0.22, 1.64), (0.21, 0.20, 0.23))
                         k.obj("sphere", "operator", (x, cy - side * 0.17, 1.76), (0.23, 0.22, 0.10))
@@ -541,15 +541,26 @@ def build_room(k: Kit) -> list[dict]:
         k.obj("cube", "amber", (cx, cy, 1.64), (ln, 0.16, 0.07), (0, 0, rz))
         k.obj("cube", "amber", (cx, cy, 0.02), (ln, 0.08, 0.02), (0, 0, rz))
 
-    # Plants and the lounge corner, plus a ring of planters around the hub (open towards the camera).
-    hub_plants = [(math.cos(a) * 15.3, math.sin(a) * 15.3) for a in (i / 18 * math.tau for i in range(18))
-                  if abs(math.sin(a) + 1) > 0.15]
-    for px_, py_ in PLANTS + hub_plants:
-        k.obj("cyl", "pot", (px_, py_, 0.4), (0.9, 0.9, 0.8))
+    # Raised walkway around the hub, as in the reference room: a deck between radius 14.4 and 16.0
+    # (inside the side galleries, whose inner edge is x = 16.4),
+    # glass balustrade on its outer edge with a cyan cap, an amber step edge, open towards the camera.
+    entrance = lambda a: abs(math.atan2(math.sin(a + math.pi / 2), math.cos(a + math.pi / 2))) < math.radians(24)  # noqa: E731
+    for i in range(96):
+        a = i / 96 * math.tau
+        if entrance(a):
+            continue
+        seg = math.tau * 15.2 / 96 * 1.02
+        for r, mat, z, sy, sz in [(15.2, "rim", 0.18, 1.6, 0.36), (15.95, "glass", 0.85, 0.08, 1.0),
+                                  (15.95, "cyan", 1.37, 0.12, 0.05), (14.42, "amber", 0.37, 0.07, 0.03)]:
+            k.obj("cube", mat, (math.cos(a) * r, math.sin(a) * r, z), (seg, sy, sz), (0, 0, a + math.pi / 2))
+    # Plants and the lounge corner, plus planters along the walkway (none in the entrance).
+    hub_plants = [(math.cos(a) * 15.15, math.sin(a) * 15.15, 0.36) for a in (i / 18 * math.tau for i in range(18)) if not entrance(a)]
+    for px_, py_, z0 in [(x, y, 0.0) for x, y in PLANTS] + hub_plants:
+        k.obj("cyl", "pot", (px_, py_, z0 + 0.4), (0.9, 0.9, 0.8))
         for j in range(11):
             a = j / 11 * math.tau + random.random() * 0.4
             tilt = 0.5 + random.random() * 0.5
-            k.obj("sphere", "leaf" if j % 2 else "leaf2", (px_ + math.cos(a) * 0.35, py_ + math.sin(a) * 0.35, 1.25 + random.random() * 0.3),
+            k.obj("sphere", "leaf" if j % 2 else "leaf2", (px_ + math.cos(a) * 0.35, py_ + math.sin(a) * 0.35, z0 + 1.25 + random.random() * 0.3),
                   (0.1, 0.22, 0.75), (tilt, 0, a + math.pi / 2))
     for sx, sy, rz in [(23, -12, math.pi), (23, -17.6, 0), (19, -14.8, -math.pi / 2)]:
         k.obj("cube", "sofa", (sx, sy, 0.3), (3.4, 1.1, 0.6), (0, 0, rz))
