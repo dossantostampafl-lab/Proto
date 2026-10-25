@@ -5,11 +5,11 @@ code, no third-party models, textures or photos). Licence: same as this reposito
 
 | File | What |
 |---|---|
-| `room.webp` | Landscape render of the empty room: no people, robots, text or numbers |
-| `room-portrait.webp` | Portrait render for phones |
+| `room.webp` | Landscape room render with anonymous unidentifiable operator silhouettes; no live labels, robots, text or numbers |
+| `room-portrait.webp` | Portrait render focusing on the globe and command hub for phones |
 | `robot.webp` | PROTO's own robot, four walk frames, transparent background |
 
-Screens in the render show abstract glowing panels only. Every value on the view (totals, agents,
+Screens in the render show abstract glowing panels only. Operator silhouettes are static set dressing, not agents or proof of active work. Every value on the view (totals, agents,
 status, queue, sources) is drawn live over the image by `src/views/floorControl/FloorControl.tsx`
 from the API. Seat, hub and globe positions come from `src/views/floorControl/anchors.json`, which
 the same script writes.
