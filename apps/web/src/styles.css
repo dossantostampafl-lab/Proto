@@ -884,3 +884,13 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 @media (prefers-reduced-motion: reduce) {
   .fc-room, .fc-globe, .fc-bot, .fc-tag { animation: none !important; transition: none !important; }
 }
+
+
+/* Legibility pass against the frozen high-resolution preview. */
+@media (min-width: 981px) {
+  .fc-kpis b { font-size: clamp(42px, 4.6vw, 72px); }
+  .fc-kpis > div { min-height: 139px; }
+  .fc-roster li b, .fc-roster li small { font-size: 12px; }
+  .fc-activity ol li { font-size: 11px; }
+  .fc-activity b { font-size: 11px; }
+}
