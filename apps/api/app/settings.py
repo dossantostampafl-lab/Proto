@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     xp_executor_url: str | None = None
     xp_executor_api_token: str | None = None
     operator_api_token: str | None = None
+    chatgpt_local_enabled: bool = False
+    chatgpt_profile: str = "default"
+    chatgpt_model: str = ""
     # Phase 6b: the independent watchdog's token. It can only halt and report a heartbeat.
     watchdog_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).

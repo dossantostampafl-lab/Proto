@@ -1,0 +1,11 @@
+{
+  "backend/app/inference/chatgpt_connect.py": "b135e1d0d5571c63d3f350fb4ae668879b0cc8a3",
+  "backend/app/inference/chatgpt_credentials.py": "f2bb3b73d1f8b2b7ac4f7452c86360ca55f00536",
+  "backend/app/inference/chatgpt_accounts.py": "7deb57988bb2ba342fff1cb5ed730693159bfefe",
+  "backend/app/inference/chatgpt_provider.py": "f88f043ca80a667ae93167821caaf09fa72b771c",
+  "backend/app/inference/contracts.py": "291716059c69aebc16beb8c4c7888cb42666afc7",
+  "backend/app/inference/provider_common.py": "e7badf8c159a504c3c5a1d146fcffde774caa456",
+  "backend/tests/test_chatgpt_connect.py": "78ff7062b97b741f9118a1514ec2c1409a1030cf",
+  "backend/tests/test_chatgpt_credentials.py": "0f16ae349c4af9593da5f3d752a079a991c7154b",
+  "backend/tests/test_chatgpt_accounts.py": "d393dbbe0b98e75d0eb33513bf75bfbae9345862"
+}

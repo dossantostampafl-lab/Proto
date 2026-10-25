@@ -14,6 +14,7 @@ from apps.api.app.live_database import LiveBase
 from apps.api.app.persistence import Base
 from apps.api.app.schema_registry import canonical_metadata
 from services.agents.roster import roster_metadata
+from services.chatgpt.conversations import metadata as conversation_metadata
 from services.events import journal_metadata
 from services.oms import ledger_metadata
 from services.promotion import promotion_metadata
@@ -29,6 +30,7 @@ if _database_url:
     config.set_main_option("sqlalchemy.url", _database_url.replace("%", "%%"))
 
 target_metadata = [
+    conversation_metadata,
     LiveBase.metadata,
     Base.metadata,
     canonical_metadata,

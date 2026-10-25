@@ -29,3 +29,9 @@
   .agent-decisions summary { grid-template-columns: minmax(0, 1fr) auto; }
   .agent-dl { grid-template-columns: minmax(0, 1fr); }
 }
+
+.agent-conversation textarea, .agent-conversation input, .agent-conversation select { display: block; width: 100%; max-width: 100%; box-sizing: border-box; margin: 8px 0; }
+
+.agent-conversation { min-width: 0; overflow-wrap: anywhere; }
+.agent-conversation pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-conversation button { margin: 4px 8px 4px 0; }

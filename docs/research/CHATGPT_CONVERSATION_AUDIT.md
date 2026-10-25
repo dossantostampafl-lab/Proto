@@ -1,3 +1,39 @@
+# Continuation: local OAuth and explanation conversations
+
+The audit below describes the initial evidence-browser increment. It is retained
+as history and superseded by this section where implementation status changed.
+
+Implemented now: isolated PROTO OAuth CLI, refresh/sign-out, original provider
+adaptation with no tools/fallback, loopback-only authenticated API, account-owned
+SQL history, evidence snapshots and explanation UI. Disabled by default. See
+[local setup](CHATGPT_LOCAL_SETUP.md) for commands, boundaries and remaining gaps.
+Original source copies/hashes and adaptations are documented in
+`third_party/the_creation_os/UPSTREAM.md`. No upstream license was invented.
+
+No real account authorization, external inference, FinRobot research execution,
+merge or deploy is claimed. Multi-user remote hosting and dashboard-native login
+remain unimplemented. Direct trader chat is unavailable; the available path is
+explicitly a ChatGPT explanation of registered evidence.
+
+Continuation verified 2026-10-25: the official VM procedure requires local OAuth
+and protected transfer of the same PROTO registration. Added a VM prepare/import
+command that preserves the VM identity, private dashboard account/catalog checks,
+model selection and disconnect. See [Oracle setup](CHATGPT_ORACLE_SETUP.md).
+The public dashboard responds, but SSH/Bastion permissions were not provided.
+The repository's Oracle deployment uses opc, Bastion, Podman and Caddy; mounting
+the protected profile and enabling the connector there remain deployment work.
+
+Local validation: all 1,358 Python tests passed. Ruff, frontend TypeScript,
+contracts, build and bundle passed. Playwright exercised the real dashboard,
+HTTP API and SQLite on desktop/mobile: disabled auth, SIMULATED account/inference,
+history, wrong-agent history refusal and disconnect. SQLite migration upgrade /
+downgrade to 0013_control_state / upgrade passed. A first verification command
+used the wrong downgrade revision name; corrected to the actual parent and passed.
+No simulated provider boundary is evidence of real OpenAI authorization.
+Final CI status is attached to the PR revision.
+
+## Historical first-increment audit
+
 # ChatGPT + PROTO conversation — PARTIAL
 
 Audit: 2026-10-24. Baseline PROTO `55f54fa0e6616acc7e40ef2d9dc40fbd2e33f3ae`.

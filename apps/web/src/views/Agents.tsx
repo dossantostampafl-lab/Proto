@@ -3,6 +3,7 @@ import { usePoll } from "../hooks";
 import { Empty, Panel, Stat } from "../ui";
 import { arr, bool, finiteDecimal, fmt2, isRecord, num, orDash, rec, short, str, strs } from "./deskData";
 import "./agents.css";
+import { AgentConversation } from "./AgentConversation";
 
 // Agents dashboard: the trader roster, each agent's virtual book, the recorded decision evidence for
 // its instrument and the orchestration contracts. Read only: no prompts, credentials, job submission
@@ -161,8 +162,9 @@ export function Agents() {
           <dt>Created</dt><dd>{when(agent.createdAt)}</dd>
           {agent.eliminatedAt && <><dt>Eliminated</dt><dd className="down">{when(agent.eliminatedAt)} · {orDash(agent.eliminationReason)}</dd></>}
           <dt>Parameters</dt><dd>{Object.keys(agent.params).length ? Object.entries(agent.params).map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(" · ") : "none"}</dd>
-          <dt>Conversation</dt><dd>Unavailable — this trader exposes no chat handler.</dd>
+          <dt>Conversation</dt><dd>Direct trader execution is unavailable. ChatGPT can explain recorded evidence when configured locally.</dd>
         </dl>
+        <AgentConversation key={agent.id} agentId={agent.id} />
       </>}
     </Panel>
 
@@ -215,7 +217,7 @@ export function Agents() {
       <span className="tag research">CAPABILITY INVENTORY · READ ONLY</span>
       <dl className="agent-dl">
         <dt>Agent conversation</dt><dd>Unavailable in this deployment. Selecting an agent does not run it.</dd>
-        <dt>ChatGPT sign-in</dt><dd>Not connected; no private conversation history. No paid API fallback is used.</dd>
+        <dt>ChatGPT sign-in</dt><dd>Opt-in private local OAuth and account-owned history; disabled by default. No paid API fallback is used.</dd>
         <dt>FinRobot research</dt><dd>Original opt-in worker only (research, earnings, DCF, comps, IC memo, LBO). Not launched from the dashboard.</dd>
       </dl>
       <small className="agent-src">Gates: docs/research/CHATGPT_CONVERSATION_AUDIT.md · <a href="https://developers.openai.com/siwc/token-sharing-open-source" target="_blank" rel="noopener noreferrer">ChatGPT plan integration requirements</a></small>
