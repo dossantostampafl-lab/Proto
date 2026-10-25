@@ -839,3 +839,48 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fc-queue header b { font: 800 12px var(--mono); letter-spacing: .09em; }
 .fc-tag { border-color: rgba(89,166,241,.55); box-shadow: 0 8px 25px rgba(0,0,0,.48); }
 .fc-tag small { color: #b5f5de; }
+
+
+@media (max-width: 980px) {
+  .fc-scene { min-height: 690px; }
+  .fc-kpis > div { top: 84px; min-height: 110px; padding: 12px; }
+  .fc-kpis > div:first-child { left: 10px; width: 29%; }
+  .fc-kpis > div:last-child { left: 48%; width: 34%; }
+  .fc-sources { right: 10px; top: 225px; width: 175px; }
+  .fc-roster { left: 10px; bottom: 140px; width: 240px; }
+  .fc-activity { right: 10px; bottom: 140px; width: 280px; }
+}
+@media (max-width: 760px) {
+  .fc-scene { display: block; padding: 0; aspect-ratio: auto; height: min(860px, 95svh); min-height: 660px; max-height: none; overflow: hidden; }
+  .fc-head { position: absolute; top: 7px; left: 9px; right: 9px; flex-wrap: wrap; gap: 4px 7px; }
+  .fc-head > b { font-size: 12px; }
+  .fc-head ul { order: 3; flex-basis: 100%; max-height: 35px; overflow: hidden; gap: 3px; }
+  .fc-head li { font-size: 7px; padding: 2px 4px; }
+  .fc-head time { font-size: 9px; }
+  .fc-pause { padding: 2px 4px; font-size: 8px; }
+  .fc-kpis > div { top: 94px; min-height: 88px; padding: 10px; display: grid; gap: 4px; }
+  .fc-kpis > div:first-child { left: 8px; width: calc(50% - 11px); }
+  .fc-kpis > div:last-child { left: auto; right: 8px; transform: none; width: calc(50% - 11px); }
+  .fc-kpis b { font-size: 25px; }
+  .fc-kpis span { font-size: 7px; letter-spacing: .08em; }
+  .fc-kpis small { font-size: 8px; }
+  .fc-kpis b em { font-size: 8px; }
+  .fc-kpis .fc-bar { height: 5px; }
+  .fc-sources { display: none; }
+  .fc-roster { left: 8px; right: 8px; bottom: 120px; width: auto; padding: 7px 9px; }
+  .fc-roster header { font-size: 9px; padding-bottom: 3px; }
+  .fc-roster ul { grid-template-columns: 1fr 1fr; gap: 0 8px; }
+  .fc-roster li { grid-template-columns: 8px minmax(0,1fr); gap: 4px; padding: 3px 0; }
+  .fc-roster li b { font-size: 9px; }
+  .fc-roster li small { display: none; }
+  .fc-activity { display: none; }
+  .fc-queue { left: 7px; right: 7px; bottom: 7px; min-height: 94px; padding: 7px 9px; }
+  .fc-queue header b { font-size: 10px; }
+  .fc-item { grid-template-columns: 1fr auto; }
+  .fc-tag { padding: 4px 6px; max-width: 105px; min-width: 0; }
+  .fc-tag b { font-size: 9px; }
+  .fc-tag small, .fc-tag em { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fc-room, .fc-globe, .fc-bot, .fc-tag { animation: none !important; transition: none !important; }
+}
