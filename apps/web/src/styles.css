@@ -894,3 +894,22 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
   .fc-activity ol li { font-size: 11px; }
   .fc-activity b { font-size: 11px; }
 }
+
+/* Read-only inspection of a real roster agent; no order execution controls. */
+.fc-tag { appearance: none; color: inherit; font-family: inherit; text-align: left; cursor: pointer; pointer-events: auto; }
+.fc-tag:hover, .fc-tag[aria-pressed="true"] { border-color: #6ee7ff; box-shadow: 0 0 0 2px rgba(82,203,255,.24), 0 8px 25px rgba(0,0,0,.55); }
+.fc-tag:focus-visible, .fc-roster-select:focus-visible, .fc-agent-detail button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.fc-roster-select { appearance: none; grid-column: 2 / -1; width: 100%; border: 0; background: transparent; color: inherit; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(40px,.5fr) minmax(90px,1.5fr); gap: 9px; text-align: left; align-items: center; cursor: pointer; }
+.fc-roster-select:hover b, .fc-roster-select[aria-pressed="true"] b { color: #6ee7ff; }
+.fc-agent-detail { position: absolute; z-index: 7; top: 210px; left: 50%; transform: translateX(-50%); width: min(345px, calc(100% - 22px)); display: grid; gap: 12px; padding: 15px 17px; border: 1px solid #5bb9ff; border-radius: 12px; background: rgba(3,14,37,.97); box-shadow: 0 20px 54px rgba(0,0,0,.7), 0 0 18px rgba(56,189,248,.15); backdrop-filter: blur(12px); }
+.fc-agent-detail header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.fc-agent-detail header b { font: 800 12px var(--mono); letter-spacing: .11em; color: #e6f7ff; }
+.fc-agent-detail header button { appearance: none; border: 1px solid #5bb9ff; color: #e6f7ff; background: rgba(28,69,117,.42); border-radius: 50%; font-size: 20px; cursor: pointer; width: 28px; height: 28px; line-height: 24px; flex: none; }
+.fc-agent-detail dl { margin: 0; display: grid; grid-template-columns: 105px minmax(0,1fr); gap: 7px 11px; font: 500 11px var(--mono); }
+.fc-agent-detail dt { color: #91badf; }
+.fc-agent-detail dd { color: #f0f9ff; margin: 0; overflow-wrap: anywhere; }
+.fc-agent-detail p { margin: 0; padding: 9px 10px; background: rgba(44,91,151,.18); border-left: 2px solid #49dbef; font: 500 11px/1.5 var(--mono); overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .fc-roster-select { grid-template-columns: minmax(0,1fr); gap: 0; }
+  .fc-agent-detail { top: 195px; padding: 12px; }
+}
