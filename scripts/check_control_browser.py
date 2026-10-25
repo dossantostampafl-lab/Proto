@@ -80,6 +80,12 @@ async def exercise(port: int, output: Path) -> None:
                     await expect(room.locator(".fc-room")).to_be_visible(timeout=15000)
                     await expect(room.locator(".fc-roster")).to_be_visible()
                     await expect(room.locator(".fc-queue")).to_be_visible()
+                    # Agents displayed on the room are inspectable without granting
+                    # order authority or replacing their real roster state.
+                    await room.locator(".fc-roster-select").first.click()
+                    await expect(room.locator(".fc-agent-detail")).to_be_visible()
+                    await room.get_by_role("button", name="Fechar detalhes do agente").click()
+                    await expect(room.locator(".fc-agent-detail")).to_have_count(0)
                     await expect(room.locator(".fc-head li").nth(1)).to_contain_text(
                         "SUMMARY", timeout=15000
                     )
