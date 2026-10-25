@@ -382,7 +382,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
           </dl>
           <p>{lastFor(selectedAgent, actions)?.headline ?? "Sem atividade registrada para este instrumento."}</p>
         </aside>
-      )
+      )}
       <Activity actions={actions} fresh={stateFresh} />
       <Queue actions={actions} agents={agents} />
       {!loaded && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
