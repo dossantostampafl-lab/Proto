@@ -32,6 +32,9 @@ from mathutils import Vector
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[2]
+# The globe floats clear of the floor and the console ring; anchors project the same numbers.
+GLOBE_Z, GLOBE_R = 5.4, 4.4
+RING_R = 11.6  # between the second and third glowing rings
 WEB = ROOT / "apps" / "web"
 PUBLIC = WEB / "public" / "floorcontrol"
 ANCHORS = WEB / "src" / "views" / "floorControl" / "anchors.json"
@@ -66,6 +69,17 @@ LAND = [
 ]
 
 
+def land_rings() -> list[list[tuple[float, float]]]:
+    """Coastlines of Natural Earth 1:110m land (public domain, naturalearthdata.com), lon/lat rings."""
+    data = json.loads((Path(__file__).resolve().parent / "ne_110m_land.geojson").read_text())
+    rings: list[list[tuple[float, float]]] = []
+    for feature in data["features"]:
+        geometry = feature["geometry"]
+        polygons = [geometry["coordinates"]] if geometry["type"] == "Polygon" else geometry["coordinates"]
+        rings.extend([(float(lon), float(lat)) for lon, lat in polygon[0]] for polygon in polygons)
+    return rings
+
+
 def earth_texture(path: Path) -> None:
     w, h = 2048, 1024
     img = Image.new("RGB", (w, h))
@@ -75,18 +89,15 @@ def earth_texture(path: Path) -> None:
     mask = Image.new("L", (w, h))
     d = ImageDraw.Draw(mask)
     to = lambda lon, lat: ((lon + 180) / 360 * w, (90 - lat) / 180 * h)  # noqa: E731
-    for shape in LAND:
-        d.polygon([to(*p) for p in shape], fill=255)
-    # Ragged coastlines: erode/dilate noise so the outlines read as land, not polygons.
-    noise = Image.effect_noise((w, h), 90).filter(ImageFilter.GaussianBlur(6))
-    mask = Image.composite(mask.filter(ImageFilter.MaxFilter(9)), mask.filter(ImageFilter.MinFilter(9)), noise.point(lambda v: 255 if v > 128 else 0))
-    mask = mask.filter(ImageFilter.GaussianBlur(2))
-    land = Image.new("RGB", (w, h), (52, 190, 110))
+    for ring in land_rings():
+        d.polygon([to(*p) for p in ring], fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(1.2))
+    land = Image.new("RGB", (w, h), (24, 170, 171))
     tone = Image.effect_noise((w, h), 60).filter(ImageFilter.GaussianBlur(10)).convert("RGB")
     land = Image.blend(land, Image.merge("RGB", [tone.getchannel(0).point(lambda v: v // 3), tone.getchannel(0), tone.getchannel(0).point(lambda v: v // 2)]), 0.25)
     img.paste(land, (0, 0), mask)
     coast = mask.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(1.5))
-    img.paste(Image.new("RGB", (w, h), (180, 255, 220)), (0, 0), coast.point(lambda v: min(255, v * 3)))
+    img.paste(Image.new("RGB", (w, h), (151, 255, 243)), (0, 0), coast.point(lambda v: min(255, v * 3)))
     grid = ImageDraw.Draw(img)
     for lon in range(-180, 181, 15):
         x = (lon + 180) / 360 * w
@@ -95,6 +106,24 @@ def earth_texture(path: Path) -> None:
         y = (90 - lat) / 180 * h
         grid.line([(0, y), (w, y)], fill=(90, 160, 230), width=1)
     img.save(path)
+
+
+def map_screen_texture(path: Path, seed: int) -> None:
+    """A glowing world-map screen (Natural Earth coastlines) with scattered pins; no text, no numbers."""
+    rnd = random.Random(seed)
+    w, h = 512, 300
+    img = Image.new("RGB", (w, h), (8, 30, 86))
+    d = ImageDraw.Draw(img)
+    for y in range(h):
+        d.line([(0, y), (w, y)], fill=(8, 30 + y // 10, 90 + y // 6))
+    to = lambda lon, lat: ((lon + 180) / 360 * w, (84 - lat) / 144 * h)  # noqa: E731
+    for ring in land_rings():
+        d.polygon([to(*p) for p in ring], fill=(40, 150, 230), outline=(150, 225, 255))
+    for _ in range(26):
+        x, y = rnd.randint(20, w - 20), rnd.randint(30, h - 30)
+        d.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(110, 255, 200))
+    d.rectangle([0, 0, w - 1, h - 1], outline=(140, 210, 255), width=3)
+    img.filter(ImageFilter.GaussianBlur(0.5)).save(path)
 
 
 def screen_texture(path: Path, seed: int) -> None:
@@ -130,9 +159,9 @@ def screen_texture(path: Path, seed: int) -> None:
 
 def floor_texture(path: Path) -> None:
     w = 1024
-    img = Image.new("RGB", (w, w), (20, 52, 118))
+    img = Image.new("RGB", (w, w), (11, 28, 70))
     d = ImageDraw.Draw(img)
-    d.rectangle([0, 0, w - 1, w - 1], outline=(52, 96, 170), width=4)
+    d.rectangle([0, 0, w - 1, w - 1], outline=(40, 82, 156), width=4)
     d.line([(w // 2, 0), (w // 2, w)], fill=(34, 70, 140), width=3)
     d.line([(0, w // 2), (w, w // 2)], fill=(34, 70, 140), width=3)
     noise = Image.effect_noise((w, w), 12).convert("RGB")
@@ -223,11 +252,11 @@ class Kit:
 # ---------- the room ----------
 
 BLOCKS = [  # desk blocks: centre x, y (y grows away from the camera), columns, row pairs, floor
-    (-23, 11.5, 4, 2, "binance"),
-    (23, 11.5, 4, 2, "binance"),
-    (-23, -2.5, 4, 1, "binance"),
-    (23, -2.5, 4, 1, "binance"),
-    (-23, -14.5, 4, 1, "xp"),
+    (-23, 11.5, 5, 2, "binance"),
+    (23, 11.5, 5, 2, "binance"),
+    (-23, -2.5, 5, 1, "binance"),
+    (23, -2.5, 5, 1, "binance"),
+    (-23, -14.5, 5, 1, "xp"),
 ]
 WALLS = [
     (-15, 20, -15, 5.5), (15, 20, 15, 5.5), (-15, -6, -15, -19.5), (15, -6, 15, -19.5),
@@ -246,11 +275,12 @@ def build_room(k: Kit) -> list[dict]:
     screens = []
     for i in range(4):
         p = WORK / f"screen{i}.png"
-        screen_texture(p, i + 3)
+        # Half the screens show the world map, as on the reference room's monitor walls.
+        (map_screen_texture if i % 2 == 0 else screen_texture)(p, i + 3)
         screens.append(p)
 
     # Materials.
-    fl = k.principled("floor", "#123a7a", rough=0.14, coat=0.7)
+    fl = k.principled("floor", "#0b1f4a", rough=0.07, coat=1.0)
     nt = fl.node_tree
     tex = nt.nodes.new("ShaderNodeTexImage")
     tex.image = bpy.data.images.load(str(floor_png))
@@ -265,6 +295,8 @@ def build_room(k: Kit) -> list[dict]:
     k.principled("desk", "#2a3442", rough=0.3, metal=0.3)
     k.principled("deskbody", "#151c27", rough=0.6)
     k.principled("black", "#0b0e14", rough=0.45)
+    k.principled("operator", "#121b2b", rough=0.74)
+    k.principled("operatorFace", "#886b62", rough=0.85)
     k.principled("console", "#2b3a52", rough=0.3, metal=0.5)
     k.principled("glass", "#bfe3ff", rough=0.03, transmission=1.0)
     k.principled("pot", "#e8ecef", rough=0.35)
@@ -277,8 +309,8 @@ def build_room(k: Kit) -> list[dict]:
     k.emissive("cyanSoft", "#2b7de9", 1.6)
     k.emissive("ringBright", "#4cc3ff", 2.6)
     for i, p in enumerate(screens):
-        k.emissive(f"screen{i}", strength=2.2, image=p)
-    k.emissive("beam", "#38bdf8", 2.0, alpha=0.12)
+        k.emissive(f"screen{i}", strength=1.65, image=p)
+    k.emissive("beam", "#38bdf8", 1.2, alpha=0.06)
     k.emissive("wire", "#38bdf8", 2.0, alpha=0.1)
 
     # Earth: its own texture plus a rim of cyan light.
@@ -290,10 +322,10 @@ def build_room(k: Kit) -> list[dict]:
     t = nt.nodes.new("ShaderNodeTexImage")
     t.image = bpy.data.images.load(str(earth_png))
     e1 = nt.nodes.new("ShaderNodeEmission")
-    e1.inputs["Strength"].default_value = 1.0
+    e1.inputs["Strength"].default_value = 0.95
     nt.links.new(t.outputs["Color"], e1.inputs["Color"])
     lw = nt.nodes.new("ShaderNodeLayerWeight")
-    lw.inputs["Blend"].default_value = 0.35
+    lw.inputs["Blend"].default_value = 0.2
     pw = nt.nodes.new("ShaderNodeMath")
     pw.operation = "POWER"
     pw.inputs[1].default_value = 2.0
@@ -302,7 +334,7 @@ def build_room(k: Kit) -> list[dict]:
     e2.inputs["Color"].default_value = (*lin("#7dd3fc"), 1)
     mul = nt.nodes.new("ShaderNodeMath")
     mul.operation = "MULTIPLY"
-    mul.inputs[1].default_value = 4.5
+    mul.inputs[1].default_value = 2.2
     nt.links.new(pw.outputs[0], mul.inputs[0])
     nt.links.new(mul.outputs[0], e2.inputs["Strength"])
     add = nt.nodes.new("ShaderNodeAddShader")
@@ -318,23 +350,82 @@ def build_room(k: Kit) -> list[dict]:
         k.obj("cube", "wall", ((x1 + x2) / 2, (y1 + y2) / 2, 0.8), (ln, 0.5, 1.6), (0, 0, rz))
         k.obj("cube", "cyanSoft", ((x1 + x2) / 2, (y1 + y2) / 2, 1.62), (ln, 0.12, 0.05), (0, 0, rz))
 
+
+    # Dense elevated rear monitor gallery; all screens show abstract artwork,
+    # never baked-in counts or status strings.
+    for x in range(-27, 28, 6):
+        k.obj("cube", "rim", (x, 19.6, 2.5), (5.0, 0.24, 3.25))
+        k.obj("cube", "black", (x, 19.42, 2.5), (4.58, 0.1, 2.85))
+        k.obj("plane", f"screen{(x + 27) // 6 % 4}", (x, 19.33, 2.5),
+              (4.38, 2.67, 1), (math.pi / 2, 0, 0))
+        k.obj("cube", "cyanSoft", (x, 19.25, 4.03), (4.75, 0.08, 0.04))
+    for x in (-30.8, 30.8):
+        for y in (-14.0, -5.0, 8.0, 16.0):
+            k.obj("cube", "cyanSoft", (x, y, 0.035), (0.09, 5.5, 0.025))
+    # Fine luminous floor seams orient the viewer to the central command hub.
+    for side in (-1, 1):
+        for y in (-17.5, -9.5, 7.5, 15.5):
+            k.obj("cube", "amber", (side * 15.4, y, 0.05), (0.055, 5.5, 0.025))
+
+    # Two tiers of side galleries frame the central holographic room.  The raised
+    # desks are architectural details, not invented agents or API events.
+    # Keep each platform outside the hub (inner edge x=16.4) and preserve
+    # open walkways between the front and back sections.
+    for side in (-1, 1):
+        for gallery_y in (-12.3, 9.6):
+            deck_x, deck_length = side * 24.3, 9.0
+            k.obj("cube", "rim", (deck_x, gallery_y, 2.62), (15.8, deck_length, 0.34))
+            k.obj("cube", "console", (deck_x, gallery_y, 2.82), (15.3, deck_length - 0.3, 0.08))
+            # Thin glazed balustrade, a bright cyan cap and an amber step edge.
+            inner_x = side * 16.45
+            k.obj("cube", "glass", (inner_x, gallery_y, 3.26), (0.10, deck_length, 0.88))
+            k.obj("cube", "cyanSoft", (inner_x, gallery_y, 3.72), (0.13, deck_length, 0.065))
+            k.obj("cube", "amber", (deck_x, gallery_y - deck_length * 0.5, 2.83),
+                  (15.8, 0.09, 0.07))
+            # Console banks viewed from an elevated, oblique camera angle.
+            for col in range(5):
+                x = side * (18.35 + col * 2.65)
+                for row in (-1, 1):
+                    y = gallery_y + row * 1.5
+                    k.obj("cube", "desk", (x, y, 3.31), (2.20, 1.00, 0.12))
+                    k.obj("cube", "deskbody", (x, y, 3.10), (2.14, 0.92, 0.34))
+                    k.obj("cube", "black", (x, y + 0.18, 3.93), (1.70, 0.09, 0.69),
+                          (math.radians(-12), 0, 0))
+                    k.obj("plane", f"screen{(col + (row > 0) + (side > 0)) % 4}",
+                          (x, y + 0.10, 3.94), (1.60, 0.62, 1),
+                          (math.radians(75), 0, 0))
+                    k.obj("cube", "black", (x, y - 0.74, 3.22), (0.67, 0.54, 0.20))
+                    k.obj("cube", "black", (x, y - 1.03, 3.49), (0.67, 0.10, 0.68))
+            # Visible posts beneath the catwalk make the extra level read
+            # as architecture rather than floating screens.
+            for support_x in (side * 17.0, side * 31.4):
+                for support_y in (gallery_y - 3.9, gallery_y + 3.9):
+                    k.obj("cube", "rim", (support_x, support_y, 1.20),
+                          (0.24, 0.24, 2.4))
+            bpy.ops.object.light_add(type="AREA", location=(deck_x, gallery_y, 7.1))
+            gallery_light = bpy.context.active_object
+            gallery_light.data.shape = "RECTANGLE"
+            gallery_light.data.size, gallery_light.data.size_y = 13.5, 7.0
+            gallery_light.data.energy = 480
+            gallery_light.data.color = (0.66, 0.83, 1.0)
+
     # Hub: sunken well, rim, glowing rings, dashed ring, arc segments.
-    k.obj("cyl64", "well", (0, 0, 0.005), (14.2, 14.2, 0.01))
-    k.obj("cyl64", "rim", (0, 0, 0.12), (14.6, 14.6, 0.24))
-    k.obj("cyl64", "well", (0, 0, 0.13), (14.1, 14.1, 0.25))
-    for r, w, mat in [(7.35, 0.09, "ringBright"), (9.0, 0.22, "cyan"), (9.7, 0.05, "ringBright"), (13.0, 0.14, "cyan"), (13.8, 0.04, "cyanSoft")]:
+    k.obj("cyl64", "well", (0, 0, 0.005), (11.9, 11.9, 0.01))
+    k.obj("cyl64", "rim", (0, 0, 0.12), (12.3, 12.3, 0.24))
+    k.obj("cyl64", "well", (0, 0, 0.13), (11.8, 11.8, 0.25))
+    for r, w, mat in [(7.1, 0.09, "ringBright"), (8.4, 0.22, "cyan"), (9.1, 0.05, "ringBright"), (10.6, 0.14, "cyan"), (11.5, 0.04, "cyanSoft")]:
         bpy.ops.mesh.primitive_torus_add(major_radius=r, minor_radius=w, major_segments=192, minor_segments=8, location=(0, 0, 0.3 if r < 7.5 else 0.02))
         o = bpy.context.active_object
         o.scale.z = 0.25
         o.data.materials.append(k.mats[mat])
     for i in range(80):
         a = i / 80 * math.tau
-        k.obj("cube", "cyanSoft", (math.cos(a) * 11, math.sin(a) * 11, 0.02), (0.55, 0.1, 0.02), (0, 0, a + math.pi / 2))
+        k.obj("cube", "cyanSoft", (math.cos(a) * 9.9, math.sin(a) * 9.9, 0.02), (0.55, 0.1, 0.02), (0, 0, a + math.pi / 2))
     for i in range(6):
         start = i / 6 * math.tau
         for j in range(14):
             a = start + j * 0.04
-            k.obj("cube", "ringBright", (math.cos(a) * 12.1, math.sin(a) * 12.1, 0.02), (0.52, 0.16, 0.02), (0, 0, a + math.pi / 2))
+            k.obj("cube", "ringBright", (math.cos(a) * 10.75, math.sin(a) * 10.75, 0.02), (0.52, 0.16, 0.02), (0, 0, a + math.pi / 2))
 
     # Ring of consoles around the globe (entrance towards the camera) with tilted screens.
     n = 24
@@ -350,19 +441,54 @@ def build_room(k: Kit) -> list[dict]:
     # Curved command desk beyond the hub, screens towards the camera.
     for i in range(13):
         a = math.pi / 2 + (i / 12 - 0.5) * 1.1
-        x, y = math.cos(a) * 16.3, math.sin(a) * 16.3
+        x, y = math.cos(a) * 14.0, math.sin(a) * 14.0
         rz = a + math.pi / 2
         k.obj("cube", "console", (x, y, 0.45), (1.5, 0.9, 0.9), (0, 0, rz))
-        k.obj("plane", f"screen{(i + 1) % 4}", (math.cos(a) * 15.85, math.sin(a) * 15.85, 1.15), (1.4, 0.8, 1), (math.radians(60), 0, a - math.pi / 2))
+        k.obj("plane", f"screen{(i + 1) % 4}", (math.cos(a) * 13.55, math.sin(a) * 13.55, 1.15), (1.4, 0.8, 1), (math.radians(60), 0, a - math.pi / 2))
 
+    # Detailed rear operator rows between the circular hub and video wall.
+    # Consoles are unlabelled environment geometry. They neither imply a
+    # connected agent nor report an executed order; those remain live DOM data.
+    for rear_row, rear_y in enumerate((16.1, 18.35)):
+        for col, console_x in enumerate((-10.5, -7.0, -3.5, 0.0, 3.5, 7.0, 10.5)):
+            k.obj("cube", "desk", (console_x, rear_y, 0.75), (3.15, 1.12, 0.10))
+            k.obj("cube", "deskbody", (console_x, rear_y, 0.42), (3.04, 1.03, 0.60))
+            for monitor in (-1, 0, 1):
+                mx = console_x + monitor * 0.86
+                k.obj("cube", "black", (mx, rear_y + 0.32, 1.35),
+                      (0.78, 0.10, 0.54), (math.radians(-12), 0, 0))
+                k.obj("plane", f"screen{(col + rear_row + monitor + 4) % 4}",
+                      (mx, rear_y + 0.26, 1.35), (0.73, 0.51, 1),
+                      (math.radians(75), 0, 0))
+            k.obj("cube", "black", (console_x, rear_y - 0.91, 0.57),
+                  (0.70, 0.56, 0.16))
+            k.obj("cube", "black", (console_x, rear_y - 1.15, 0.95),
+                  (0.70, 0.11, 0.67))
+    for marker_x in (-12.6, 12.6):
+        k.obj("cube", "amber", (marker_x, 17.2, 0.05),
+              (0.065, 6.2, 0.04))
+
+    # Segmented cyan architectural floor arcs around the central hub.
+    for radius, count, width in [(10.8, 96, 0.22), (14.8, 120, 0.24), (18.0, 144, 0.18)]:
+        for segment in range(count):
+            angle = (segment + 0.5) * math.tau / count
+            if -2.05 < angle - math.tau * (angle > math.pi) < -1.1:
+                continue  # keep the near-side entrance open
+            k.obj("cube", "cyanSoft",
+                  (math.cos(angle) * radius, math.sin(angle) * radius, 0.035),
+                  (math.tau * radius / count * 0.64, width, 0.028),
+                  (0, 0, angle + math.pi / 2))
+
+    # Globe: enlarge the focal point while keeping projection anchors in sync.
+    # Re-render both variants after changing geometry; never hand-edit anchors.json.
     # Globe: earth, wire shell, light column.
-    k.obj("sphere", "earth", (0, 0, 4.2), (3.3, 3.3, 3.3), (0.35, 0, 1.2))
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=3.75, location=(0, 0, 4.2))
+    k.obj("sphere", "earth", (0, 0, GLOBE_Z), (GLOBE_R, GLOBE_R, GLOBE_R), (-0.12, 0, -0.37))
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=GLOBE_R + 0.4, location=(0, 0, GLOBE_Z))
     wire = bpy.context.active_object
     mod = wire.modifiers.new("w", "WIREFRAME")
     mod.thickness = 0.025
     wire.data.materials.append(k.mats["wire"])
-    k.obj("cone", "beam", (0, 0, 1.6), (6.5, 6.5, 3.2), (math.pi, 0, 0))
+    k.obj("cone", "beam", (0, 0, 1.6), (8.2, 8.2, 3.2), (math.pi, 0, 0))
 
     # Desk blocks. Every seat is recorded for the robots.
     seats: list[dict] = []
@@ -381,11 +507,20 @@ def build_room(k: Kit) -> list[dict]:
                         # Monitor leans back, away from its seat; the screen faces the seat.
                         k.obj("cube", "black", (x + kx * 1.25, my, 1.22), (0.7, 0.04, 0.46), (math.radians(15) * side, 0, 0))
                         k.obj("plane", f"screen{(c + p + int(kx * 2) + (side > 0)) % 4}", (x + kx * 1.25, my + side * 0.03, 1.22), (0.66, 0.42, 1),
-                              (math.radians(75) * -side, 0, 0))
+                              (math.radians(55) * -side, 0, 0))
                     cy = yc + side * 1.6
                     k.obj("cube", "black", (x, cy, 0.5), (0.6, 0.6, 0.1))
                     k.obj("cube", "black", (x, cy + side * 0.3, 0.85), (0.6, 0.08, 0.65))
                     k.obj("cyl", "black", (x, cy, 0.25), (0.12, 0.12, 0.5))
+                    # Anonymous seated silhouettes approximate the dense occupancy
+                    # of the approved preview; no identifiable faces or live values.
+                    if (c + 2 * p + (1 if side > 0 else 0)) % 5 != 0:
+                        k.obj("sphere", "operator", (x, cy - side * 0.18, 1.10), (0.37, 0.31, 0.51))
+                        k.obj("sphere", "operatorFace", (x, cy - side * 0.22, 1.64), (0.21, 0.20, 0.23))
+                        k.obj("sphere", "operator", (x, cy - side * 0.17, 1.76), (0.23, 0.22, 0.10))
+                        for dx in (-0.44, 0.44):
+                            k.obj("sphere", "operator", (x + dx, cy - side * 0.42, 1.07), (0.13, 0.35, 0.16))
+
                     block_seats.append({"x": x, "y": yc + side * 2.25, "floor": floor})
         # Spread a block's seats: outer columns first.
         block_seats.sort(key=lambda s: -abs(s["x"] - bx))
@@ -406,13 +541,26 @@ def build_room(k: Kit) -> list[dict]:
         k.obj("cube", "amber", (cx, cy, 1.64), (ln, 0.16, 0.07), (0, 0, rz))
         k.obj("cube", "amber", (cx, cy, 0.02), (ln, 0.08, 0.02), (0, 0, rz))
 
-    # Plants and the lounge corner.
-    for px_, py_ in PLANTS:
-        k.obj("cyl", "pot", (px_, py_, 0.4), (0.9, 0.9, 0.8))
+    # Raised walkway around the hub, as in the reference room: a deck between radius 14.4 and 16.0
+    # (inside the side galleries, whose inner edge is x = 16.4),
+    # glass balustrade on its outer edge with a cyan cap, an amber step edge, open towards the camera.
+    entrance = lambda a: abs(math.atan2(math.sin(a + math.pi / 2), math.cos(a + math.pi / 2))) < math.radians(24)  # noqa: E731
+    for i in range(96):
+        a = i / 96 * math.tau
+        if entrance(a):
+            continue
+        seg = math.tau * 15.2 / 96 * 1.02
+        for r, mat, z, sy, sz in [(15.2, "rim", 0.18, 1.6, 0.36), (15.95, "glass", 0.85, 0.08, 1.0),
+                                  (15.95, "cyan", 1.37, 0.12, 0.05), (14.42, "amber", 0.37, 0.07, 0.03)]:
+            k.obj("cube", mat, (math.cos(a) * r, math.sin(a) * r, z), (seg, sy, sz), (0, 0, a + math.pi / 2))
+    # Plants and the lounge corner, plus planters along the walkway (none in the entrance).
+    hub_plants = [(math.cos(a) * 15.15, math.sin(a) * 15.15, 0.36) for a in (i / 18 * math.tau for i in range(18)) if not entrance(a)]
+    for px_, py_, z0 in [(x, y, 0.0) for x, y in PLANTS] + hub_plants:
+        k.obj("cyl", "pot", (px_, py_, z0 + 0.4), (0.9, 0.9, 0.8))
         for j in range(11):
             a = j / 11 * math.tau + random.random() * 0.4
             tilt = 0.5 + random.random() * 0.5
-            k.obj("sphere", "leaf" if j % 2 else "leaf2", (px_ + math.cos(a) * 0.35, py_ + math.sin(a) * 0.35, 1.25 + random.random() * 0.3),
+            k.obj("sphere", "leaf" if j % 2 else "leaf2", (px_ + math.cos(a) * 0.35, py_ + math.sin(a) * 0.35, z0 + 1.25 + random.random() * 0.3),
                   (0.1, 0.22, 0.75), (tilt, 0, a + math.pi / 2))
     for sx, sy, rz in [(23, -12, math.pi), (23, -17.6, 0), (19, -14.8, -math.pi / 2)]:
         k.obj("cube", "sofa", (sx, sy, 0.3), (3.4, 1.1, 0.6), (0, 0, rz))
@@ -502,9 +650,11 @@ def anchors_for(k: Kit, cam, seats: list[dict]) -> dict:
         foot = project(k, cam, s["x"], s["y"], 0)
         head = project(k, cam, s["x"], s["y"], 1.9)
         out_seats.append({"floor": s["floor"], "seat": foot, "hub": project(k, cam, hx, hy, 0), "height": round(foot[1] - head[1], 4)})
-    gc = project(k, cam, 0, 0, 4.2)
-    gt = project(k, cam, 0, 0, 7.6)
-    return {"seats": out_seats, "globe": {"center": gc, "radius": round(gc[1] - gt[1], 4)}}
+    gc = project(k, cam, 0, 0, GLOBE_Z)
+    gt = project(k, cam, 0, 0, GLOBE_Z + GLOBE_R)
+    # Posts on the floor ring around the globe, where agents stand when the panels cover their desks.
+    ring = [project(k, cam, math.cos(a) * RING_R, math.sin(a) * RING_R, 0) for a in (i / 36 * math.tau for i in range(36))]
+    return {"seats": out_seats, "ring": ring, "globe": {"center": gc, "radius": round(gc[1] - gt[1], 4)}}
 
 
 def robot_sheet(samples: int, view_dir: Vector, dst: Path) -> None:
@@ -566,16 +716,20 @@ def robot_sheet(samples: int, view_dir: Vector, dst: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--preview", action="store_true")
+    ap.add_argument("--samples", type=int, default=None, help="Cycles samples; defaults to 192 for final render")
     ap.add_argument("--only", choices=["landscape", "portrait", "robot"])
+    ap.add_argument("--anchors-only", action="store_true", help="rebuild anchors.json without rendering")
     args = ap.parse_args()
-    samples = 24 if args.preview else 192
+    samples = args.samples if args.samples is not None else (24 if args.preview else 192)
+    if samples < 16 or samples > 512:
+        ap.error("--samples must be between 16 and 512")
     scale = 0.5 if args.preview else 1.0
     PUBLIC.mkdir(parents=True, exist_ok=True)
     anchors = json.loads(ANCHORS.read_text()) if ANCHORS.exists() else {}
     view = Vector((0, 0, 0))
     for variant, loc, target, lens, res, size in [
-        ("landscape", (0, -30, 50), (0, -0.5, 0), 33, (1920, 1080), (1920, 1080)),
-        ("portrait", (0, -19, 58), (0, 6, 0), 18, (1080, 1920), (900, 1600)),
+        ("landscape", (0, -46, 41), (0, 0, 0), 38, (1920, 1080), (1920, 1080)),
+        ("portrait", (0, -26, 46), (0, 1.5, 0), 34, (1080, 1920), (900, 1600)),
     ]:
         if variant == "landscape":
             view = Vector(target) - Vector(loc)
@@ -585,12 +739,17 @@ def main() -> None:
         seats = build_room(k)
         cam = camera(k, loc, target, lens)
         raw = WORK / f"{variant}.png"
+        if args.anchors_only:
+            k.scene.render.resolution_x, k.scene.render.resolution_y = res
+            bpy.context.view_layer.update()  # a render would refresh the camera matrices; do it by hand
+            anchors[variant] = anchors_for(k, cam, seats)
+            continue
         render(k, raw, (int(res[0] * scale), int(res[1] * scale)), samples)
         anchors[variant] = anchors_for(k, cam, seats)
         bloom(raw, PUBLIC / ("room.webp" if variant == "landscape" else "room-portrait.webp"), 80 if variant == "landscape" else 76,
               None if args.preview else size)
-    if not args.only or args.only == "robot":
-        robot_sheet(48 if args.preview else 128, view, PUBLIC / "robot.webp")
+    if not args.anchors_only and (not args.only or args.only == "robot"):
+        robot_sheet(24 if args.preview else min(samples, 96), view, PUBLIC / "robot.webp")
     ANCHORS.write_text(json.dumps(anchors, indent=1) + "\n")
 
 

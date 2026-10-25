@@ -76,13 +76,13 @@ function Kpis({ summary, ledger }: { summary: Summary | null; ledger: Ledger | n
   return (
     <section className="fc-kpis" aria-label="Totais do dia">
       <div>
-        <span>ORDENS EXECUTADAS</span>
+        <span>TOTAL DE ORDENS EXECUTADAS</span>
         <b>{summary ? `${summary.windowFull ? "≥ " : ""}${summary.total.toLocaleString("pt-BR")}` : "—"}</b>
-        <small>{summary ? Object.entries(summary.byVenue).map(([v, c]) => `${v === "XP_B3" ? "XP/B3" : "Binance"} ${c}`).join(" · ") || "nenhuma ainda" : "SUMMARY UNAVAILABLE"}</small>
+        <small>{summary ? Object.entries(summary.byVenue).map(([v, c]) => `${v === "XP_B3" ? "XP/B3" : v.startsWith("BINANCE") ? "Binance" : v} ${c}`).join(" · ") || "nenhuma ainda" : "SUMMARY UNAVAILABLE"}</small>
       </div>
       <i aria-hidden="true" />
       <div>
-        <span>HOJE</span>
+        <span>PREGÃO HOJE</span>
         <b>{summary ? summary.today : "—"} <em>ordens · {summary ? summary.signalsToday : "—"} sinais</em></b>
         <div className="fc-bar" role="meter" aria-label="Limite de perda diária usado" aria-valuemin={0} aria-valuemax={1} aria-valuenow={pct ?? undefined}>
           <span style={{ width: pct === null ? "0%" : `${(pct * 100).toFixed(1)}%` }} className={pct !== null && pct > 0.7 ? "hot" : ""} />
@@ -93,7 +93,7 @@ function Kpis({ summary, ledger }: { summary: Summary | null; ledger: Ledger | n
   );
 }
 
-function Sources({ state, stateFresh, xp, summary }: { state: FloorState | null; stateFresh: boolean; xp: XpLane; summary: Summary | null }) {
+function Sources({ state, stateFresh, xp, summary, mobileOpen }: { state: FloorState | null; stateFresh: boolean; xp: XpLane; summary: Summary | null; mobileOpen: boolean }) {
   const wd = state?.watchdog;
   const rows: { name: string; status: string; ok: boolean | null }[] = [
     { name: "Binance Spot · testnet", status: state ? (stateFresh ? "LIVE" : "STALE") : "UNAVAILABLE", ok: state ? stateFresh : null },
@@ -103,9 +103,49 @@ function Sources({ state, stateFresh, xp, summary }: { state: FloorState | null;
     { name: "Watchdog", status: wd ? (wd.active ? (wd.last_trip ? `ATIVO · último trip ${wd.last_trip.at.slice(0, 10)}` : "ATIVO") : "INATIVO") : "UNAVAILABLE", ok: wd ? wd.active : null },
   ];
   return (
-    <aside className="fc-sources" aria-label="Fontes">
+    <aside className={`fc-sources${mobileOpen ? " fc-mobile-open" : ""}`} aria-label="Fontes">
       <header><span aria-hidden="true">⌖</span> FONTES</header>
       <ul>{rows.map(r => <li key={r.name}><i className={r.ok === null ? "" : r.ok ? "on" : "off"} />{r.name}<em>{r.status}</em></li>)}</ul>
+    </aside>
+  );
+}
+
+
+function AgentRoster({ agents, actions, b3, xpLive, available, selectedId, onSelect }: { agents: Agent[]; actions: FloorAction[]; b3: boolean; xpLive: boolean; available: boolean; selectedId: string | null; onSelect: (id: string) => void }) {
+  return (
+    <aside className="fc-roster" aria-label="Agentes do pregão">
+      <header>AGENTES <strong>{available ? agents.length : "—"}</strong></header>
+      {!available ? <p className="fc-note">AGENT ROSTER UNAVAILABLE</p> : agents.length === 0 ? <p className="fc-note">Nenhum agente cadastrado.</p> :
+        <ul>{agents.slice(0, 6).map(a => <li key={a.id}>
+          <i className={a.status === "ACTIVE" ? "on" : ""} aria-hidden="true" />
+          <button type="button" className="fc-roster-select" aria-pressed={selectedId === a.id} onClick={() => onSelect(a.id)}>
+            <b>{a.name ?? a.id}</b>
+            <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
+          </button>
+        </li>)}</ul>}
+      {available && agents.length > 6 && <p className="fc-note">+{agents.length - 6} agentes · lista completa na legenda do pregão</p>}
+    </aside>
+  );
+}
+
+
+/** A journal line as people read it: "AG-0005-NOVA entrou no pregão" rather than the raw "joined". */
+function describe(a: FloorAction): string {
+  const joined = /\b(AG-\d{4}-[A-Z]+)\b.*\bjoined\b/i.exec(a.headline);
+  return joined ? `${joined[1].toUpperCase()} entrou no pregão` : a.headline;
+}
+
+function Activity({ actions, fresh, mobileOpen }: { actions: FloorAction[]; fresh: boolean; mobileOpen: boolean }) {
+  const recent = actions.slice(-5).reverse();
+  return (
+    <aside className={`fc-activity${mobileOpen ? " fc-mobile-open" : ""}`} aria-label="Atividade do pregão">
+      <header>ATIVIDADE EM TEMPO REAL <small>{fresh ? "LIVE" : "LAST KNOWN"}</small></header>
+      {recent.length === 0 ? <p className="fc-note">Nenhum evento registrado.</p> :
+        <ol>{recent.map(a => <li key={`${a.seq}:${a.station}`}>
+          <time>{a.at.slice(11, 16)}</time>
+          <b>{STATIONS.find(s => s.id === a.station)?.label ?? a.station}</b>
+          <span title={a.headline}>{describe(a)}{a.symbol ? " · " + a.symbol : ""}</span>
+        </li>)}</ol>}
     </aside>
   );
 }
@@ -141,7 +181,7 @@ function Queue({ actions, agents }: { actions: FloorAction[]; agents: Agent[] })
 }
 
 type Pt = [number, number];
-type Layout = { seats: { floor: "binance" | "xp"; seat: Pt; hub: Pt; height: number }[]; globe: { center: Pt; radius: number } };
+type Layout = { seats: { floor: "binance" | "xp"; seat: Pt; hub: Pt; height: number }[]; ring?: Pt[]; globe: { center: Pt; radius: number } };
 const RENDERED = ANCHORS as Partial<Record<"landscape" | "portrait", Layout>>;
 const LANDSCAPE = { src: "floorcontrol/room.webp", aspect: 16 / 9, layout: RENDERED.landscape as Layout };
 const ROOMS = {
@@ -153,6 +193,7 @@ const SPRITE = `${import.meta.env.BASE_URL}floorcontrol/robot.webp`;
 // The robot sprite frame is 2.6 m tall (orthographic scale); a robot stands 1.9 m in the anchors.
 // Robots are drawn twice their scale so they read at a glance, as in a control-room overview.
 const SPRITE_PER_HEIGHT = (2.6 / 1.9) * 2;
+const BOT_HUES = [0, 175, 85, 255, 40, 145];
 
 /** Where the image lands inside the box with object-fit: cover. */
 function coverRect(w: number, h: number, aspect: number) {
@@ -160,33 +201,76 @@ function coverRect(w: number, h: number, aspect: number) {
   return { x: (w - iw) / 2, y: (h - ih) / 2, w: iw, h: ih };
 }
 
+type Box = { l: number; t: number; r: number; b: number };
+const overlaps = (p: Box, q: Box) => p.l < q.r && q.l < p.r && p.t < q.b && q.t < p.b;
+
 /**
- * Which seat each agent takes, in roster order: of the seats of its floor that are on screen, the one
- * nearest the hub that keeps its name tag clear of the tags already placed (else the one farthest from them).
+ * Where each agent stands, in roster order: on the line from a desk of its floor to its hub post (the
+ * desk first, then further along towards the ring around the globe, as in the reference room), with
+ * its tag above or below the robot. The robot and tag must stay inside the stage and clear of every
+ * panel drawn over the room (measured, not guessed), of the globe and of the tags already placed.
+ * When the panels cover all of those, a post on the floor ring around the globe. With no such spot
+ * there is no robot: the AGENTES panel and the queue legend still list the agent.
  */
-function seatsFor(agents: Agent[], layout: Layout, place: (p: Pt) => Pt, w: number, h: number): Map<string, { i: number; tag: boolean }> {
-  const out = new Map<string, { i: number; tag: boolean }>();
-  const placed: Pt[] = [];
-  const [gx, gy] = place(layout.globe.center);
-  // On screen with room for the tag above, clear of the totals (phones) and of the sources panel (wide screens, bottom right).
+// A spot on the line from desk i to its hub (t = 0 at the desk), or, with `post`, a ring post.
+type Spot = { i: number; t: number; below: boolean; post?: number };
+const STOPS = [0, 0.35, 0.7, 1];
+function seatsFor(agents: Agent[], layout: Layout, place: (p: Pt) => Pt, w: number, h: number, roomH: number, panels: Box[]): Map<string, Spot> {
+  const out = new Map<string, Spot>();
   const wide = w > 760;
-  const onScreen = ([x, y]: Pt) => x > w * 0.06 && x < w * 0.94 && y > h * (wide ? 0.26 : 0.52) && y < h * 0.8
-    && !(wide && x > w - 250 && y > h * 0.42);
-  // Phones show the name only, so their tags need less room.
-  const gapX = wide ? 170 : 92, gapY = wide ? 80 : 36;
-  const clear = ([x, y]: Pt) => placed.every(([px, py]) => Math.abs(px - x) > gapX || Math.abs(py - y) > gapY);
+  // Tags show name, status and capital on wide screens, the name only on phones.
+  const tagW = wide ? 172 : 96, tagH = wide ? 66 : 30;
+  const [gx, gy] = place(layout.globe.center);
+  const gr = layout.globe.radius * roomH;
+  // The globe is round: a box clears it when its nearest point lies outside the sphere's disc.
+  const onGlobe = (b: Box) => Math.hypot(Math.max(b.l, Math.min(gx, b.r)) - gx, Math.max(b.t, Math.min(gy, b.b)) - gy) < gr;
+  const placed: Box[] = [];
+  const free = (b: Box) => b.l >= 4 && b.r <= w - 4 && b.t >= 4 && b.b <= h - 4
+    && !onGlobe(b) && !panels.some(p => overlaps(b, p)) && !placed.some(p => overlaps(b, p));
   for (const a of agents) {
-    const free = layout.seats
-      .map((s, i) => ({ i, at: place(s.seat), floor: s.floor }))
-      .filter(s => s.floor === a.floor && ![...out.values()].some(o => o.i === s.i) && onScreen(s.at))
-      .sort((p, q) => Math.hypot(p.at[0] - gx, p.at[1] - gy) - Math.hypot(q.at[0] - gx, q.at[1] - gy));
-    // No clear seat left: the one farthest from the tags already placed.
-    const spread = (p: Pt) => Math.min(...placed.map(([px, py]) => Math.max(Math.abs(px - p[0]) / gapX, Math.abs(py - p[1]) / gapY)));
-    const pick = free.find(s => clear(s.at)) ?? [...free].sort((p, q) => spread(q.at) - spread(p.at))[0];
-    if (!pick) continue; // no seat of this floor on screen: the legend still lists the agent
-    // A crowded seat keeps its robot; on a phone its tag gives way (the queue legend lists everyone).
-    const tag = wide || clear(pick.at);
-    out.set(a.id, { i: pick.i, tag }); if (tag) placed.push(pick.at);
+    const taken = [...out.values()].map(o => o.i);
+    let best: { spot: Spot; boxes: Box[]; score: number } | null = null;
+    layout.seats.forEach((s, i) => {
+      if (s.floor !== a.floor || taken.includes(i)) return;
+      const bot = Math.min(84, Math.max(20, s.height * roomH * SPRITE_PER_HEIGHT));
+      const [x1, y1] = place(s.seat), [x2, y2] = place(s.hub);
+      for (const t of STOPS) {
+        const x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
+        const robot: Box = { l: x - bot / 2, r: x + bot / 2, t: y - bot * 0.88, b: y + 4 };
+        for (const below of [false, true]) {
+          const tag: Box = below
+            ? { l: x - tagW / 2, r: x + tagW / 2, t: y + 6, b: y + 6 + tagH }
+            : { l: x - tagW / 2, r: x + tagW / 2, t: y - bot * 0.82 - tagH, b: y - bot * 0.82 };
+          if (!free(robot) || !free(tag)) continue;
+          // Desks first, then the shortest way out towards the hub; tags above when possible.
+          const score = t * 10_000 + Math.hypot(x - gx, y - gy) + (below ? 50 : 0);
+          if (!best || score < best.score) best = { spot: { i, t, below }, boxes: [robot, tag], score };
+        }
+      }
+    });
+    if (!best) {
+      // Every desk line is covered: the free ring post farthest from the robots already placed.
+      const height = layout.seats.find(s => s.floor === a.floor)?.height ?? 0.05;
+      const bot = Math.min(84, Math.max(20, height * roomH * SPRITE_PER_HEIGHT));
+      const takenPosts = [...out.values()].map(o => o.post);
+      (layout.ring ?? []).forEach((p, j) => {
+        if (takenPosts.includes(j)) return;
+        const [x, y] = place(p);
+        const robot: Box = { l: x - bot / 2, r: x + bot / 2, t: y - bot * 0.88, b: y + 4 };
+        for (const below of [false, true]) {
+          const tag: Box = below
+            ? { l: x - tagW / 2, r: x + tagW / 2, t: y + 6, b: y + 6 + tagH }
+            : { l: x - tagW / 2, r: x + tagW / 2, t: y - bot * 0.82 - tagH, b: y - bot * 0.82 };
+          if (!free(robot) || !free(tag)) continue;
+          const spread = placed.length ? Math.min(...placed.map(b => Math.hypot((b.l + b.r) / 2 - x, b.b - y))) : 0;
+          const score = (below ? 50 : 0) - spread;
+          if (!best || score < best.score) best = { spot: { i: -1, t: 1, below, post: j }, boxes: [robot, tag], score };
+        }
+      });
+    }
+    if (!best) continue;
+    const { spot, boxes } = best as { spot: Spot; boxes: Box[]; score: number };
+    out.set(a.id, spot); placed.push(...boxes);
   }
   return out;
 }
@@ -203,6 +287,8 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const [paused, setPaused] = useState(reduced);
   const [running, setRunning] = useState(true);
   const [now, setNow] = useState(() => new Date());
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<"sources" | "activity" | null>(null);
   useEffect(() => { const t = window.setInterval(() => setNow(new Date()), 30000); return () => window.clearInterval(t); }, []);
 
   const roster = dataOf(useDeskFeed("/v1/agents/roster", parseRoster, POLL).state);
@@ -210,6 +296,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const summaryFeed = useDeskFeed("/v1/floor/summary", parseSummary, POLL);
   const summary = dataOf(summaryFeed.state);
   const agents = useMemo(() => roster?.agents ?? [], [roster]);
+  const selectedAgent = agents.find(agent => agent.id === selectedAgentId) ?? null;
   const b3 = b3Open(now);
   const busySymbols = useMemo(() => new Set(STATIONS.filter(s => active(s.id)).map(s => latest[s.id]?.symbol).filter((s): s is string => Boolean(s))), [active, latest]);
 
@@ -230,9 +317,24 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const room = size.w > 0 && size.w / Math.max(1, size.h) < 0.9 ? ROOMS.portrait : ROOMS.landscape;
   const rect = coverRect(Math.max(1, size.w), Math.max(1, size.h), room.aspect);
   const at = ([x, y]: Pt): Pt => [rect.x + x * rect.w, rect.y + y * rect.h];
-  const seatOf = useMemo(() => seatsFor(agents, room.layout, at, size.w, size.h),
+  // Panels drawn over the room, measured after layout, so robots and tags never sit underneath one.
+  const [panels, setPanels] = useState<Box[]>([]);
+  useEffect(() => {
+    const box = wrap.current;
+    if (!box) return;
+    const raf = requestAnimationFrame(() => {
+      const origin = box.getBoundingClientRect();
+      const next = [...box.querySelectorAll<HTMLElement>(".fc-head, .fc-kpis > div, .fc-sources, .fc-roster, .fc-activity, .fc-queue, .fc-agent-detail")]
+        .map(el => el.getBoundingClientRect())
+        .filter(r => r.width > 0 && r.height > 0)
+        .map(r => ({ l: r.left - origin.left - 6, t: r.top - origin.top - 6, r: r.right - origin.left + 6, b: r.bottom - origin.top + 6 }));
+      setPanels(old => (JSON.stringify(old) === JSON.stringify(next) ? old : next));
+    });
+    return () => cancelAnimationFrame(raf);
+  });
+  const seatOf = useMemo(() => seatsFor(agents, room.layout, at, size.w, size.h, rect.h, panels),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [agents, room, size.w, size.h]);
+    [agents, room, size.w, size.h, panels]);
   const animate = !paused && running;
 
   // Walk progress per agent: 0 at its desk, 1 at the hub console. Busy agents walk out and back.
@@ -268,37 +370,48 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const xpLive = xp.state === "live";
   const [gx, gy] = at(room.layout.globe.center);
   const gr = room.layout.globe.radius * rect.h;
+  // Decorative glow must remain readable on narrower, wider-framed portrait renders.
+  const glowSize = size.w <= 760 ? Math.max(140, gr * 2.6) : gr * 2.6;
 
   return (
     <div ref={wrap} className={`fl-scene fc-scene${animate ? "" : " fc-still"}`} role="group" aria-label={`Controle do pregão: ${agents.length} agentes, ${summary ? `${summary.total} ordens executadas` : "totais indisponíveis"}`}>
       <img className="fc-room" src={`${import.meta.env.BASE_URL}${room.src}`} alt="" aria-hidden="true" decoding="async"
         style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
-      <i className="fc-globe" aria-hidden="true" style={{ left: gx, top: gy, width: gr * 2.6, height: gr * 2.6 }} />
+      <i className="fc-globe" aria-hidden="true" style={{ left: gx, top: gy, width: glowSize, height: glowSize }} />
       <svg className="fc-paths" aria-hidden="true" width={size.w} height={size.h}>
         {agents.map(a => {
-          const i = seatOf.get(a.id)?.i;
-          if (i === undefined || !(a.status === "ACTIVE" && busySymbols.has(a.symbol))) return null;
-          const s = room.layout.seats[i], [x1, y1] = at(s.seat), [x2, y2] = at(s.hub);
+          const spot = seatOf.get(a.id);
+          // A ring post is already at the hub: no path to draw.
+          if (spot === undefined || spot.post !== undefined || !(a.status === "ACTIVE" && busySymbols.has(a.symbol))) return null;
+          const i = spot.i;
+          const s = room.layout.seats[i], [sx, sy] = at(s.seat), [x2, y2] = at(s.hub);
+          const x1 = sx + (x2 - sx) * spot.t, y1 = sy + (y2 - sy) * spot.t;
           return <g key={a.id}><line x1={x1} y1={y1} x2={x2} y2={y2} /><circle cx={x2} cy={y2} r={Math.max(6, s.height * rect.h * 0.22)} /></g>;
         })}
       </svg>
-      {agents.map(a => {
-        const seat = seatOf.get(a.id);
-        if (seat === undefined) return null;
-        const s = room.layout.seats[seat.i], t = walk[a.id] ?? 0;
-        const [x1, y1] = at(s.seat), [x2, y2] = at(s.hub);
+      {agents.map((a, index) => {
+        const spot = seatOf.get(a.id);
+        if (spot === undefined) return null; // listed in AGENTES and the queue legend
+        // From its spot on the desk-to-hub line, a busy agent walks the rest of the way to the hub;
+        // an agent on a ring post is at the hub already.
+        const post = spot.post === undefined ? null : room.layout.ring?.[spot.post] ?? null;
+        const w = post ? 0 : walk[a.id] ?? 0;
+        const s = post ? null : room.layout.seats[spot.i], t = spot.t + (1 - spot.t) * w;
+        const [x1, y1] = s ? at(s.seat) : at(post!), [x2, y2] = s ? at(s.hub) : at(post!);
         const x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
-        const h = s.height * rect.h * SPRITE_PER_HEIGHT;
-        const moving = t > 0 && t < 1;
+        const height = s?.height ?? room.layout.seats[0]?.height ?? 0.05;
+        const h = Math.min(84, Math.max(20, height * rect.h * SPRITE_PER_HEIGHT));
+        const moving = w > 0 && w < 1;
         const busy = busySymbols.has(a.symbol);
         return (
-          <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`} style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)` }}>
-            <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0` }} />
-            {seat.tag && <div className="fc-tag" style={{ bottom: h * 0.82 }}>
+          <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`}
+            style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`, ["--bot-hue" as string]: `${50 + BOT_HUES[index % BOT_HUES.length]}`, ["--bot-size" as string]: `${h}px` }}>
+            <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0`, filter: a.status === "ACTIVE" ? `hue-rotate(${BOT_HUES[index % BOT_HUES.length]}deg) drop-shadow(0 4px 6px rgba(0,0,0,.55))` : "grayscale(1) brightness(.7)" }} />
+            <button type="button" className="fc-tag" style={spot.below ? { top: 6 } : { bottom: h * 0.82 }} aria-pressed={selectedAgentId === a.id} aria-label={`Abrir agente ${a.name ?? a.id}`} onClick={() => setSelectedAgentId(a.id)}>
               <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>
               <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
               <em>{brl(a.equity)} · capital virtual</em>
-            </div>}
+            </button>
           </div>
         );
       })}
@@ -312,10 +425,30 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
           <li className={b3 ? "live" : "stale"}>B3 {b3 ? "PREGÃO ABERTO" : "FECHADA"}</li>
         </ul>
         <time>{date}</time>
+        <button type="button" className="fc-panel-mobile-toggle" aria-expanded={mobilePanel === "sources"} onClick={() => setMobilePanel(v => v === "sources" ? null : "sources")}>Fontes</button>
+        <button type="button" className="fc-panel-mobile-toggle" aria-expanded={mobilePanel === "activity"} onClick={() => setMobilePanel(v => v === "activity" ? null : "activity")}>Atividade</button>
         <button type="button" className="fc-pause" aria-pressed={paused} disabled={reduced} title={reduced ? "Movimento reduzido pelo sistema" : undefined} onClick={() => setPaused(p => !p)}>{paused ? "Retomar animação" : "Pausar animação"}</button>
       </header>
       <Kpis summary={summary} ledger={ledger} />
-      <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} />
+      <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} mobileOpen={mobilePanel === "sources"} />
+      <AgentRoster agents={agents} actions={actions} b3={b3} xpLive={xpLive} available={roster !== null} selectedId={selectedAgentId} onSelect={setSelectedAgentId} />
+      {selectedAgent && (
+        <aside className="fc-agent-detail" aria-label={`Detalhes do agente ${selectedAgent.name ?? selectedAgent.id}`}>
+          <header>
+            <b>AGENTE · {selectedAgent.name ?? selectedAgent.id}</b>
+            <button type="button" onClick={() => setSelectedAgentId(null)} aria-label="Fechar detalhes do agente">×</button>
+          </header>
+          <dl>
+            <dt>Identificador</dt><dd>{selectedAgent.id}</dd>
+            <dt>Instrumento</dt><dd>{selectedAgent.symbol}</dd>
+            <dt>Ambiente</dt><dd>{selectedAgent.floor === "xp" ? "XP / B3" : "Binance"}</dd>
+            <dt>Situação</dt><dd>{statusLine(selectedAgent, lastFor(selectedAgent, actions), b3, xpLive)}</dd>
+            <dt>Capital virtual</dt><dd>{brl(selectedAgent.equity)}</dd>
+          </dl>
+          <p>{lastFor(selectedAgent, actions)?.headline ?? "Sem atividade registrada para este instrumento."}</p>
+        </aside>
+      )}
+      <Activity actions={actions} fresh={stateFresh} mobileOpen={mobilePanel === "activity"} />
       <Queue actions={actions} agents={agents} />
       {!loaded && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
       {failed && <p className="fl-3d-loading" role="alert">Imagem da sala indisponível. Os dados continuam abaixo e na vista Realista.</p>}

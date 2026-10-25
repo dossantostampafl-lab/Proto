@@ -207,7 +207,7 @@ export function Floor({ market }: Shared) {
         </span>}
       >
         {viewMode === "control" ? (
-          buildingFailed || !canRender3d() ? <BuildingUnavailable text="Controle indisponível: este dispositivo não roda WebGL. Use a vista Realista." /> : (
+          (
             <Fallback onError={() => setBuildingFailed(true)}>
               <Suspense fallback={<BuildingUnavailable text="Carregando sala de controle…" />}>
                 <FloorControl market={market} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} active={floor.active} xp={xp.lane} />

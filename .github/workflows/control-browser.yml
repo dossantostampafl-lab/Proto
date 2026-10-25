@@ -1,0 +1,50 @@
+name: Control Room Browser Regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/web/src/views/floorControl/**
+      - apps/web/src/styles.css
+      - scripts/check_control_browser.py
+      - .github/workflows/control-browser.yml
+
+permissions:
+  contents: read
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Build actual dashboard
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run contract-check
+          npm run build
+          npm run bundle-check
+      - name: Install offline fixture and Chromium
+        run: |
+          python -m pip install -e '.[dev]' playwright
+          python -m playwright install chromium --with-deps
+      - name: Capture Control Room without WebGL
+        run: python scripts/check_control_browser.py --output /tmp/proto-floor-screenshots
+      - name: Preserve visual review captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-room-browser-evidence
+          path: /tmp/proto-floor-screenshots/*.png
+          if-no-files-found: ignore
