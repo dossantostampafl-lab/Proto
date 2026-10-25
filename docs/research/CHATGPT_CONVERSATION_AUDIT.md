@@ -38,6 +38,14 @@ HTTP/network failure hides retained data; empty/configuration states are explici
 Polling uses the existing bounded, same-origin client at 15-second intervals.
 No new backend, persistence layer, credentials, inference cost or execution path.
 
+Follow-up (Claude Code review): the view is now an Agents dashboard. Roster totals,
+per-agent virtual book (equity, P&L, position, realized, valuation) and detail come from
+`/v1/agents/roster`; decision evidence narrows to the selected agent's instrument
+(`instrument_id`) and renders structured fields instead of raw JSON. Payloads are parsed
+defensively and styles use the theme tokens. Validated: typecheck, build, contract-check,
+bundle-check, and Chromium at 1440 px and 390 px against a local API (no console errors,
+no horizontal overflow). Conversation remains unavailable.
+
 ## Official authentication compatibility
 
 Sources consulted, not an OAuth end-to-end test:

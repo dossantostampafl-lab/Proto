@@ -162,6 +162,23 @@ assert.match(building, /visibilitychange/, "the building pauses while the tab is
 assert.match(building, /instance\.dispose\(\)/, "the building disposes its GPU resources on unmount");
 assert.match(building, /Pausar animação/, "the building animation can be paused");
 
+// "Controle": the mission-control room, a third view of the same live floor; only real numbers.
+const control = files.filter(([p]) => p.includes("floorControl")).map(([, s]) => s).join("\n");
+assert.match(floorView, /lazy\(\(\) => import\("\.\/floorControl\/FloorControl"\)\)/, "the control view loads on demand");
+assert.match(floorView, />Controle<\/button>/, "the floor offers the control view");
+assert.match(control, /"\/v1\/floor\/summary"/, "control totals come from the journal summary");
+assert.match(control, /windowFull \? "≥ "/, "a truncated journal window is printed as at least");
+for (const label of ["SUMMARY UNAVAILABLE", "AGENT ROSTER UNAVAILABLE", "MODE UNAVAILABLE", "TESTNET · NO REAL MONEY", "NOT CONFIGURED", "perda diária: não medida", "fora do pregão"]) {
+  assert.ok(control.includes(label), `control view must show ${label}`);
+}
+assert.match(control, /Math\.min\(window\.devicePixelRatio \|\| 1, 1\.5\)/, "the control room caps the pixel ratio at 1.5");
+assert.doesNotMatch(control, /shadowMap|castShadow|MeshStandardMaterial|MeshPhysicalMaterial/, "the control room uses no shadow maps and only cheap materials");
+assert.match(control, /prefers-reduced-motion: reduce/, "the control room respects reduced motion");
+assert.match(control, /IntersectionObserver/, "the control room pauses while off-screen");
+assert.match(control, /visibilitychange/, "the control room pauses while the tab is hidden");
+assert.match(control, /instance\.dispose\(\)/, "the control room disposes its GPU resources on unmount");
+assert.match(control, /Pausar animação/, "the control room animation can be paused");
+
 // Every desk is a real control over the photo and opens a drawer of live, read-only data.
 const desks = ["floorDesks.tsx", "deskData.ts"].map(name => files.find(([p]) => p.endsWith(name))?.[1] ?? "").join("\n");
 const api = files.find(([p]) => p.endsWith("api.ts"))?.[1] ?? "";

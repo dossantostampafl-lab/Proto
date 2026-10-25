@@ -42,7 +42,7 @@ export function parseRoster(raw: unknown): Roster | null {
 }
 
 /** One per-currency account of the ledger: the three equities the Risk Engine measures limits against. */
-export type Account = { quote: string; equity: string | null; startOfDay: string | null; peak: string | null; measured: boolean };
+export type Account = { quote: string; equity: string | null; startOfDay: string | null; peak: string | null; reference: string | null; measured: boolean };
 export type Ledger = { unavailable: boolean; accounts: Account[] };
 
 export function parseLedger(raw: unknown): Ledger | null {
@@ -52,7 +52,7 @@ export function parseLedger(raw: unknown): Ledger | null {
     unavailable,
     accounts: Object.entries(raw.accounts).map(([quote, a]) => {
       const r = rec(a);
-      return { quote, equity: finiteDecimal(r.equity), startOfDay: finiteDecimal(r.start_of_day_equity), peak: finiteDecimal(r.peak_equity), measured: !unavailable && finiteDecimal(r.gross_exposure) !== null };
+      return { quote, equity: finiteDecimal(r.equity), startOfDay: finiteDecimal(r.start_of_day_equity), peak: finiteDecimal(r.peak_equity), reference: finiteDecimal(r.reference_capital), measured: !unavailable && finiteDecimal(r.gross_exposure) !== null };
     }),
   };
 }
@@ -95,12 +95,18 @@ export function realizedSum(agents: Agent[]): number | null {
 }
 
 export type Limit = { used: number | null; limit: number; text: string };
-/** Daily loss (equity vs start of day) and drawdown (equity vs peak) of an account, as fractions; null when not measured. */
+/**
+ * Daily loss and drawdown of an account as fractions, measured as the Risk Engine does: the loss
+ * over the start-of-day (or peak) equity, but never over more than the account's reference capital
+ * (R$ 10,000 in its own currency, e.g. ~1,980 USDT). Null when not measured.
+ */
 export function limitsOf(a: Account | null): { daily: Limit; drawdown: Limit; measured: boolean } {
   const eq = toNum(a?.equity ?? null), sod = toNum(a?.startOfDay ?? null), peak = toNum(a?.peak ?? null);
+  const ref = toNum(a?.reference ?? null);
+  const base = (v: number) => (ref !== null && ref > 0 ? Math.min(v, ref) : v);
   const measured = Boolean(a?.measured) && eq !== null;
-  const daily = measured && sod !== null && sod > 0 ? Math.max(0, 1 - eq / sod) : null;
-  const dd = measured && peak !== null && peak > 0 ? Math.max(0, 1 - eq / peak) : null;
+  const daily = measured && sod !== null && sod > 0 ? Math.max(0, (sod - eq) / base(sod)) : null;
+  const dd = measured && peak !== null && peak > 0 ? Math.max(0, (peak - eq) / base(peak)) : null;
   const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(2)}%`);
   return { measured, daily: { used: daily, limit: 0.01, text: pct(daily) }, drawdown: { used: dd, limit: 0.05, text: pct(dd) } };
 }
