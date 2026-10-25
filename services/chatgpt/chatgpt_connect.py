@@ -6,6 +6,7 @@ import base64
 import hashlib
 import os
 import secrets
+import tempfile
 import threading
 import uuid
 import webbrowser
@@ -92,32 +93,46 @@ def _host_id_path(output: Path) -> Path:
 
 
 def _persist_host_id(path: Path, value: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    from .storage import check_path
+
+    path = check_path(path)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    fd, name = tempfile.mkstemp(prefix=".host-", dir=path.parent)
     try:
-        os.chmod(path.parent, 0o700)
-    except OSError:
-        pass
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(value + "\n", encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, path)
-    os.chmod(path, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(value + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 
 def _load_or_create_host_id(output: Path, credentials: dict[str, object]) -> str:
-    path = _host_id_path(output)
+    import fcntl
+
+    from .storage import check_path
+
     credential_host_id = str(credentials.get("ext_agent_host_id") or "").strip()
     if credential_host_id:
-        # A saved profile can intentionally represent a remote/self-hosted runtime.
-        # Reuse its binding without overwriting this computer's own shared host identity.
+        # Remote reauthorization never replaces the browser host's own identity.
         return credential_host_id
-    if path.exists():
-        value = path.read_text(encoding="utf-8").strip()
-        if value:
-            return value
-    value = "urn:uuid:" + str(uuid.uuid4())
-    _persist_host_id(path, value)
-    return value
+    path = check_path(_host_id_path(output))
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        if path.exists():
+            value = path.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+        value = "urn:uuid:" + str(uuid.uuid4())
+        _persist_host_id(path, value)
+        return value
+    finally:
+        os.close(fd)
 
 
 def _granted_scopes(tokens: dict[str, object]) -> set[str]:
@@ -163,6 +178,8 @@ def _validate_id_token(
 class _CallbackHandler(BaseHTTPRequestHandler):
     result: dict[str, str] | None = None
     event = threading.Event()
+    expected_state = ""
+    result_lock = threading.Lock()
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -171,8 +188,23 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         query = parse_qs(parsed.query, keep_blank_values=True)
-        type(self).result = {key: values[-1] for key, values in query.items() if values}
-        type(self).event.set()
+        handler = type(self)
+        supplied_state = query.get("state", [""])
+        if (
+            any(len(values) != 1 for values in query.values())
+            or not handler.expected_state
+            or not secrets.compare_digest(supplied_state[0], handler.expected_state)
+        ):
+            self.send_response(400)
+            self.end_headers()
+            return
+        with handler.result_lock:
+            if handler.event.is_set():
+                self.send_response(409)
+                self.end_headers()
+                return
+            handler.result = {key: values[0] for key, values in query.items()}
+            handler.event.set()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
@@ -269,9 +301,18 @@ def _connect(
 
     url = AUTHORIZE_URL + "?" + urlencode(params)
 
-    _CallbackHandler.result = None
-    _CallbackHandler.event.clear()
-    server = ThreadingHTTPServer(("127.0.0.1", port), _CallbackHandler)
+    # Per-listener state avoids cross-profile callback races in the same process.
+    handler = type(
+        "ProtoCallback",
+        (_CallbackHandler,),
+        {
+            "result": None,
+            "event": threading.Event(),
+            "expected_state": state,
+            "result_lock": threading.Lock(),
+        },
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -286,14 +327,14 @@ def _connect(
             print(url)
         if not no_browser:
             webbrowser.open(url)
-        if not _CallbackHandler.event.wait(timeout=600):
+        if not handler.event.wait(timeout=600):
             raise RuntimeError("Timed out waiting for the ChatGPT authorization callback")
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
 
-    callback: dict[str, str] = _CallbackHandler.result or {}
+    callback: dict[str, str] = handler.result or {}
     if callback.get("state") != state:
         raise RuntimeError("OAuth state did not match")
     if callback.get("error"):
@@ -468,14 +509,20 @@ def main() -> None:
             "Refusing to store ChatGPT OAuth credentials inside a Git checkout. "
             "Choose a protected path outside source control."
         )
-    connect(
-        output=output,
-        port=args.port,
-        no_browser=args.no_browser,
-        force_new=args.new,
-        enable_plan=args.enable_plan,
-        host_id_override=args.host_id,
-    )
+    try:
+        connect(
+            output=output,
+            port=args.port,
+            no_browser=args.no_browser,
+            force_new=args.new,
+            enable_plan=args.enable_plan,
+            host_id_override=args.host_id,
+        )
+    except Exception:
+        raise SystemExit(
+            "ChatGPT authorization failed. Check consent, profile permissions and callback port; "
+            "retry with the same profile. No credential details were printed."
+        ) from None
 
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ def _clear_local_tokens(path: Path, data: dict[str, Any], *, revocation_confirme
     _write(path, retained)
 
 
-def _revoke_remote(data: dict[str, Any], *, timeout_seconds: float = 15.0) -> bool:
+def _revoke_remote(data: dict[str, Any], *, timeout_seconds: float = 5.0) -> bool:
     refresh_token = str(data.get("refresh_token") or "")
     client_id = str(data.get("client_id") or "")
     if not refresh_token or not client_id:

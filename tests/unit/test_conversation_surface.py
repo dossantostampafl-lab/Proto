@@ -128,3 +128,77 @@ async def test_non_loopback_denied(client):
         base_url="http://localhost",
     ) as remote:
         assert (await remote.post("/conversation/status")).status_code == 403
+
+
+async def test_setup_status_is_not_claimed_as_real_authorization(client, monkeypatch):
+    from services.chatgpt.contracts import InferenceAuthenticationError
+
+    response = await client.post("/conversation/status")
+    assert response.json()["state"] == "CREDENTIALS_PRESENT_UNVERIFIED"
+    assert "access_token" not in response.text
+
+    def missing(_):
+        raise InferenceAuthenticationError("chatgpt", "missing")
+
+    monkeypatch.setattr(surface.ChatGPTCredentialStore, "_read", missing)
+    response = await client.post("/conversation/status")
+    assert response.status_code == 200
+    assert response.json()["connected"] is False
+    assert response.json()["state"] == "AUTHORIZATION_REQUIRED"
+    assert (await client.post("/conversation/models")).status_code == 401
+
+
+async def test_model_catalog_and_disconnect_are_explicit(client, monkeypatch):
+    async def models(profile):
+        assert profile == "default"
+        return ["fixture-model"]
+
+    monkeypatch.setattr(surface, "models", models)
+    assert (await client.post("/conversation/models")).json() == {
+        "models": ["fixture-model"],
+        "state": "ACCOUNT_ACCESS_VERIFIED",
+    }
+    monkeypatch.setattr(surface, "sign_out", lambda profile: False)
+    assert (await client.post("/conversation/disconnect")).json() == {
+        "connected": False,
+        "remote_revocation_confirmed": False,
+    }
+    await surface._gate.acquire()
+    try:
+        assert (await client.post("/conversation/disconnect")).status_code == 409
+    finally:
+        surface._gate.release()
+
+
+async def test_proxy_headers_and_cross_scheme_are_denied(client):
+    for headers in ({"X-Forwarded-For": "127.0.0.1"}, {"Origin": "https://localhost"}):
+        for path in ("status", "models", "disconnect", "new"):
+            assert (
+                await client.post(
+                    f"/conversation/{path}", headers=headers, json={"agent_id": "AG-1"}
+                )
+            ).status_code == 403
+
+
+async def test_selected_model_is_used_without_changing_server_configuration(client, monkeypatch):
+    seen = []
+    original = surface.ChatGPTPlanProvider.__init__
+
+    def capture(self, **kwargs):
+        seen.append(kwargs["default_model"])
+        original(self, **kwargs)
+
+    monkeypatch.setattr(surface.ChatGPTPlanProvider, "__init__", capture)
+    created = await client.post("/conversation/new", json={"agent_id": "AG-1"})
+    response = await client.post(
+        f"/conversation/{created.json()['id']}/messages",
+        json={
+            "text": "Explain",
+            "version": 0,
+            "model": "fixture-other",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["agent_id"] == "AG-1"
+    assert seen == ["fixture-other"]
+    assert surface.settings.chatgpt_model == "fixture-model"

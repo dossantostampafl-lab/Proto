@@ -13,9 +13,11 @@ import re
 from urllib.parse import urlparse
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from services.chatgpt.chatgpt_accounts import sign_out
 from services.chatgpt.chatgpt_connect import _profile_credentials_path
 from services.chatgpt.chatgpt_credentials import ChatGPTCredentialStore
 from services.chatgpt.chatgpt_provider import ChatGPTPlanProvider
@@ -26,6 +28,7 @@ from services.chatgpt.contracts import (
     InferenceRequest,
 )
 from services.chatgpt.conversations import ConversationStore
+from services.chatgpt.models import models
 
 from . import control_state
 from .event_state import record_operational_event
@@ -48,9 +51,12 @@ class Create(BaseModel):
 class Message(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     version: int = Field(ge=0)
+    model: str | None = Field(
+        default=None, min_length=1, max_length=160, pattern=r"^[a-zA-Z0-9._:/-]+$"
+    )
 
 
-def identity(request: Request) -> tuple[str, ChatGPTCredentialStore]:
+def authorize_operator(request: Request) -> None:
     if not settings.chatgpt_local_enabled:
         raise HTTPException(503, "Local ChatGPT conversation is disabled")
     # This mode is not suitable behind a reverse proxy or for shared remote hosting.
@@ -59,12 +65,25 @@ def identity(request: Request) -> tuple[str, ChatGPTCredentialStore]:
     if request.url.hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise HTTPException(403, "Unexpected conversation host")
     origin = request.headers.get("origin")
-    if origin and urlparse(origin).netloc != request.url.netloc:
+    if origin and (
+        urlparse(origin).netloc != request.url.netloc
+        or urlparse(origin).scheme != request.url.scheme
+    ):
         raise HTTPException(403, "Cross-origin conversation request refused")
     expected = settings.operator_api_token
     supplied = request.headers.get("X-Proto-Operator-Token", "")
     if not expected or not hmac.compare_digest(supplied, expected):
         raise HTTPException(401, "Operator authentication required")
+    # This mode must never be reachable through a public forwarding proxy.
+    if any(
+        name in request.headers
+        for name in ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto")
+    ):
+        raise HTTPException(403, "Forwarded conversation requests are refused")
+
+
+def identity(request: Request) -> tuple[str, ChatGPTCredentialStore]:
+    authorize_operator(request)
     try:
         credentials = ChatGPTCredentialStore(
             str(_profile_credentials_path(settings.chatgpt_profile))
@@ -87,13 +106,57 @@ def store() -> ConversationStore:
 
 @router.post("/status")
 def status(request: Request) -> dict:
-    identity(request)
+    authorize_operator(request)
+    connected = False
+    try:
+        identity(request)
+        connected = True
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
     return {
-        "connected": True,
+        "connected": connected,
+        "state": "CREDENTIALS_PRESENT_UNVERIFIED" if connected else "AUTHORIZATION_REQUIRED",
         "mode": "LOCAL_SINGLE_USER",
         "execution_authority": False,
         "model_configured": bool(settings.chatgpt_model),
+        "configured_model": settings.chatgpt_model or None,
+        "setup_document": "docs/research/CHATGPT_ORACLE_SETUP.md",
+        "authorization_command": (
+            "python -m services.chatgpt.chatgpt_connect --profile oracle --enable-plan"
+        ),
     }
+
+
+@router.post("/models")
+async def account_models(request: Request) -> dict:
+    identity(request)
+    try:
+        return {
+            "models": await models(settings.chatgpt_profile),
+            "state": "ACCOUNT_ACCESS_VERIFIED",
+        }
+    except InferenceAuthenticationError:
+        raise HTTPException(401, "Authorize ChatGPT plan usage locally again") from None
+    except (InferenceError, httpx.HTTPError, RuntimeError, ValueError, TimeoutError):
+        raise HTTPException(
+            502, "Account model catalog unavailable; access was not verified"
+        ) from None
+
+
+@router.post("/disconnect")
+async def disconnect(request: Request) -> dict:
+    authorize_operator(request)
+    if _gate.locked():
+        raise HTTPException(409, "Wait for the current conversation before disconnecting")
+    async with _gate:
+        try:
+            confirmed = await asyncio.to_thread(sign_out, settings.chatgpt_profile)
+        except (OSError, ValueError, RuntimeError):
+            raise HTTPException(
+                409, "Profile unavailable or busy; retry local disconnect"
+            ) from None
+    return {"connected": False, "remote_revocation_confirmed": confirmed}
 
 
 @router.post("/new")
@@ -125,7 +188,8 @@ async def send(identifier: UUID, body: Message, request: Request) -> dict:
     ]
     if _SECRET.search(body.text) or any(value and value in body.text for value in secret_values):
         raise HTTPException(422, "Do not include credentials or secrets in messages")
-    if not settings.chatgpt_model:
+    model = body.model or settings.chatgpt_model
+    if not model:
         raise HTTPException(503, "Select an account-supported CHATGPT_MODEL locally")
     if _gate.locked():
         raise HTTPException(429, "Another conversation is running; retry after it completes")
@@ -163,9 +227,7 @@ async def send(identifier: UUID, body: Message, request: Request) -> dict:
                 payload={"conversation_id": str(identifier), "version": body.version},
                 idempotency_key=f"conversation:{identifier}:{body.version}:requested",
             )
-            provider = ChatGPTPlanProvider(
-                credentials=credentials, default_model=settings.chatgpt_model
-            )
+            provider = ChatGPTPlanProvider(credentials=credentials, default_model=model)
             answer = await provider.generate(InferenceRequest(messages=messages))
             if (
                 not answer.content
@@ -190,6 +252,7 @@ async def send(identifier: UUID, body: Message, request: Request) -> dict:
             await db.append(owner, str(identifier), body.version, entries)
             return {
                 "id": str(identifier),
+                "agent_id": row["agent_id"],
                 "version": body.version + 1,
                 "messages": entries,
                 "execution_authority": False,

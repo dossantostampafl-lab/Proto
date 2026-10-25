@@ -31,8 +31,8 @@ python -m services.chatgpt.models --profile default
 ```
 
 Choose `CHATGPT_MODEL` from the account's official `/v1/models` catalog (visible
-slugs), not from guessed model names. This version does not provide a model picker.
-Set `CHATGPT_LOCAL_ENABLED=true`, `CHATGPT_PROFILE=default`, `CHATGPT_MODEL` and a
+slugs), not from guessed model names. The dashboard can verify the catalog and select a model.
+Set `CHATGPT_LOCAL_ENABLED=true`, `CHATGPT_PROFILE=default`, optionally `CHATGPT_MODEL`, and a
 strong `OPERATOR_API_TOKEN` in the private host's configuration. Use the existing
 PROTO durable database/control persistence configuration; in-memory storage is
 refused. Apply migration `0014_agent_conversations` using the existing migration
@@ -80,9 +80,14 @@ python -m services.chatgpt.chatgpt_accounts sign-out --profile default
 
 If remote revocation is not confirmed, disconnect in ChatGPT settings too. Local
 sign-out removes tokens, retains registration identity, and leaves private SQL
-history intact. Login/disconnect UI and multi-user sessions remain future work.
+history intact. The dashboard provides setup guidance, account/model verification and
+disconnect. OAuth consent happens in the local CLI browser flow. Multi-user sessions
+remain unsupported.
 
 ## VM and other deployment types
+
+Follow [the Oracle setup procedure](CHATGPT_ORACLE_SETUP.md) for protected transfer,
+VM identity preservation, private access and the public reverse-proxy deny rule.
 
 Official VM procedure: https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms
 Complete OAuth locally for PROTO, preserve the VM's own host identity, and transfer
