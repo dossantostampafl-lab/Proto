@@ -661,7 +661,7 @@ def main() -> None:
     view = Vector((0, 0, 0))
     for variant, loc, target, lens, res, size in [
         ("landscape", (0, -46, 41), (0, 0, 0), 38, (1920, 1080), (1920, 1080)),
-        ("portrait", (0, -17, 39), (0, 1, 0), 52, (1080, 1920), (900, 1600)),
+        ("portrait", (0, -26, 46), (0, 1.5, 0), 34, (1080, 1920), (900, 1600)),
     ]:
         if variant == "landscape":
             view = Vector(target) - Vector(loc)
