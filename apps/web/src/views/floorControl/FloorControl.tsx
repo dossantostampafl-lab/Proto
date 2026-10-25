@@ -110,6 +110,21 @@ function Sources({ state, stateFresh, xp, summary }: { state: FloorState | null;
   );
 }
 
+
+function AgentRoster({ agents, actions, b3, xpLive }: { agents: Agent[]; actions: FloorAction[]; b3: boolean; xpLive: boolean }) {
+  return (
+    <aside className="fc-roster" aria-label="Agentes do pregão">
+      <header>AGENTES <strong>{agents.length}</strong></header>
+      {agents.length === 0 ? <p className="fc-note">Nenhum agente disponível.</p> :
+        <ul>{agents.slice(0, 6).map(a => <li key={a.id}>
+          <i className={a.status === "ACTIVE" ? "on" : ""} aria-hidden="true" />
+          <b>{a.name ?? a.id}</b>
+          <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
+        </li>)}</ul>}
+    </aside>
+  );
+}
+
 function Queue({ actions, agents }: { actions: FloorAction[]; agents: Agent[] }) {
   const recent = useMemo(() => [...actions].reverse().slice(0, 55), [actions]);
   const [i, setI] = useState(0);
