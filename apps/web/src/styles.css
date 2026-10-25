@@ -742,7 +742,7 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fc-bar { height: 6px; border-radius: 3px; background: rgba(148, 163, 184, 0.2); overflow: hidden; }
 .fc-bar span { display: block; height: 100%; background: #22c55e; border-radius: 3px; }
 .fc-bar span.hot { background: #f97316; }
-.fc-sources { position: absolute; right: 12px; top: 170px; width: 200px; padding: 10px 12px; border-radius: 8px; background: rgba(10, 24, 52, 0.86); border: 1px solid rgba(96, 165, 250, 0.3); z-index: 3; }
+.fc-sources { position: absolute; right: 12px; bottom: 140px; width: 200px; padding: 10px 12px; border-radius: 8px; background: rgba(10, 24, 52, 0.86); border: 1px solid rgba(96, 165, 250, 0.3); z-index: 3; }
 .fc-sources header { font: 700 10px var(--mono); letter-spacing: 0.2em; color: #4ade80; margin-bottom: 6px; }
 .fc-sources ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .fc-sources li { display: grid; grid-template-columns: 10px 1fr; column-gap: 6px; font: 600 11px system-ui, sans-serif; }
@@ -787,7 +787,10 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
   .fc-head, .fc-kpis { position: relative; top: auto; left: auto; right: auto; transform: none; min-width: 0; }
   .fc-head { flex-wrap: wrap; }
   .fc-head ul { order: 3; flex-basis: 100%; }
-  .fc-kpis b em { display: block; margin-top: 4px; }
+  .fc-kpis { padding: 8px 10px; }
+  .fc-kpis span { font-size: 8px; letter-spacing: 0.14em; }
+  .fc-kpis b { font-size: 22px; }
+  .fc-kpis b em, .fc-kpis small { font-size: 9px; }
   .fc-sources, .fc-queue footer, .fc-tag small, .fc-tag em { display: none; }
   .fc-tag { min-width: 0; }
   .fc-item { grid-template-columns: 1fr auto; }

@@ -574,8 +574,8 @@ def main() -> None:
     anchors = json.loads(ANCHORS.read_text()) if ANCHORS.exists() else {}
     view = Vector((0, 0, 0))
     for variant, loc, target, lens, res, size in [
-        ("landscape", (0, -29, 49), (0, -0.5, 0), 40, (1920, 1080), (1920, 1080)),
-        ("portrait", (0, -30, 84), (0, -6, 0), 30, (1080, 1920), (900, 1600)),
+        ("landscape", (0, -30, 50), (0, -0.5, 0), 33, (1920, 1080), (1920, 1080)),
+        ("portrait", (0, -19, 58), (0, 6, 0), 18, (1080, 1920), (900, 1600)),
     ]:
         if variant == "landscape":
             view = Vector(target) - Vector(loc)

@@ -151,7 +151,8 @@ const ROOMS = {
 };
 const SPRITE = `${import.meta.env.BASE_URL}floorcontrol/robot.webp`;
 // The robot sprite frame is 2.6 m tall (orthographic scale); a robot stands 1.9 m in the anchors.
-const SPRITE_PER_HEIGHT = 2.6 / 1.9;
+// Robots are drawn twice their scale so they read at a glance, as in a control-room overview.
+const SPRITE_PER_HEIGHT = (2.6 / 1.9) * 2;
 
 /** Where the image lands inside the box with object-fit: cover. */
 function coverRect(w: number, h: number, aspect: number) {
@@ -159,14 +160,33 @@ function coverRect(w: number, h: number, aspect: number) {
   return { x: (w - iw) / 2, y: (h - ih) / 2, w: iw, h: ih };
 }
 
-/** Which seat each agent takes: first free seat of its floor, in roster order (seats alternate sides). */
-function seatsFor(agents: Agent[], layout: Layout): Map<string, number> {
-  const out = new Map<string, number>();
-  const taken = new Set<number>();
+/**
+ * Which seat each agent takes, in roster order: of the seats of its floor that are on screen, the one
+ * nearest the hub that keeps its name tag clear of the tags already placed (else the one farthest from them).
+ */
+function seatsFor(agents: Agent[], layout: Layout, place: (p: Pt) => Pt, w: number, h: number): Map<string, { i: number; tag: boolean }> {
+  const out = new Map<string, { i: number; tag: boolean }>();
+  const placed: Pt[] = [];
+  const [gx, gy] = place(layout.globe.center);
+  // On screen with room for the tag above, clear of the totals (phones) and of the sources panel (wide screens, bottom right).
+  const wide = w > 760;
+  const onScreen = ([x, y]: Pt) => x > w * 0.06 && x < w * 0.94 && y > h * (wide ? 0.26 : 0.52) && y < h * 0.8
+    && !(wide && x > w - 250 && y > h * 0.42);
+  // Phones show the name only, so their tags need less room.
+  const gapX = wide ? 170 : 92, gapY = wide ? 80 : 36;
+  const clear = ([x, y]: Pt) => placed.every(([px, py]) => Math.abs(px - x) > gapX || Math.abs(py - y) > gapY);
   for (const a of agents) {
-    const i = layout.seats.findIndex((s, j) => s.floor === a.floor && !taken.has(j));
-    if (i < 0) continue; // more agents than seats on this floor: the legend still lists them
-    taken.add(i); out.set(a.id, i);
+    const free = layout.seats
+      .map((s, i) => ({ i, at: place(s.seat), floor: s.floor }))
+      .filter(s => s.floor === a.floor && ![...out.values()].some(o => o.i === s.i) && onScreen(s.at))
+      .sort((p, q) => Math.hypot(p.at[0] - gx, p.at[1] - gy) - Math.hypot(q.at[0] - gx, q.at[1] - gy));
+    // No clear seat left: the one farthest from the tags already placed.
+    const spread = (p: Pt) => Math.min(...placed.map(([px, py]) => Math.max(Math.abs(px - p[0]) / gapX, Math.abs(py - p[1]) / gapY)));
+    const pick = free.find(s => clear(s.at)) ?? [...free].sort((p, q) => spread(q.at) - spread(p.at))[0];
+    if (!pick) continue; // no seat of this floor on screen: the legend still lists the agent
+    // A crowded seat keeps its robot; on a phone its tag gives way (the queue legend lists everyone).
+    const tag = wide || clear(pick.at);
+    out.set(a.id, { i: pick.i, tag }); if (tag) placed.push(pick.at);
   }
   return out;
 }
@@ -210,7 +230,9 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const room = size.w > 0 && size.w / Math.max(1, size.h) < 0.9 ? ROOMS.portrait : ROOMS.landscape;
   const rect = coverRect(Math.max(1, size.w), Math.max(1, size.h), room.aspect);
   const at = ([x, y]: Pt): Pt => [rect.x + x * rect.w, rect.y + y * rect.h];
-  const seatOf = useMemo(() => seatsFor(agents, room.layout), [agents, room]);
+  const seatOf = useMemo(() => seatsFor(agents, room.layout, at, size.w, size.h),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agents, room, size.w, size.h]);
   const animate = !paused && running;
 
   // Walk progress per agent: 0 at its desk, 1 at the hub console. Busy agents walk out and back.
@@ -254,16 +276,16 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
       <i className="fc-globe" aria-hidden="true" style={{ left: gx, top: gy, width: gr * 2.6, height: gr * 2.6 }} />
       <svg className="fc-paths" aria-hidden="true" width={size.w} height={size.h}>
         {agents.map(a => {
-          const i = seatOf.get(a.id);
+          const i = seatOf.get(a.id)?.i;
           if (i === undefined || !(a.status === "ACTIVE" && busySymbols.has(a.symbol))) return null;
           const s = room.layout.seats[i], [x1, y1] = at(s.seat), [x2, y2] = at(s.hub);
           return <g key={a.id}><line x1={x1} y1={y1} x2={x2} y2={y2} /><circle cx={x2} cy={y2} r={Math.max(6, s.height * rect.h * 0.22)} /></g>;
         })}
       </svg>
       {agents.map(a => {
-        const i = seatOf.get(a.id);
-        if (i === undefined) return null;
-        const s = room.layout.seats[i], t = walk[a.id] ?? 0;
+        const seat = seatOf.get(a.id);
+        if (seat === undefined) return null;
+        const s = room.layout.seats[seat.i], t = walk[a.id] ?? 0;
         const [x1, y1] = at(s.seat), [x2, y2] = at(s.hub);
         const x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
         const h = s.height * rect.h * SPRITE_PER_HEIGHT;
@@ -272,11 +294,11 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
         return (
           <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`} style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)` }}>
             <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0` }} />
-            <div className="fc-tag" style={{ bottom: h * 0.82 }}>
+            {seat.tag && <div className="fc-tag" style={{ bottom: h * 0.82 }}>
               <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>
               <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
               <em>{brl(a.equity)} · capital virtual</em>
-            </div>
+            </div>}
           </div>
         );
       })}
