@@ -223,11 +223,11 @@ class Kit:
 # ---------- the room ----------
 
 BLOCKS = [  # desk blocks: centre x, y (y grows away from the camera), columns, row pairs, floor
-    (-23, 11.5, 4, 2, "binance"),
-    (23, 11.5, 4, 2, "binance"),
-    (-23, -2.5, 4, 1, "binance"),
-    (23, -2.5, 4, 1, "binance"),
-    (-23, -14.5, 4, 1, "xp"),
+    (-23, 11.5, 5, 2, "binance"),
+    (23, 11.5, 5, 2, "binance"),
+    (-23, -2.5, 5, 1, "binance"),
+    (23, -2.5, 5, 1, "binance"),
+    (-23, -14.5, 5, 1, "xp"),
 ]
 WALLS = [
     (-15, 20, -15, 5.5), (15, 20, 15, 5.5), (-15, -6, -15, -19.5), (15, -6, 15, -19.5),
@@ -355,14 +355,16 @@ def build_room(k: Kit) -> list[dict]:
         k.obj("cube", "console", (x, y, 0.45), (1.5, 0.9, 0.9), (0, 0, rz))
         k.obj("plane", f"screen{(i + 1) % 4}", (math.cos(a) * 15.85, math.sin(a) * 15.85, 1.15), (1.4, 0.8, 1), (math.radians(60), 0, a - math.pi / 2))
 
+    # Globe: enlarge the focal point while keeping projection anchors in sync.
+    # Re-render both variants after changing geometry; never hand-edit anchors.json.
     # Globe: earth, wire shell, light column.
-    k.obj("sphere", "earth", (0, 0, 4.2), (3.3, 3.3, 3.3), (0.35, 0, 1.2))
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=3.75, location=(0, 0, 4.2))
+    k.obj("sphere", "earth", (0, 0, 4.2), (4.1, 4.1, 4.1), (0.35, 0, 1.2))
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=4.55, location=(0, 0, 4.2))
     wire = bpy.context.active_object
     mod = wire.modifiers.new("w", "WIREFRAME")
     mod.thickness = 0.025
     wire.data.materials.append(k.mats["wire"])
-    k.obj("cone", "beam", (0, 0, 1.6), (6.5, 6.5, 3.2), (math.pi, 0, 0))
+    k.obj("cone", "beam", (0, 0, 1.6), (7.6, 7.6, 3.2), (math.pi, 0, 0))
 
     # Desk blocks. Every seat is recorded for the robots.
     seats: list[dict] = []
@@ -503,7 +505,7 @@ def anchors_for(k: Kit, cam, seats: list[dict]) -> dict:
         head = project(k, cam, s["x"], s["y"], 1.9)
         out_seats.append({"floor": s["floor"], "seat": foot, "hub": project(k, cam, hx, hy, 0), "height": round(foot[1] - head[1], 4)})
     gc = project(k, cam, 0, 0, 4.2)
-    gt = project(k, cam, 0, 0, 7.6)
+    gt = project(k, cam, 0, 0, 8.3)
     return {"seats": out_seats, "globe": {"center": gc, "radius": round(gc[1] - gt[1], 4)}}
 
 
