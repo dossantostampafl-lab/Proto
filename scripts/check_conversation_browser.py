@@ -7,11 +7,12 @@ The fixture runner lives outside the production image and uses a temporary datab
 import argparse
 import asyncio
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+
+SCRIPT_PATH = str(Path(__file__).resolve())
 
 
 def serve(port: int, simulated: bool):
@@ -55,10 +56,10 @@ async def scenario(simulated: bool, port: int):
     from playwright.async_api import async_playwright, expect
 
     with tempfile.TemporaryFile() as logs:
-        args = [sys.executable, str(Path(__file__).resolve()), "--serve", str(port)]
+        args = [sys.executable, SCRIPT_PATH, "--serve", str(port)]
         if simulated:
             args.append("--simulated")
-        server = subprocess.Popen(args, stdout=logs, stderr=logs)
+        server = await asyncio.create_subprocess_exec(*args, stdout=logs, stderr=logs)
         try:
             base = f"http://127.0.0.1:{port}"
             async with httpx.AsyncClient(trust_env=False) as client:
@@ -68,7 +69,7 @@ async def scenario(simulated: bool, port: int):
                             break
                     except httpx.HTTPError:
                         pass
-                    if server.poll() is not None:
+                    if server.returncode is not None:
                         raise RuntimeError("Browser fixture server failed")
                     await asyncio.sleep(0.25)
                 else:
@@ -129,13 +130,14 @@ async def scenario(simulated: bool, port: int):
                         "Remote revocation unconfirmed"
                     )
                 await section.get_by_role("button", name="Connect ChatGPT · setup").click()
+                label = "simulated" if simulated else "disabled"
                 await page.screenshot(
-                    path=f"/tmp/proto-chatgpt-{'simulated' if simulated else 'disabled'}-desktop.png",
+                    path=f"/tmp/proto-chatgpt-{label}-desktop.png",
                     full_page=True,
                 )
                 await page.set_viewport_size({"width": 390, "height": 844})
                 await page.screenshot(
-                    path=f"/tmp/proto-chatgpt-{'simulated' if simulated else 'disabled'}-mobile.png",
+                    path=f"/tmp/proto-chatgpt-{label}-mobile.png",
                     full_page=True,
                 )
                 assert await page.evaluate(
@@ -145,10 +147,9 @@ async def scenario(simulated: bool, port: int):
                 await browser.close()
         finally:
             server.terminate()
-            server.wait(timeout=15)
-    print(
-        f"PASS: real dashboard/HTTP/SQLite, {'SIMULATED account and inference' if simulated else 'disabled authentication'}, desktop/mobile. No real OAuth."
-    )
+            await asyncio.wait_for(server.wait(), timeout=15)
+    label = "SIMULATED account and inference" if simulated else "disabled authentication"
+    print(f"PASS: real dashboard/HTTP/SQLite, {label}, desktop/mobile. No real OAuth.")
 
 
 async def main():
