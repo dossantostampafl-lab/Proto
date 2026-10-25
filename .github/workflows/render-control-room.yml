@@ -1,0 +1,72 @@
+name: Render Control Room
+
+on:
+  push:
+    branches: [codex/floorcontrol-reference-fidelity-spec]
+    paths:
+      - tools/render_control_room/render.py
+      - .github/workflows/render-control-room.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    if: github.repository == 'dossantostampafl-lab/Proto' && github.ref == 'refs/heads/codex/floorcontrol-reference-fidelity-spec'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install renderer
+        run: python -m pip install 'bpy==5.2.3' pillow numpy
+      - name: Render native wide and portrait scenes plus robot animation
+        run: python tools/render_control_room/render.py
+      - name: Check render and anchors
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from PIL import Image
+          root = Path("apps/web")
+          limits = {"room.webp": 700_000, "room-portrait.webp": 700_000, "robot.webp": 700_000}
+          for name, limit in limits.items():
+              asset = root / "public/floorcontrol" / name
+              assert asset.exists() and asset.stat().st_size < limit, (str(asset), limit)
+              with Image.open(asset) as image:
+                  image.verify()
+              print(name, asset.stat().st_size, "bytes")
+          anchors = json.loads((root / "src/views/floorControl/anchors.json").read_text())
+          for kind in ("landscape", "portrait"):
+              view = anchors[kind]
+              assert view["seats"] and len(view["seats"]) >= 50, kind
+              assert 0 < view["globe"]["radius"] < 0.3, kind
+              assert all(len(seat["seat"]) == 2 for seat in view["seats"]), kind
+          PY
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Verify frontend build
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run contract-check
+          npm run build
+          npm run bundle-check
+      - name: Commit reproducible artwork only into review branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/web/public/floorcontrol/room.webp apps/web/public/floorcontrol/room-portrait.webp apps/web/public/floorcontrol/robot.webp apps/web/src/views/floorControl/anchors.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'build(floor): render approved command-room assets and anchors'
+            git push origin HEAD:codex/floorcontrol-reference-fidelity-spec
+          fi
