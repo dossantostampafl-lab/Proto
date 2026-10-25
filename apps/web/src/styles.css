@@ -723,6 +723,9 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fc-bot { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
 .fc-bot > i { position: absolute; left: 0; bottom: 0; transform: translate(-50%, 12%); background-size: 400% 100%; background-repeat: no-repeat; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.55)); }
 .fc-bot.out > i { filter: grayscale(1) brightness(0.7); }
+/* A glowing ring on the floor under each robot, in the robot's colour (as in the reference room). */
+.fc-bot::before { content: ""; position: absolute; left: 0; top: 0; width: calc(var(--bot-size, 40px) * 0.9); height: calc(var(--bot-size, 40px) * 0.32); transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid hsl(var(--bot-hue, 50) 95% 60%); box-shadow: 0 0 10px hsl(var(--bot-hue, 50) 95% 55%), inset 0 0 8px hsl(var(--bot-hue, 50) 95% 55% / 0.6); }
+.fc-bot.out::before { border-color: #64748b; box-shadow: none; }
 .fc-scene .fl-3d-loading { position: absolute; inset: 0; margin: 0; display: grid; place-content: center; color: #d6deef; font: 500 13px var(--mono); z-index: 5; }
 .fc-head { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; align-items: flex-start; gap: 10px; z-index: 3; pointer-events: none; }
 .fc-head > b { font: 800 15px var(--mono); letter-spacing: 0.18em; color: #f8fafc; white-space: nowrap; }

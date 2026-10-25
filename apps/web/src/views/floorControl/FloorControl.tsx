@@ -404,7 +404,8 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
         const moving = w > 0 && w < 1;
         const busy = busySymbols.has(a.symbol);
         return (
-          <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`} style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)` }}>
+          <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`}
+            style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`, ["--bot-hue" as string]: `${50 + BOT_HUES[index % BOT_HUES.length]}`, ["--bot-size" as string]: `${h}px` }}>
             <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0`, filter: a.status === "ACTIVE" ? `hue-rotate(${BOT_HUES[index % BOT_HUES.length]}deg) drop-shadow(0 4px 6px rgba(0,0,0,.55))` : "grayscale(1) brightness(.7)" }} />
             <button type="button" className="fc-tag" style={spot.below ? { top: 6 } : { bottom: h * 0.82 }} aria-pressed={selectedAgentId === a.id} aria-label={`Abrir agente ${a.name ?? a.id}`} onClick={() => setSelectedAgentId(a.id)}>
               <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>

@@ -13,3 +13,6 @@ Screens in the render show abstract glowing panels only. Operator silhouettes ar
 status, queue, sources) is drawn live over the image by `src/views/floorControl/FloorControl.tsx`
 from the API. Seat, hub and globe positions come from `src/views/floorControl/anchors.json`, which
 the same script writes.
+
+Coastlines on the globe and on the world-map screens come from Natural Earth 1:110m land
+(`tools/render_control_room/ne_110m_land.geojson`, public domain, https://www.naturalearthdata.com).

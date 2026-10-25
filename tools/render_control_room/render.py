@@ -69,6 +69,17 @@ LAND = [
 ]
 
 
+def land_rings() -> list[list[tuple[float, float]]]:
+    """Coastlines of Natural Earth 1:110m land (public domain, naturalearthdata.com), lon/lat rings."""
+    data = json.loads((Path(__file__).resolve().parent / "ne_110m_land.geojson").read_text())
+    rings: list[list[tuple[float, float]]] = []
+    for feature in data["features"]:
+        geometry = feature["geometry"]
+        polygons = [geometry["coordinates"]] if geometry["type"] == "Polygon" else geometry["coordinates"]
+        rings.extend([(float(lon), float(lat)) for lon, lat in polygon[0]] for polygon in polygons)
+    return rings
+
+
 def earth_texture(path: Path) -> None:
     w, h = 2048, 1024
     img = Image.new("RGB", (w, h))
@@ -78,12 +89,9 @@ def earth_texture(path: Path) -> None:
     mask = Image.new("L", (w, h))
     d = ImageDraw.Draw(mask)
     to = lambda lon, lat: ((lon + 180) / 360 * w, (90 - lat) / 180 * h)  # noqa: E731
-    for shape in LAND:
-        d.polygon([to(*p) for p in shape], fill=255)
-    # Ragged coastlines: erode/dilate noise so the outlines read as land, not polygons.
-    noise = Image.effect_noise((w, h), 90).filter(ImageFilter.GaussianBlur(6))
-    mask = Image.composite(mask.filter(ImageFilter.MaxFilter(9)), mask.filter(ImageFilter.MinFilter(9)), noise.point(lambda v: 255 if v > 128 else 0))
-    mask = mask.filter(ImageFilter.GaussianBlur(2))
+    for ring in land_rings():
+        d.polygon([to(*p) for p in ring], fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(1.2))
     land = Image.new("RGB", (w, h), (24, 170, 171))
     tone = Image.effect_noise((w, h), 60).filter(ImageFilter.GaussianBlur(10)).convert("RGB")
     land = Image.blend(land, Image.merge("RGB", [tone.getchannel(0).point(lambda v: v // 3), tone.getchannel(0), tone.getchannel(0).point(lambda v: v // 2)]), 0.25)
@@ -98,6 +106,24 @@ def earth_texture(path: Path) -> None:
         y = (90 - lat) / 180 * h
         grid.line([(0, y), (w, y)], fill=(90, 160, 230), width=1)
     img.save(path)
+
+
+def map_screen_texture(path: Path, seed: int) -> None:
+    """A glowing world-map screen (Natural Earth coastlines) with scattered pins; no text, no numbers."""
+    rnd = random.Random(seed)
+    w, h = 512, 300
+    img = Image.new("RGB", (w, h), (8, 30, 86))
+    d = ImageDraw.Draw(img)
+    for y in range(h):
+        d.line([(0, y), (w, y)], fill=(8, 30 + y // 10, 90 + y // 6))
+    to = lambda lon, lat: ((lon + 180) / 360 * w, (84 - lat) / 144 * h)  # noqa: E731
+    for ring in land_rings():
+        d.polygon([to(*p) for p in ring], fill=(40, 150, 230), outline=(150, 225, 255))
+    for _ in range(26):
+        x, y = rnd.randint(20, w - 20), rnd.randint(30, h - 30)
+        d.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(110, 255, 200))
+    d.rectangle([0, 0, w - 1, h - 1], outline=(140, 210, 255), width=3)
+    img.filter(ImageFilter.GaussianBlur(0.5)).save(path)
 
 
 def screen_texture(path: Path, seed: int) -> None:
@@ -249,7 +275,8 @@ def build_room(k: Kit) -> list[dict]:
     screens = []
     for i in range(4):
         p = WORK / f"screen{i}.png"
-        screen_texture(p, i + 3)
+        # Half the screens show the world map, as on the reference room's monitor walls.
+        (map_screen_texture if i % 2 == 0 else screen_texture)(p, i + 3)
         screens.append(p)
 
     # Materials.
@@ -295,10 +322,10 @@ def build_room(k: Kit) -> list[dict]:
     t = nt.nodes.new("ShaderNodeTexImage")
     t.image = bpy.data.images.load(str(earth_png))
     e1 = nt.nodes.new("ShaderNodeEmission")
-    e1.inputs["Strength"].default_value = 0.7
+    e1.inputs["Strength"].default_value = 0.95
     nt.links.new(t.outputs["Color"], e1.inputs["Color"])
     lw = nt.nodes.new("ShaderNodeLayerWeight")
-    lw.inputs["Blend"].default_value = 0.35
+    lw.inputs["Blend"].default_value = 0.2
     pw = nt.nodes.new("ShaderNodeMath")
     pw.operation = "POWER"
     pw.inputs[1].default_value = 2.0
@@ -455,7 +482,7 @@ def build_room(k: Kit) -> list[dict]:
     # Globe: enlarge the focal point while keeping projection anchors in sync.
     # Re-render both variants after changing geometry; never hand-edit anchors.json.
     # Globe: earth, wire shell, light column.
-    k.obj("sphere", "earth", (0, 0, GLOBE_Z), (GLOBE_R, GLOBE_R, GLOBE_R), (0.35, 0, 1.2))
+    k.obj("sphere", "earth", (0, 0, GLOBE_Z), (GLOBE_R, GLOBE_R, GLOBE_R), (-0.12, 0, -0.37))
     bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=GLOBE_R + 0.4, location=(0, 0, GLOBE_Z))
     wire = bpy.context.active_object
     mod = wire.modifiers.new("w", "WIREFRAME")
@@ -514,8 +541,10 @@ def build_room(k: Kit) -> list[dict]:
         k.obj("cube", "amber", (cx, cy, 1.64), (ln, 0.16, 0.07), (0, 0, rz))
         k.obj("cube", "amber", (cx, cy, 0.02), (ln, 0.08, 0.02), (0, 0, rz))
 
-    # Plants and the lounge corner.
-    for px_, py_ in PLANTS:
+    # Plants and the lounge corner, plus a ring of planters around the hub (open towards the camera).
+    hub_plants = [(math.cos(a) * 15.3, math.sin(a) * 15.3) for a in (i / 18 * math.tau for i in range(18))
+                  if abs(math.sin(a) + 1) > 0.15]
+    for px_, py_ in PLANTS + hub_plants:
         k.obj("cyl", "pot", (px_, py_, 0.4), (0.9, 0.9, 0.8))
         for j in range(11):
             a = j / 11 * math.tau + random.random() * 0.4
