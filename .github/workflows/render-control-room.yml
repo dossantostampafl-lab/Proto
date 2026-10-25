@@ -26,7 +26,7 @@ jobs:
       - name: Install renderer
         run: python -m pip install 'bpy==5.2.3' pillow numpy
       - name: Render native wide and portrait scenes plus robot animation
-        run: python tools/render_control_room/render.py
+        run: python tools/render_control_room/render.py --samples 64
       - name: Check render and anchors
         run: |
           python - <<'PY'
@@ -68,5 +68,19 @@ jobs:
           git add apps/web/public/floorcontrol/room.webp apps/web/public/floorcontrol/room-portrait.webp apps/web/public/floorcontrol/robot.webp apps/web/src/views/floorControl/anchors.json
           if ! git diff --cached --quiet; then
             git commit -m 'build(floor): render approved command-room assets and anchors'
+            git fetch origin codex/floorcontrol-reference-fidelity-spec
+            git rebase origin/codex/floorcontrol-reference-fidelity-spec
             git push origin HEAD:codex/floorcontrol-reference-fidelity-spec
           fi
+      - name: Capture desktop/mobile actual UI without WebGL
+        run: |
+          python -m pip install -e '.[dev]' playwright
+          python -m playwright install chromium --with-deps
+          python scripts/check_control_browser.py --output /tmp/proto-floor-screenshots
+      - name: Attach reference screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-room-review-screenshots
+          path: /tmp/proto-floor-screenshots/*.png
+          if-no-files-found: ignore
