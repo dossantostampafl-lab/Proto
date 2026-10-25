@@ -103,10 +103,6 @@ async def exercise(port: int, output: Path) -> None:
                             await toggle.click()
                             await expect(room.locator(panel)).to_be_hidden()
                         await expect(room.locator(".fc-bot > i").first).to_be_visible(timeout=15000)
-                        diameter = await room.locator(".fc-globe").evaluate(
-                            "(el) => el.getBoundingClientRect().width"
-                        )
-                        assert diameter > 120, f"Mobile hologram is too small: {diameter:.1f}px"
                     # Robots and their tags stand clear of every panel drawn over the room.
                     hidden = await room.evaluate(
                         """(scene) => {

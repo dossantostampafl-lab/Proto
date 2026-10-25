@@ -35,10 +35,13 @@ ROOT = Path(__file__).resolve().parents[2]
 # The globe floats clear of the floor and the console ring; anchors project the same numbers.
 GLOBE_Z, GLOBE_R = 5.4, 4.4
 RING_R = 11.6  # between the second and third glowing rings
+CHAIR_FACING, SOFA_FACING = 0.0, 0.0  # model yaw so the chair seat faces its desk
 WEB = ROOT / "apps" / "web"
 PUBLIC = WEB / "public" / "floorcontrol"
 ANCHORS = WEB / "src" / "views" / "floorControl" / "anchors.json"
 WORK = Path(__file__).resolve().parent / "build"
+# CC0 models and HDRI from Poly Haven (fetch_assets.py); each is used only when present.
+ASSETS = Path(__file__).resolve().parent / "assets"
 
 random.seed(7)
 
@@ -194,6 +197,49 @@ class Kit:
                     p.use_smooth = True
             bpy.data.objects.remove(obj)
 
+    def asset(self, name: str, height: float, recolor: str | None = None) -> bpy.types.Collection | None:
+        """A Poly Haven model as a collection normalised to `height` metres, or None if absent."""
+        key = f"asset:{name}:{height}"
+        if key in self.mats:
+            return self.mats[key]  # type: ignore[return-value]
+        blend = next((ASSETS / name).glob("*.blend"), None) if (ASSETS / name).is_dir() else None
+        if blend is None:
+            return None
+        before = set(bpy.data.images)
+        with bpy.data.libraries.load(str(blend), link=False) as (src, dst):
+            dst.objects = list(src.objects)
+        for img in set(bpy.data.images) - before:  # textures sit next to the .blend
+            if img.filepath.startswith("//"):
+                img.filepath = str(blend.parent / img.filepath[2:])
+        coll = bpy.data.collections.new(key)
+        loaded = [o for o in dst.objects if o is not None]
+        for o in loaded:
+            coll.objects.link(o)
+        meshes = [o for o in loaded if o.type == "MESH"]
+        if recolor:  # e.g. office chairs upholstered to match the dark room
+            for o in meshes:
+                for slot in o.material_slots:
+                    slot.material = self.mats[recolor]
+        # Measure with parents applied: link the collection for a moment and evaluate it.
+        self.scene.collection.children.link(coll)
+        bpy.context.view_layer.update()
+        corners = [o.matrix_world @ Vector(c) for o in meshes for c in o.bound_box]
+        self.scene.collection.children.unlink(coll)
+        lo = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
+        hi = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
+        coll.instance_offset = Vector(((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, lo.z))
+        coll["scale"] = height / max(hi.z - lo.z, 1e-6)
+        self.mats[key] = coll  # type: ignore[assignment]
+        return coll
+
+    def place(self, coll: bpy.types.Collection, loc, rz: float = 0.0) -> bpy.types.Object:
+        empty = bpy.data.objects.new("inst", None)
+        empty.instance_type, empty.instance_collection = "COLLECTION", coll
+        empty.location, empty.rotation_euler = loc, (0, 0, rz)
+        empty.scale = (coll["scale"],) * 3
+        self.scene.collection.objects.link(empty)
+        return empty
+
     def obj(self, mesh: str, mat: str, loc, scale=(1, 1, 1), rot=(0, 0, 0), name: str = "o") -> bpy.types.Object:
         o = bpy.data.objects.new(name, self.meshes[mesh])
         o.location = loc
@@ -297,6 +343,7 @@ def build_room(k: Kit) -> list[dict]:
     k.principled("desk", "#2a3442", rough=0.3, metal=0.3)
     k.principled("deskbody", "#151c27", rough=0.6)
     k.principled("black", "#0b0e14", rough=0.45)
+    k.principled("chair", "#151a24", rough=0.55, coat=0.3)
     k.principled("operator", "#121b2b", rough=0.74)
     k.principled("operatorFace", "#886b62", rough=0.85)
     k.principled("console", "#2b3a52", rough=0.3, metal=0.5)
@@ -513,9 +560,13 @@ def build_room(k: Kit) -> list[dict]:
                         k.obj("plane", f"screen{(c + p + int(kx * 2) + (side > 0)) % 4}", (x + kx * 1.25, my + side * 0.03, 1.22), (0.66, 0.42, 1),
                               (math.radians(55) * -side, 0, 0))
                     cy = yc + side * 1.6
-                    k.obj("cube", "black", (x, cy, 0.5), (0.6, 0.6, 0.1))
-                    k.obj("cube", "black", (x, cy + side * 0.3, 0.85), (0.6, 0.08, 0.65))
-                    k.obj("cyl", "black", (x, cy, 0.25), (0.12, 0.12, 0.5))
+                    chair = k.asset("modern_arm_chair_01", 1.05, recolor="chair")
+                    if chair:  # a real office chair facing its desk
+                        k.place(chair, (x, cy, 0), CHAIR_FACING + (0 if side < 0 else math.pi))
+                    else:
+                        k.obj("cube", "black", (x, cy, 0.5), (0.6, 0.6, 0.1))
+                        k.obj("cube", "black", (x, cy + side * 0.3, 0.85), (0.6, 0.08, 0.65))
+                        k.obj("cyl", "black", (x, cy, 0.25), (0.12, 0.12, 0.5))
                     # Anonymous seated silhouettes approximate the dense occupancy
                     # of the approved preview; no identifiable faces or live values.
                     if (c + 2 * p + (1 if side > 0 else 0)) % 5 != 0:
@@ -559,14 +610,24 @@ def build_room(k: Kit) -> list[dict]:
             k.obj("cube", mat, (math.cos(a) * r, math.sin(a) * r, z), (seg, sy, sz), (0, 0, a + math.pi / 2))
     # Plants and the lounge corner, plus planters along the walkway (none in the entrance).
     hub_plants = [(math.cos(a) * 15.15, math.sin(a) * 15.15, 0.36) for a in (i / 18 * math.tau for i in range(18)) if not entrance(a)]
-    for px_, py_, z0 in [(x, y, 0.0) for x, y in PLANTS] + hub_plants:
+    # Leafy potted plants, a little larger than life so they read from the high camera.
+    plants = [k.asset("potted_plant_01", 2.5), k.asset("potted_plant_01", 2.9)]
+    for n, (px_, py_, z0) in enumerate([(x, y, 0.0) for x, y in PLANTS] + hub_plants):
+        real = plants[n % 2]
+        if real:  # a real potted plant, turned at random
+            k.place(real, (px_, py_, z0), random.random() * math.tau)
+            continue
         k.obj("cyl", "pot", (px_, py_, z0 + 0.4), (0.9, 0.9, 0.8))
         for j in range(11):
             a = j / 11 * math.tau + random.random() * 0.4
             tilt = 0.5 + random.random() * 0.5
             k.obj("sphere", "leaf" if j % 2 else "leaf2", (px_ + math.cos(a) * 0.35, py_ + math.sin(a) * 0.35, z0 + 1.25 + random.random() * 0.3),
                   (0.1, 0.22, 0.75), (tilt, 0, a + math.pi / 2))
+    sofa = k.asset("sofa_02", 0.85)
     for sx, sy, rz in [(23, -12, math.pi), (23, -17.6, 0), (19, -14.8, -math.pi / 2)]:
+        if sofa:
+            k.place(sofa, (sx, sy, 0), rz + SOFA_FACING)
+            continue
         k.obj("cube", "sofa", (sx, sy, 0.3), (3.4, 1.1, 0.6), (0, 0, rz))
         bx_, by_ = -math.sin(rz) * -0.45, math.cos(rz) * -0.45  # backrest on the far side of the seat
         k.obj("cube", "sofa", (sx + bx_, sy + by_, 0.75), (3.4, 0.25, 0.6), (0, 0, rz))
@@ -586,6 +647,22 @@ def build_room(k: Kit) -> list[dict]:
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs["Color"].default_value = (*lin("#0a1a3a"), 1)
     world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.9
+    hdr = ASSETS / "blue_photo_studio_1k.hdr"
+    if hdr.exists():
+        # The studio HDRI lights and reflects in the glossy floor and glass; the camera still sees
+        # the dark room, never the studio.
+        nt = world.node_tree
+        env = nt.nodes.new("ShaderNodeTexEnvironment")
+        env.image = bpy.data.images.load(str(hdr))
+        lit = nt.nodes.new("ShaderNodeBackground")
+        lit.inputs["Strength"].default_value = 0.35
+        nt.links.new(env.outputs["Color"], lit.inputs["Color"])
+        path = nt.nodes.new("ShaderNodeLightPath")
+        mix = nt.nodes.new("ShaderNodeMixShader")
+        nt.links.new(path.outputs["Is Camera Ray"], mix.inputs["Fac"])
+        nt.links.new(lit.outputs[0], mix.inputs[1])
+        nt.links.new(nt.nodes["Background"].outputs[0], mix.inputs[2])
+        nt.links.new(mix.outputs[0], nt.nodes["World Output"].inputs["Surface"])
     k.scene.world = world
 
     # Interleave blocks so a small roster fills the room evenly: left, right, left, right...

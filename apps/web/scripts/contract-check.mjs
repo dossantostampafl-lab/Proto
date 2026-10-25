@@ -171,10 +171,8 @@ assert.match(control, /windowFull \? "≥ "/, "a truncated journal window is pri
 for (const label of ["SUMMARY UNAVAILABLE", "AGENT ROSTER UNAVAILABLE", "MODE UNAVAILABLE", "TESTNET · NO REAL MONEY", "NOT CONFIGURED", "perda diária: não medida", "fora do pregão"]) {
   assert.ok(control.includes(label), `control view must show ${label}`);
 }
-// The room is a pre-rendered picture with no people, text or numbers; everything live is drawn over it.
-assert.match(control, /"floorcontrol\/room\.webp"/, "the control room is the rendered room image");
-assert.match(control, /"floorcontrol\/room-portrait\.webp"/, "phones get the portrait render");
-assert.match(control, /import ANCHORS from "\.\/anchors\.json"/, "robots and tags stand where the renderer says the seats are");
+// The room is the approved mockup picture; every sample value baked into it is covered by a live panel.
+assert.match(control, /"floorcontrol\/room-photo\.webp"/, "the control room is the approved room picture");
 assert.doesNotMatch(control, /from "three"/, "the control room needs no WebGL");
 assert.match(control, /prefers-reduced-motion: reduce/, "the control room respects reduced motion");
 assert.match(control, /IntersectionObserver/, "the control room pauses while off-screen");
