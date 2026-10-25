@@ -374,6 +374,17 @@ def build_room(k: Kit) -> list[dict]:
         k.obj("cube", "console", (x, y, 0.45), (1.5, 0.9, 0.9), (0, 0, rz))
         k.obj("plane", f"screen{(i + 1) % 4}", (math.cos(a) * 13.55, math.sin(a) * 13.55, 1.15), (1.4, 0.8, 1), (math.radians(60), 0, a - math.pi / 2))
 
+    # Segmented cyan architectural floor arcs around the central hub.
+    for radius, count, width in [(10.8, 96, 0.22), (14.8, 120, 0.24), (18.0, 144, 0.18)]:
+        for segment in range(count):
+            angle = (segment + 0.5) * math.tau / count
+            if -2.05 < angle - math.tau * (angle > math.pi) < -1.1:
+                continue  # keep the near-side entrance open
+            k.obj("cube", "cyanSoft",
+                  (math.cos(angle) * radius, math.sin(angle) * radius, 0.035),
+                  (math.tau * radius / count * 0.64, width, 0.028),
+                  (0, 0, angle + math.pi / 2))
+
     # Globe: enlarge the focal point while keeping projection anchors in sync.
     # Re-render both variants after changing geometry; never hand-edit anchors.json.
     # Globe: earth, wire shell, light column.
