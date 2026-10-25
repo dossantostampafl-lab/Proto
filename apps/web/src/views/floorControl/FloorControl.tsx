@@ -76,13 +76,13 @@ function Kpis({ summary, ledger }: { summary: Summary | null; ledger: Ledger | n
   return (
     <section className="fc-kpis" aria-label="Totais do dia">
       <div>
-        <span>ORDENS EXECUTADAS</span>
+        <span>TOTAL DE ORDENS EXECUTADAS</span>
         <b>{summary ? `${summary.windowFull ? "≥ " : ""}${summary.total.toLocaleString("pt-BR")}` : "—"}</b>
         <small>{summary ? Object.entries(summary.byVenue).map(([v, c]) => `${v === "XP_B3" ? "XP/B3" : "Binance"} ${c}`).join(" · ") || "nenhuma ainda" : "SUMMARY UNAVAILABLE"}</small>
       </div>
       <i aria-hidden="true" />
       <div>
-        <span>HOJE</span>
+        <span>PREGÃO HOJE</span>
         <b>{summary ? summary.today : "—"} <em>ordens · {summary ? summary.signalsToday : "—"} sinais</em></b>
         <div className="fc-bar" role="meter" aria-label="Limite de perda diária usado" aria-valuemin={0} aria-valuemax={1} aria-valuenow={pct ?? undefined}>
           <span style={{ width: pct === null ? "0%" : `${(pct * 100).toFixed(1)}%` }} className={pct !== null && pct > 0.7 ? "hot" : ""} />
