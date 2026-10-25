@@ -89,6 +89,12 @@ async def exercise(port: int, output: Path) -> None:
                     assert await page.evaluate(
                         "document.documentElement.scrollWidth <= window.innerWidth"
                     ), "unwanted horizontal scroll"
+                    if width == 390:
+                        await expect(room.locator(".fc-bot > i").first).to_be_visible(timeout=15000)
+                        diameter = await room.locator(".fc-globe").evaluate(
+                            "(el) => el.getBoundingClientRect().width"
+                        )
+                        assert diameter > 120, f"Mobile hologram is too small: {diameter:.1f}px"
                     await page.screenshot(
                         path=str(output / f"control-{name}.png"),
                         full_page=True,
