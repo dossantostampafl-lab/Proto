@@ -111,11 +111,11 @@ function Sources({ state, stateFresh, xp, summary }: { state: FloorState | null;
 }
 
 
-function AgentRoster({ agents, actions, b3, xpLive }: { agents: Agent[]; actions: FloorAction[]; b3: boolean; xpLive: boolean }) {
+function AgentRoster({ agents, actions, b3, xpLive, available }: { agents: Agent[]; actions: FloorAction[]; b3: boolean; xpLive: boolean; available: boolean }) {
   return (
     <aside className="fc-roster" aria-label="Agentes do pregão">
-      <header>AGENTES <strong>{agents.length}</strong></header>
-      {agents.length === 0 ? <p className="fc-note">Nenhum agente disponível.</p> :
+      <header>AGENTES <strong>{available ? agents.length : "—"}</strong></header>
+      {!available ? <p className="fc-note">AGENT ROSTER UNAVAILABLE</p> : agents.length === 0 ? <p className="fc-note">Nenhum agente cadastrado.</p> :
         <ul>{agents.slice(0, 6).map(a => <li key={a.id}>
           <i className={a.status === "ACTIVE" ? "on" : ""} aria-hidden="true" />
           <b>{a.name ?? a.id}</b>
@@ -347,7 +347,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
       </header>
       <Kpis summary={summary} ledger={ledger} />
       <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} />
-      <AgentRoster agents={agents} actions={actions} b3={b3} xpLive={xpLive} />
+      <AgentRoster agents={agents} actions={actions} b3={b3} xpLive={xpLive} available={roster !== null} />
       <Activity actions={actions} fresh={stateFresh} />
       <Queue actions={actions} agents={agents} />
       {!loaded && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
