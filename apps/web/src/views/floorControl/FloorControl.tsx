@@ -125,6 +125,22 @@ function AgentRoster({ agents, actions, b3, xpLive }: { agents: Agent[]; actions
   );
 }
 
+
+function Activity({ actions, fresh }: { actions: FloorAction[]; fresh: boolean }) {
+  const recent = actions.slice(-5).reverse();
+  return (
+    <aside className="fc-activity" aria-label="Atividade do pregão">
+      <header>ATIVIDADE EM TEMPO REAL <small>{fresh ? "LIVE" : "LAST KNOWN"}</small></header>
+      {recent.length === 0 ? <p className="fc-note">Nenhum evento registrado.</p> :
+        <ol>{recent.map(a => <li key={a.seq}>
+          <time>{a.at.slice(11, 16)}</time>
+          <b>{STATIONS.find(s => s.id === a.station)?.label ?? a.station}</b>
+          <span title={a.headline}>{a.headline}{a.symbol ? " · " + a.symbol : ""}</span>
+        </li>)}</ol>}
+    </aside>
+  );
+}
+
 function Queue({ actions, agents }: { actions: FloorAction[]; agents: Agent[] }) {
   const recent = useMemo(() => [...actions].reverse().slice(0, 55), [actions]);
   const [i, setI] = useState(0);
