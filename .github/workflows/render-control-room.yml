@@ -72,6 +72,15 @@ jobs:
             git rebase origin/codex/floorcontrol-reference-fidelity-spec
             git push origin HEAD:codex/floorcontrol-reference-fidelity-spec
           fi
+      # The artwork commit rebases onto the latest review branch. If frontend or
+      # browser tests changed meanwhile, the earlier dist is no longer current.
+      - name: Rebuild frontend after updating the review branch
+        working-directory: apps/web
+        run: |
+          npm run typecheck
+          npm run contract-check
+          npm run build
+          npm run bundle-check
       - name: Capture desktop/mobile actual UI without WebGL
         run: |
           python -m pip install -e '.[dev]' playwright
