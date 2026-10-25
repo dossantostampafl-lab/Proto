@@ -279,7 +279,7 @@ def build_room(k: Kit) -> list[dict]:
     k.emissive("cyanSoft", "#2b7de9", 1.6)
     k.emissive("ringBright", "#4cc3ff", 2.6)
     for i, p in enumerate(screens):
-        k.emissive(f"screen{i}", strength=2.2, image=p)
+        k.emissive(f"screen{i}", strength=3.2, image=p)
     k.emissive("beam", "#38bdf8", 2.0, alpha=0.12)
     k.emissive("wire", "#38bdf8", 2.0, alpha=0.1)
 
@@ -402,7 +402,7 @@ def build_room(k: Kit) -> list[dict]:
                         # Monitor leans back, away from its seat; the screen faces the seat.
                         k.obj("cube", "black", (x + kx * 1.25, my, 1.22), (0.7, 0.04, 0.46), (math.radians(15) * side, 0, 0))
                         k.obj("plane", f"screen{(c + p + int(kx * 2) + (side > 0)) % 4}", (x + kx * 1.25, my + side * 0.03, 1.22), (0.66, 0.42, 1),
-                              (math.radians(75) * -side, 0, 0))
+                              (math.radians(55) * -side, 0, 0))
                     cy = yc + side * 1.6
                     k.obj("cube", "black", (x, cy, 0.5), (0.6, 0.6, 0.1))
                     k.obj("cube", "black", (x, cy + side * 0.3, 0.85), (0.6, 0.08, 0.65))
@@ -607,7 +607,7 @@ def main() -> None:
     anchors = json.loads(ANCHORS.read_text()) if ANCHORS.exists() else {}
     view = Vector((0, 0, 0))
     for variant, loc, target, lens, res, size in [
-        ("landscape", (0, -29, 48), (0, 0, 0), 34, (1920, 1080), (1920, 1080)),
+        ("landscape", (0, -46, 41), (0, 0, 0), 38, (1920, 1080), (1920, 1080)),
         ("portrait", (0, -17, 39), (0, 1, 0), 52, (1080, 1920), (900, 1600)),
     ]:
         if variant == "landscape":
