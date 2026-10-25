@@ -375,6 +375,10 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .tag.testnet { color: var(--up); background: rgba(88, 195, 154, 0.08); }
 .floor-view { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
 .floor-stage { padding-bottom: 10px; }
+/* "Controle" takes the full width, like a control-room wall; the side panels move below it. */
+.floor-view.floor-view-wide { grid-template-columns: minmax(0, 1fr); }
+.floor-view-wide .floor-side { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.floor-view-wide .floor-side .floor-feed { grid-column: auto; }
 .floor-badges { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font: 400 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
 .floor-live { color: var(--up); }
 .floor-live::before { content: "● "; }
@@ -708,7 +712,7 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 }
 
 /* "Controle": mission-control room (src/views/floorControl/). */
-.fc-scene { position: relative; aspect-ratio: 16 / 10; min-height: 520px; overflow: hidden; border-radius: 6px; background: #0a1630; touch-action: pan-y; user-select: none; -webkit-user-select: none; color: #e0f2fe; }
+.fc-scene { position: relative; aspect-ratio: 16 / 9; min-height: 560px; max-height: 86vh; width: 100%; overflow: hidden; border-radius: 6px; background: #050b18; touch-action: pan-y; user-select: none; -webkit-user-select: none; color: #e0f2fe; }
 .fc-scene canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: pan-y; }
 .fc-scene .fl-3d-loading { position: absolute; inset: 0; margin: 0; display: grid; place-content: center; color: #d6deef; font: 500 13px var(--mono); z-index: 5; }
 .fc-head { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; align-items: flex-start; gap: 10px; z-index: 3; pointer-events: none; }
@@ -738,7 +742,7 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fc-sources li i.off { background: #f87171; }
 .fc-sources li em { grid-column: 2; font: 500 9px var(--mono); color: #94a3b8; font-style: normal; }
 .fc-tags { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
-.fc-tag { position: absolute; left: 0; top: 0; padding: 5px 8px; border-radius: 6px; background: rgba(8, 18, 38, 0.9); border: 1px solid rgba(148, 163, 184, 0.35); visibility: hidden; display: grid; gap: 1px; min-width: 110px; max-width: 210px; }
+.fc-tag { position: absolute; left: 0; top: 0; padding: 5px 8px; border-radius: 6px; background: rgba(8, 18, 38, 0.9); border: 1px solid rgba(148, 163, 184, 0.35); visibility: hidden; display: grid; gap: 1px; min-width: 110px; max-width: 190px; }
 .fc-tag small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fc-tag b { font: 800 11px var(--mono); letter-spacing: 0.08em; color: #f8fafc; display: flex; align-items: center; gap: 5px; }
 .fc-tag b i { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; }

@@ -193,7 +193,7 @@ export function Floor({ market }: Shared) {
   const killed = isHalted(state);
   const recent = [...floor.actions].reverse().slice(0, 30);
   return (
-    <div className="floor-view">
+    <div className={`floor-view${viewMode === "control" ? " floor-view-wide" : ""}`}>
       <XpStrip xp={xp} />
       <Panel
         title="Trading floor"

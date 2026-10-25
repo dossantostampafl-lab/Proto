@@ -58,7 +58,10 @@ export function statusLine(a: Agent, last: FloorAction | null, b3: boolean, xpLi
   if (a.floor === "xp" && !b3) return "fora do pregão";
   const held = finiteDecimal(a.position);
   if (held !== null && !/^0*(\.0*)?$/.test(held)) return `posicionado · ${held} ${a.symbol.replace(/USDT$|F$/, "")}`;
-  if (last) return last.headline.length > 44 ? `${last.headline.slice(0, 43)}…` : last.headline;
+  if (last) {
+    if (/\bjoined\b/i.test(last.headline)) return "entrou no pregão";
+    return last.headline.length > 30 ? `${last.headline.slice(0, 29)}…` : last.headline;
+  }
   return a.kind === "tradingview" ? "aguardando alerta…" : "aguardando cruzamento…";
 }
 
@@ -237,7 +240,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
           <div key={a.id} ref={ref(a.id)} className={`fc-tag${a.status === "ACTIVE" ? "" : " out"}`}>
             <b><i className={busySymbols.has(a.symbol) ? "busy" : ""} />{a.name ?? a.id}</b>
             <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
-            <em>{brl(a.equity)}</em>
+            <em>{brl(a.equity)} · capital virtual</em>
           </div>
         ))}
       </div>
