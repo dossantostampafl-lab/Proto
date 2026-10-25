@@ -585,9 +585,12 @@ def robot_sheet(samples: int, view_dir: Vector, dst: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--preview", action="store_true")
+    ap.add_argument("--samples", type=int, default=None, help="Cycles samples; defaults to 192 for final render")
     ap.add_argument("--only", choices=["landscape", "portrait", "robot"])
     args = ap.parse_args()
-    samples = 24 if args.preview else 192
+    samples = args.samples if args.samples is not None else (24 if args.preview else 192)
+    if samples < 16 or samples > 512:
+        ap.error("--samples must be between 16 and 512")
     scale = 0.5 if args.preview else 1.0
     PUBLIC.mkdir(parents=True, exist_ok=True)
     anchors = json.loads(ANCHORS.read_text()) if ANCHORS.exists() else {}
@@ -609,7 +612,7 @@ def main() -> None:
         bloom(raw, PUBLIC / ("room.webp" if variant == "landscape" else "room-portrait.webp"), 80 if variant == "landscape" else 76,
               None if args.preview else size)
     if not args.only or args.only == "robot":
-        robot_sheet(48 if args.preview else 128, view, PUBLIC / "robot.webp")
+        robot_sheet(24 if args.preview else min(samples, 96), view, PUBLIC / "robot.webp")
     ANCHORS.write_text(json.dumps(anchors, indent=1) + "\n")
 
 
