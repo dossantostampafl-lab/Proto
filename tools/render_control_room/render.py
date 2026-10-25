@@ -338,22 +338,22 @@ def build_room(k: Kit) -> list[dict]:
             k.obj("cube", "amber", (side * 15.4, y, 0.05), (0.055, 5.5, 0.025))
 
     # Hub: sunken well, rim, glowing rings, dashed ring, arc segments.
-    k.obj("cyl64", "well", (0, 0, 0.005), (14.2, 14.2, 0.01))
-    k.obj("cyl64", "rim", (0, 0, 0.12), (14.6, 14.6, 0.24))
-    k.obj("cyl64", "well", (0, 0, 0.13), (14.1, 14.1, 0.25))
-    for r, w, mat in [(7.35, 0.09, "ringBright"), (9.0, 0.22, "cyan"), (9.7, 0.05, "ringBright"), (13.0, 0.14, "cyan"), (13.8, 0.04, "cyanSoft")]:
+    k.obj("cyl64", "well", (0, 0, 0.005), (11.9, 11.9, 0.01))
+    k.obj("cyl64", "rim", (0, 0, 0.12), (12.3, 12.3, 0.24))
+    k.obj("cyl64", "well", (0, 0, 0.13), (11.8, 11.8, 0.25))
+    for r, w, mat in [(7.1, 0.09, "ringBright"), (8.4, 0.22, "cyan"), (9.1, 0.05, "ringBright"), (10.6, 0.14, "cyan"), (11.5, 0.04, "cyanSoft")]:
         bpy.ops.mesh.primitive_torus_add(major_radius=r, minor_radius=w, major_segments=192, minor_segments=8, location=(0, 0, 0.3 if r < 7.5 else 0.02))
         o = bpy.context.active_object
         o.scale.z = 0.25
         o.data.materials.append(k.mats[mat])
     for i in range(80):
         a = i / 80 * math.tau
-        k.obj("cube", "cyanSoft", (math.cos(a) * 11, math.sin(a) * 11, 0.02), (0.55, 0.1, 0.02), (0, 0, a + math.pi / 2))
+        k.obj("cube", "cyanSoft", (math.cos(a) * 9.9, math.sin(a) * 9.9, 0.02), (0.55, 0.1, 0.02), (0, 0, a + math.pi / 2))
     for i in range(6):
         start = i / 6 * math.tau
         for j in range(14):
             a = start + j * 0.04
-            k.obj("cube", "ringBright", (math.cos(a) * 12.1, math.sin(a) * 12.1, 0.02), (0.52, 0.16, 0.02), (0, 0, a + math.pi / 2))
+            k.obj("cube", "ringBright", (math.cos(a) * 10.75, math.sin(a) * 10.75, 0.02), (0.52, 0.16, 0.02), (0, 0, a + math.pi / 2))
 
     # Ring of consoles around the globe (entrance towards the camera) with tilted screens.
     n = 24
@@ -369,21 +369,21 @@ def build_room(k: Kit) -> list[dict]:
     # Curved command desk beyond the hub, screens towards the camera.
     for i in range(13):
         a = math.pi / 2 + (i / 12 - 0.5) * 1.1
-        x, y = math.cos(a) * 16.3, math.sin(a) * 16.3
+        x, y = math.cos(a) * 14.0, math.sin(a) * 14.0
         rz = a + math.pi / 2
         k.obj("cube", "console", (x, y, 0.45), (1.5, 0.9, 0.9), (0, 0, rz))
-        k.obj("plane", f"screen{(i + 1) % 4}", (math.cos(a) * 15.85, math.sin(a) * 15.85, 1.15), (1.4, 0.8, 1), (math.radians(60), 0, a - math.pi / 2))
+        k.obj("plane", f"screen{(i + 1) % 4}", (math.cos(a) * 13.55, math.sin(a) * 13.55, 1.15), (1.4, 0.8, 1), (math.radians(60), 0, a - math.pi / 2))
 
     # Globe: enlarge the focal point while keeping projection anchors in sync.
     # Re-render both variants after changing geometry; never hand-edit anchors.json.
     # Globe: earth, wire shell, light column.
-    k.obj("sphere", "earth", (0, 0, 4.2), (4.1, 4.1, 4.1), (0.35, 0, 1.2))
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=4.55, location=(0, 0, 4.2))
+    k.obj("sphere", "earth", (0, 0, 4.2), (4.9, 4.9, 4.9), (0.35, 0, 1.2))
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=5.3, location=(0, 0, 4.2))
     wire = bpy.context.active_object
     mod = wire.modifiers.new("w", "WIREFRAME")
     mod.thickness = 0.025
     wire.data.materials.append(k.mats["wire"])
-    k.obj("cone", "beam", (0, 0, 1.6), (7.6, 7.6, 3.2), (math.pi, 0, 0))
+    k.obj("cone", "beam", (0, 0, 1.6), (8.2, 8.2, 3.2), (math.pi, 0, 0))
 
     # Desk blocks. Every seat is recorded for the robots.
     seats: list[dict] = []
@@ -533,7 +533,7 @@ def anchors_for(k: Kit, cam, seats: list[dict]) -> dict:
         head = project(k, cam, s["x"], s["y"], 1.9)
         out_seats.append({"floor": s["floor"], "seat": foot, "hub": project(k, cam, hx, hy, 0), "height": round(foot[1] - head[1], 4)})
     gc = project(k, cam, 0, 0, 4.2)
-    gt = project(k, cam, 0, 0, 8.3)
+    gt = project(k, cam, 0, 0, 9.1)
     return {"seats": out_seats, "globe": {"center": gc, "radius": round(gc[1] - gt[1], 4)}}
 
 
@@ -607,8 +607,8 @@ def main() -> None:
     anchors = json.loads(ANCHORS.read_text()) if ANCHORS.exists() else {}
     view = Vector((0, 0, 0))
     for variant, loc, target, lens, res, size in [
-        ("landscape", (0, -29, 48), (0, 0, 0), 48, (1920, 1080), (1920, 1080)),
-        ("portrait", (0, -14, 32), (0, 1, 0), 70, (1080, 1920), (900, 1600)),
+        ("landscape", (0, -29, 48), (0, 0, 0), 34, (1920, 1080), (1920, 1080)),
+        ("portrait", (0, -17, 39), (0, 1, 0), 52, (1080, 1920), (900, 1600)),
     ]:
         if variant == "landscape":
             view = Vector(target) - Vector(loc)
