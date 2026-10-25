@@ -316,17 +316,27 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
       </svg>
       {agents.map((a, index) => {
         const seat = seatOf.get(a.id);
-        if (seat === undefined) return null;
-        const s = room.layout.seats[seat.i], t = walk[a.id] ?? 0;
-        const [x1, y1] = at(s.seat), [x2, y2] = at(s.hub);
-        const x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
-        const h = Math.min(84, Math.max(20, s.height * rect.h * SPRITE_PER_HEIGHT));
-        const moving = t > 0 && t < 1;
+        // Portrait camera focuses on the Earth and can crop every physical desk.
+        // Keep agent badges discoverable on a projected hub ring rather than
+        // inventing an on-screen seat or dropping all agent labels.
+        const onHub = seat === undefined && size.w <= 760;
+        if (seat === undefined && !onHub) return null;
+        const s = seat === undefined ? null : room.layout.seats[seat.i];
+        const t = s ? (walk[a.id] ?? 0) : 0;
+        const [x1, y1] = s ? at(s.seat) : [0, 0];
+        const [x2, y2] = s ? at(s.hub) : [0, 0];
+        const a1 = (index / Math.max(agents.length, 4)) * Math.PI * 2 - Math.PI * .7;
+        const markerX = gx + Math.cos(a1) * Math.min(size.w * .34, gr * 1.34);
+        const markerY = gy + Math.sin(a1) * gr * .85;
+        const x = s ? x1 + (x2 - x1) * t : markerX;
+        const y = s ? y1 + (y2 - y1) * t : markerY;
+        const h = s ? Math.min(84, Math.max(20, s.height * rect.h * SPRITE_PER_HEIGHT)) : 34;
+        const moving = s !== null && t > 0 && t < 1;
         const busy = busySymbols.has(a.symbol);
         return (
           <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`} style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)` }}>
             <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0`, filter: a.status === "ACTIVE" ? `hue-rotate(${BOT_HUES[index % BOT_HUES.length]}deg) drop-shadow(0 4px 6px rgba(0,0,0,.55))` : "grayscale(1) brightness(.7)" }} />
-            {seat.tag && <div className="fc-tag" style={{ bottom: h * 0.82 }}>
+            {(onHub || seat?.tag) && <div className="fc-tag" style={{ bottom: h * 0.82 }}>
               <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>
               <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
               <em>{brl(a.equity)} · capital virtual</em>
