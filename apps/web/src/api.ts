@@ -46,7 +46,7 @@ export function setOperatorToken(token: string): void {
 async function call<T>(path: string, init: RequestInit = {}): Promise<Result<T>> {
   const post = init.method === "POST";
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), post ? 8000 : 3500);
+  const timer = window.setTimeout(() => controller.abort(), path.startsWith("/conversation/") ? 65000 : post ? 8000 : 3500);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = operatorToken();
   if (post && token) headers["X-Proto-Operator-Token"] = token;

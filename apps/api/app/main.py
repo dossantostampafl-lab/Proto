@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__, b3_quotes, control_state
 from .agent_surface import router as agent_router
 from .app_state import control_engine, orchestration_engine, persistence_engine
+from .conversation_surface import router as conversation_router
 from .core_routes import router as core_router
 from .creation_surface import router as creation_router
 from .e2e_drill import router as e2e_drill_router
@@ -94,6 +95,7 @@ app.add_middleware(
 for router in (
     research_router,
     core_router,
+    conversation_router,
     live_router,
     live_websocket_router,
     event_router,

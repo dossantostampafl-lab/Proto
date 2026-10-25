@@ -9,3 +9,5 @@
 .agent-evidence a { color: #00F0FF; }
 .agent-evidence :focus-visible { outline: 2px solid #00F0FF; outline-offset: 3px; }
 @media (max-width: 900px) { .agent-evidence { grid-template-columns: minmax(0, 1fr); } }
+
+.agent-evidence textarea, .agent-evidence input { display: block; width: 100%; max-width: 100%; box-sizing: border-box; margin: 8px 0; }

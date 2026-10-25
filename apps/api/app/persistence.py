@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from services.agents.roster import roster_metadata
+from services.chatgpt.conversations import metadata as conversation_metadata
 from services.events import journal_metadata
 from services.oms import ledger_metadata
 from services.orchestration import DecisionMemoryBase, OrchestrationBase
@@ -97,6 +98,7 @@ def build_engine(database_url: str) -> AsyncEngine:
 
 async def init_database(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
+        await connection.run_sync(conversation_metadata.create_all)
         await connection.run_sync(Base.metadata.create_all)
         await connection.run_sync(canonical_metadata.create_all)
         await connection.run_sync(OrchestrationBase.metadata.create_all)
@@ -117,6 +119,7 @@ async def init_database(engine: AsyncEngine) -> None:
 # Control-plane tables only. Never the simulation tables (Base, canonical, orchestration):
 # this is what may run in production LIVE_MONITORING, where PERSISTENCE_ENABLED is refused.
 CONTROL_PLANE_METADATA = (
+    conversation_metadata,
     journal_metadata,
     ledger_metadata,
     promotion_metadata,

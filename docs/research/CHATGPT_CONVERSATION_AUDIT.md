@@ -1,3 +1,26 @@
+# Continuation: local OAuth and explanation conversations
+
+The audit below describes the initial evidence-browser increment. It is retained
+as history and superseded by this section where implementation status changed.
+
+Implemented now: isolated PROTO OAuth CLI, refresh/sign-out, original provider
+adaptation with no tools/fallback, loopback-only authenticated API, account-owned
+SQL history, evidence snapshots and explanation UI. Disabled by default. See
+[local setup](CHATGPT_LOCAL_SETUP.md) for commands, boundaries and remaining gaps.
+Original source copies/hashes and adaptations are documented in
+`third_party/the_creation_os/UPSTREAM.md`. No upstream license was invented.
+
+No real account authorization, external inference, FinRobot research execution,
+merge or deploy is claimed. Multi-user remote hosting and dashboard-native login
+remain unimplemented. Direct trader chat is unavailable; the available path is
+explicitly a ChatGPT explanation of registered evidence.
+
+Local validation: Python 3.13 environment and network access restored; targeted
+OAuth/storage/HTTP tests use simulated provider boundaries. Frontend typecheck,
+contracts, build and bundle passed. Final CI status is attached to the PR revision.
+
+## Historical first-increment audit
+
 # ChatGPT + PROTO conversation — PARTIAL
 
 Audit: 2026-10-24. Baseline PROTO `55f54fa0e6616acc7e40ef2d9dc40fbd2e33f3ae`.

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { usePoll } from "../hooks";
 import { Empty, Panel } from "../ui";
 import "./agents.css";
+import { AgentConversation } from "./AgentConversation";
 
 type Agent = {
   agent_id: string;
@@ -36,12 +37,12 @@ export function Agents() {
   return <div className="agent-evidence">
     <Panel title="Agents · conversation readiness">
       <span className="tag research">CAPABILITY INVENTORY · READ ONLY</span>
-      <p>Choose a registered agent to inspect its identity. Conversation is unavailable in this deployment.</p>
-      <p>ChatGPT sign-in and private conversation history are not connected. No paid API fallback is used.</p>
+      <p>Choose a registered agent to inspect its identity. Direct agent conversation is unavailable. Private local hosts may enable ChatGPT explanations.</p>
+      <p>ChatGPT explanations require local OAuth setup and durable storage. No paid API fallback is used.</p>
       <p><a href="https://developers.openai.com/siwc/token-sharing-open-source">Official ChatGPT plan integration requirements</a></p>
       <dl>
         <dt>Agent response</dt><dd>Requires a result actually produced by the specialist.</dd>
-        <dt>ChatGPT explanation</dt><dd>Interpretation of recorded evidence; unavailable here.</dd>
+        <dt>ChatGPT explanation</dt><dd>Interpretation of recorded evidence; requires explicit local setup.</dd>
         <dt>Unavailable</dt><dd>No executable conversation interface. Selecting an agent does not run it.</dd>
       </dl>
     </Panel>
@@ -60,6 +61,7 @@ export function Agents() {
         <dt>Recorded state</dt><dd>{agent.status}</dd>
         <dt>Conversation</dt><dd>Unavailable — this trader exposes no chat handler.</dd>
       </dl>}
+      {agent && <AgentConversation key={agent.agent_id} agentId={agent.agent_id} />}
       <small>Source: /v1/agents/roster</small>
     </Panel>
     <Panel title="Orchestration contracts">
