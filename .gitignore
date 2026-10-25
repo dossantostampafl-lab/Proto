@@ -18,3 +18,4 @@ graphify-out/
 
 # Strategy-lab market data cache (never committed)
 data/research/
+tools/render_control_room/build/

@@ -171,12 +171,14 @@ assert.match(control, /windowFull \? "≥ "/, "a truncated journal window is pri
 for (const label of ["SUMMARY UNAVAILABLE", "AGENT ROSTER UNAVAILABLE", "MODE UNAVAILABLE", "TESTNET · NO REAL MONEY", "NOT CONFIGURED", "perda diária: não medida", "fora do pregão"]) {
   assert.ok(control.includes(label), `control view must show ${label}`);
 }
-assert.match(control, /Math\.min\(window\.devicePixelRatio \|\| 1, 1\.5\)/, "the control room caps the pixel ratio at 1.5");
-assert.doesNotMatch(control, /shadowMap|castShadow|MeshStandardMaterial|MeshPhysicalMaterial/, "the control room uses no shadow maps and only cheap materials");
+// The room is a pre-rendered picture with no people, text or numbers; everything live is drawn over it.
+assert.match(control, /"floorcontrol\/room\.webp"/, "the control room is the rendered room image");
+assert.match(control, /"floorcontrol\/room-portrait\.webp"/, "phones get the portrait render");
+assert.match(control, /import ANCHORS from "\.\/anchors\.json"/, "robots and tags stand where the renderer says the seats are");
+assert.doesNotMatch(control, /from "three"/, "the control room needs no WebGL");
 assert.match(control, /prefers-reduced-motion: reduce/, "the control room respects reduced motion");
 assert.match(control, /IntersectionObserver/, "the control room pauses while off-screen");
 assert.match(control, /visibilitychange/, "the control room pauses while the tab is hidden");
-assert.match(control, /instance\.dispose\(\)/, "the control room disposes its GPU resources on unmount");
 assert.match(control, /Pausar animação/, "the control room animation can be paused");
 
 // Every desk is a real control over the photo and opens a drawer of live, read-only data.
