@@ -318,6 +318,23 @@ def build_room(k: Kit) -> list[dict]:
         k.obj("cube", "wall", ((x1 + x2) / 2, (y1 + y2) / 2, 0.8), (ln, 0.5, 1.6), (0, 0, rz))
         k.obj("cube", "cyanSoft", ((x1 + x2) / 2, (y1 + y2) / 2, 1.62), (ln, 0.12, 0.05), (0, 0, rz))
 
+
+    # Dense elevated rear monitor gallery; all screens show abstract artwork,
+    # never baked-in counts or status strings.
+    for x in range(-27, 28, 6):
+        k.obj("cube", "rim", (x, 19.6, 2.5), (5.0, 0.24, 3.25))
+        k.obj("cube", "black", (x, 19.42, 2.5), (4.58, 0.1, 2.85))
+        k.obj("plane", f"screen{(x + 27) // 6 % 4}", (x, 19.33, 2.5),
+              (4.38, 2.67, 1), (math.pi / 2, 0, 0))
+        k.obj("cube", "cyanSoft", (x, 19.25, 4.03), (4.75, 0.08, 0.04))
+    for x in (-30.8, 30.8):
+        for y in (-14.0, -5.0, 8.0, 16.0):
+            k.obj("cube", "cyanSoft", (x, y, 0.035), (0.09, 5.5, 0.025))
+    # Fine luminous floor seams orient the viewer to the central command hub.
+    for side in (-1, 1):
+        for y in (-17.5, -9.5, 7.5, 15.5):
+            k.obj("cube", "amber", (side * 15.4, y, 0.05), (0.055, 5.5, 0.025))
+
     # Hub: sunken well, rim, glowing rings, dashed ring, arc segments.
     k.obj("cyl64", "well", (0, 0, 0.005), (14.2, 14.2, 0.01))
     k.obj("cyl64", "rim", (0, 0, 0.12), (14.6, 14.6, 0.24))
@@ -576,8 +593,8 @@ def main() -> None:
     anchors = json.loads(ANCHORS.read_text()) if ANCHORS.exists() else {}
     view = Vector((0, 0, 0))
     for variant, loc, target, lens, res, size in [
-        ("landscape", (0, -30, 50), (0, -0.5, 0), 33, (1920, 1080), (1920, 1080)),
-        ("portrait", (0, -19, 58), (0, 6, 0), 18, (1080, 1920), (900, 1600)),
+        ("landscape", (0, -29, 48), (0, 0, 0), 38, (1920, 1080), (1920, 1080)),
+        ("portrait", (0, -20, 47), (0, 2, 0), 25, (1080, 1920), (900, 1600)),
     ]:
         if variant == "landscape":
             view = Vector(target) - Vector(loc)
