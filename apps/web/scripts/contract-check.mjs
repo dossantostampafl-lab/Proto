@@ -180,6 +180,12 @@ assert.match(control, /prefers-reduced-motion: reduce/, "the control room respec
 assert.match(control, /IntersectionObserver/, "the control room pauses while off-screen");
 assert.match(control, /visibilitychange/, "the control room pauses while the tab is hidden");
 assert.match(control, /Pausar animação/, "the control room animation can be paused");
+assert.doesNotMatch(floorView, /buildingFailed \|\| !canRender3d\(\) \? <BuildingUnavailable text="Controle/, "the rendered Control Room must never require WebGL");
+assert.match(control, /function AgentRoster\(/, "the approved view shows API-backed agents");
+assert.match(control, /function Activity\(/, "the approved view shows journal-backed recent activity");
+assert.match(control, /<AgentRoster agents=\{agents\}/, "the real roster overlay is mounted");
+assert.match(control, /<Activity actions=\{actions\}/, "the real journal overlay is mounted");
+
 
 // Every desk is a real control over the photo and opens a drawer of live, read-only data.
 const desks = ["floorDesks.tsx", "deskData.ts"].map(name => files.find(([p]) => p.endsWith(name))?.[1] ?? "").join("\n");
