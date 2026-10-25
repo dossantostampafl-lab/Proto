@@ -1,14 +1,17 @@
 # Adapted original offline tests; see third_party/the_creation_os/UPSTREAM.md.
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import time
 from pathlib import Path
 
 import httpx
+import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwk, jwt
 
 from services.chatgpt import chatgpt_connect
 from services.chatgpt.chatgpt_connect import (
@@ -90,7 +93,14 @@ def _signed_id_token(monkeypatch, *, access_token: str) -> str:
         .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
         .decode()
     )
-    public_jwk = {**jwk.construct(public_pem, "RS256").to_dict(), "kid": "test-key"}
+    public_jwk = {
+        **json.loads(
+            jwt.algorithms.RSAAlgorithm.to_jwk(
+                serialization.load_pem_public_key(public_pem.encode())
+            )
+        ),
+        "kid": "test-key",
+    }
     transport = httpx.MockTransport(
         lambda request: httpx.Response(200, json={"keys": [public_jwk]})
     )
@@ -107,13 +117,15 @@ def _signed_id_token(monkeypatch, *, access_token: str) -> str:
             "aud": "oaiapp_test",
             "sub": "user-123",
             "nonce": "nonce-1",
+            "at_hash": base64.urlsafe_b64encode(hashlib.sha256(access_token.encode()).digest()[:16])
+            .decode()
+            .rstrip("="),
             "iat": now,
             "exp": now + 600,
         },
         private_pem,
         algorithm="RS256",
         headers={"kid": "test-key"},
-        access_token=access_token,
     )
 
 
@@ -131,7 +143,7 @@ def test_id_token_with_at_hash_is_validated_against_the_access_token(monkeypatch
 def test_id_token_bound_to_another_access_token_is_rejected(monkeypatch) -> None:
     id_token = _signed_id_token(monkeypatch, access_token="access-1")
 
-    with pytest.raises(jwt.JWTClaimsError):
+    with pytest.raises(jwt.InvalidTokenError):
         _validate_id_token(
             id_token, client_id="oaiapp_test", nonce="nonce-1", access_token="other-access"
         )

@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
-from jose import jwt
+import jwt
 
 ISSUER = "https://auth.openai.com"
 AUTHORIZE_URL = "https://auth.openai.com/api/accounts/authorize"
@@ -161,13 +161,24 @@ def _validate_id_token(
         raise RuntimeError("OpenAI ID token signing key was not found")
     claims = jwt.decode(
         id_token,
-        key,
+        jwt.PyJWK.from_dict(key, algorithm="RS256").key,
         algorithms=["RS256"],
         audience=client_id,
         issuer=ISSUER,
-        access_token=access_token,
-        options={"require_sub": True, "require_exp": True, "require_iat": True},
+        options={"require": ["sub", "exp", "iat", "iss", "aud"]},
     )
+    # OIDC at_hash for RS256 is the left half of SHA-256 of the access token.
+    if "at_hash" in claims:
+        expected_hash = (
+            base64.urlsafe_b64encode(hashlib.sha256(access_token.encode("ascii")).digest()[:16])
+            .decode("ascii")
+            .rstrip("=")
+        )
+        supplied_hash = claims["at_hash"]
+        if not isinstance(supplied_hash, str) or not secrets.compare_digest(
+            supplied_hash.encode("utf-8"), expected_hash.encode("ascii")
+        ):
+            raise jwt.InvalidTokenError("OpenAI ID token access-token binding did not match")
     if claims.get("nonce") != nonce:
         raise RuntimeError("OpenAI ID token nonce did not match the authorization attempt")
     if not claims.get("sub"):

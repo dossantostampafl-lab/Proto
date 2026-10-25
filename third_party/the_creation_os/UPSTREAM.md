@@ -23,3 +23,8 @@ source dependency; its execution/tool schema is deliberately not imported.
 Original contracts and three original offline test files were adapted, with
 additional PROTO integration and isolation tests. Original test fixture strings
 are not real credentials.
+
+Security adaptation: runtime JWT validation uses PyJWT + cryptography instead of
+python-jose/ecdsa, which the PR dependency audit flagged. RS256, issuer, audience,
+expiry, nonce and access-token hash binding remain mandatory/validated as applicable.
+The byte-identical upstream reference copies retain their original dependency names.
