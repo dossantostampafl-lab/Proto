@@ -302,12 +302,14 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const xpLive = xp.state === "live";
   const [gx, gy] = at(room.layout.globe.center);
   const gr = room.layout.globe.radius * rect.h;
+  // Decorative glow must remain readable on narrower, wider-framed portrait renders.
+  const glowSize = size.w <= 760 ? Math.max(140, gr * 2.6) : gr * 2.6;
 
   return (
     <div ref={wrap} className={`fl-scene fc-scene${animate ? "" : " fc-still"}`} role="group" aria-label={`Controle do pregão: ${agents.length} agentes, ${summary ? `${summary.total} ordens executadas` : "totais indisponíveis"}`}>
       <img className="fc-room" src={`${import.meta.env.BASE_URL}${room.src}`} alt="" aria-hidden="true" decoding="async"
         style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
-      <i className="fc-globe" aria-hidden="true" style={{ left: gx, top: gy, width: gr * 2.6, height: gr * 2.6 }} />
+      <i className="fc-globe" aria-hidden="true" style={{ left: gx, top: gy, width: glowSize, height: glowSize }} />
       <svg className="fc-paths" aria-hidden="true" width={size.w} height={size.h}>
         {agents.map(a => {
           const i = seatOf.get(a.id)?.i;
