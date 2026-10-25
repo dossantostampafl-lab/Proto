@@ -796,3 +796,46 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
   .fc-item { grid-template-columns: 1fr auto; }
   .fc-item .fc-tone, .fc-item time { display: none; }
 }
+
+
+/* Approved PROTO control-room composition: centrepiece remains the rendered holographic hub.
+   All cards are genuine, API-driven DOM overlays, not baked into the artwork. */
+.fc-scene { min-height: 680px; max-height: none; border: 1px solid rgba(82, 153, 242, .42); border-radius: 12px; box-shadow: inset 0 0 80px rgba(8, 35, 91, .48); }
+.fc-room { filter: saturate(1.13) contrast(1.055); }
+.fc-head { top: 12px; left: 20px; right: 20px; align-items: center; }
+.fc-head > b { font: 800 18px var(--display, sans-serif); letter-spacing: .11em; text-shadow: 0 2px 18px #030d24; }
+.fc-head time { margin-left: auto; }
+.fc-kpis { display: contents; }
+.fc-kpis > i { display: none; }
+.fc-kpis > div { position: absolute; top: 70px; z-index: 3; min-height: 126px; padding: 18px 20px; border-radius: 12px; border: 1px solid rgba(112, 183, 255, .47); background: linear-gradient(145deg, rgba(8,25,55,.94), rgba(6,21,49,.87)); box-shadow: 0 14px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(207,233,255,.10); gap: 8px; }
+.fc-kpis > div:first-child { left: 18px; width: clamp(230px, 24%, 370px); }
+.fc-kpis > div:last-child { left: 50%; transform: translateX(-50%); width: clamp(300px, 31%, 460px); }
+.fc-kpis span { color: #d2e5ff; font-weight: 800; }
+.fc-kpis b { font: 800 clamp(30px, 3.3vw, 55px)/1 var(--display, sans-serif); text-shadow: 0 3px 14px rgba(80,165,255,.25); }
+.fc-kpis small { color: #94c5f9; }
+.fc-bar { height: 8px; border-radius: 8px; }
+.fc-bar span { background: linear-gradient(90deg, #29ce97, #78f9b4); }
+.fc-sources, .fc-roster, .fc-activity { position: absolute; z-index: 3; border: 1px solid rgba(111,174,255,.39); border-radius: 11px; background: linear-gradient(150deg, rgba(8,25,55,.94), rgba(6,19,42,.9)); box-shadow: 0 15px 30px rgba(0,0,0,.34), inset 0 1px 0 rgba(200,232,255,.08); color: #e8f4ff; backdrop-filter: blur(8px); }
+.fc-sources { right: 18px; top: 70px; bottom: auto; width: clamp(190px, 21%, 300px); padding: 14px 15px; }
+.fc-sources header { font: 800 12px var(--mono); color: #edf7ff; margin-bottom: 12px; }
+.fc-sources li { grid-template-columns: 11px 1fr; row-gap: 4px; font-size: 12px; }
+.fc-sources li em { overflow-wrap: anywhere; }
+.fc-roster { left: 18px; bottom: 135px; width: clamp(230px, 25%, 345px); padding: 13px 15px; }
+.fc-roster header, .fc-activity header { display: flex; justify-content: space-between; align-items: center; font: 800 12px var(--mono); letter-spacing: .15em; padding-bottom: 8px; }
+.fc-roster header strong { color: #69d9ff; font: 700 14px var(--mono); }
+.fc-roster ul, .fc-activity ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; }
+.fc-roster li { display: grid; grid-template-columns: 11px minmax(40px, .5fr) minmax(90px, 1.5fr); gap: 9px; padding: 7px 0; align-items: center; border-top: 1px solid rgba(129,176,231,.12); }
+.fc-roster li > i { width: 8px; height: 8px; border-radius: 50%; background: #66778e; }
+.fc-roster li > i.on { background: #42e6aa; box-shadow: 0 0 9px rgba(66,230,170,.65); }
+.fc-roster li b { font: 800 11px var(--mono); overflow: hidden; text-overflow: ellipsis; }
+.fc-roster li small { font: 500 10px var(--mono); color: #a0c3e6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-activity { right: 18px; bottom: 135px; width: clamp(250px, 27%, 365px); padding: 13px 15px; }
+.fc-activity header small { color: #54e5a9; letter-spacing: .06em; font-size: 9px; }
+.fc-activity ol li { display: grid; grid-template-columns: 34px 65px minmax(0,1fr); align-items: center; gap: 7px; padding: 7px 0; border-top: 1px solid rgba(129,176,231,.14); font: 500 10px var(--mono); }
+.fc-activity time { color: #9ebddd; }
+.fc-activity b { color: #61e4d6; font-size: 10px; text-overflow: ellipsis; overflow: hidden; }
+.fc-activity li span { color: #d8e9ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-queue { left: 18px; right: 18px; bottom: 12px; min-height: 99px; padding: 12px 16px; border: 1px solid rgba(89,155,244,.5); border-top: 2px solid rgba(73,151,245,.85); border-radius: 11px; background: linear-gradient(130deg,rgba(8,27,59,.95),rgba(4,16,38,.95)); }
+.fc-queue header b { font: 800 12px var(--mono); letter-spacing: .09em; }
+.fc-tag { border-color: rgba(89,166,241,.55); box-shadow: 0 8px 25px rgba(0,0,0,.48); }
+.fc-tag small { color: #b5f5de; }
