@@ -78,7 +78,7 @@ function Kpis({ summary, ledger }: { summary: Summary | null; ledger: Ledger | n
       <div>
         <span>TOTAL DE ORDENS EXECUTADAS</span>
         <b>{summary ? `${summary.windowFull ? "≥ " : ""}${summary.total.toLocaleString("pt-BR")}` : "—"}</b>
-        <small>{summary ? Object.entries(summary.byVenue).map(([v, c]) => `${v === "XP_B3" ? "XP/B3" : "Binance"} ${c}`).join(" · ") || "nenhuma ainda" : "SUMMARY UNAVAILABLE"}</small>
+        <small>{summary ? Object.entries(summary.byVenue).map(([v, c]) => `${v === "XP_B3" ? "XP/B3" : v.startsWith("BINANCE") ? "Binance" : v} ${c}`).join(" · ") || "nenhuma ainda" : "SUMMARY UNAVAILABLE"}</small>
       </div>
       <i aria-hidden="true" />
       <div>
