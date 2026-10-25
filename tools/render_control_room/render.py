@@ -32,6 +32,9 @@ from mathutils import Vector
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[2]
+# The globe floats clear of the floor and the console ring; anchors project the same numbers.
+GLOBE_Z, GLOBE_R = 5.4, 4.4
+RING_R = 11.6  # between the second and third glowing rings
 WEB = ROOT / "apps" / "web"
 PUBLIC = WEB / "public" / "floorcontrol"
 ANCHORS = WEB / "src" / "views" / "floorControl" / "anchors.json"
@@ -280,7 +283,7 @@ def build_room(k: Kit) -> list[dict]:
     k.emissive("ringBright", "#4cc3ff", 2.6)
     for i, p in enumerate(screens):
         k.emissive(f"screen{i}", strength=1.65, image=p)
-    k.emissive("beam", "#38bdf8", 2.0, alpha=0.12)
+    k.emissive("beam", "#38bdf8", 1.2, alpha=0.06)
     k.emissive("wire", "#38bdf8", 2.0, alpha=0.1)
 
     # Earth: its own texture plus a rim of cyan light.
@@ -292,7 +295,7 @@ def build_room(k: Kit) -> list[dict]:
     t = nt.nodes.new("ShaderNodeTexImage")
     t.image = bpy.data.images.load(str(earth_png))
     e1 = nt.nodes.new("ShaderNodeEmission")
-    e1.inputs["Strength"].default_value = 1.0
+    e1.inputs["Strength"].default_value = 0.7
     nt.links.new(t.outputs["Color"], e1.inputs["Color"])
     lw = nt.nodes.new("ShaderNodeLayerWeight")
     lw.inputs["Blend"].default_value = 0.35
@@ -304,7 +307,7 @@ def build_room(k: Kit) -> list[dict]:
     e2.inputs["Color"].default_value = (*lin("#7dd3fc"), 1)
     mul = nt.nodes.new("ShaderNodeMath")
     mul.operation = "MULTIPLY"
-    mul.inputs[1].default_value = 4.5
+    mul.inputs[1].default_value = 2.2
     nt.links.new(pw.outputs[0], mul.inputs[0])
     nt.links.new(mul.outputs[0], e2.inputs["Strength"])
     add = nt.nodes.new("ShaderNodeAddShader")
@@ -452,8 +455,8 @@ def build_room(k: Kit) -> list[dict]:
     # Globe: enlarge the focal point while keeping projection anchors in sync.
     # Re-render both variants after changing geometry; never hand-edit anchors.json.
     # Globe: earth, wire shell, light column.
-    k.obj("sphere", "earth", (0, 0, 4.2), (4.9, 4.9, 4.9), (0.35, 0, 1.2))
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=5.3, location=(0, 0, 4.2))
+    k.obj("sphere", "earth", (0, 0, GLOBE_Z), (GLOBE_R, GLOBE_R, GLOBE_R), (0.35, 0, 1.2))
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=GLOBE_R + 0.4, location=(0, 0, GLOBE_Z))
     wire = bpy.context.active_object
     mod = wire.modifiers.new("w", "WIREFRAME")
     mod.thickness = 0.025
@@ -607,9 +610,11 @@ def anchors_for(k: Kit, cam, seats: list[dict]) -> dict:
         foot = project(k, cam, s["x"], s["y"], 0)
         head = project(k, cam, s["x"], s["y"], 1.9)
         out_seats.append({"floor": s["floor"], "seat": foot, "hub": project(k, cam, hx, hy, 0), "height": round(foot[1] - head[1], 4)})
-    gc = project(k, cam, 0, 0, 4.2)
-    gt = project(k, cam, 0, 0, 9.1)
-    return {"seats": out_seats, "globe": {"center": gc, "radius": round(gc[1] - gt[1], 4)}}
+    gc = project(k, cam, 0, 0, GLOBE_Z)
+    gt = project(k, cam, 0, 0, GLOBE_Z + GLOBE_R)
+    # Posts on the floor ring around the globe, where agents stand when the panels cover their desks.
+    ring = [project(k, cam, math.cos(a) * RING_R, math.sin(a) * RING_R, 0) for a in (i / 36 * math.tau for i in range(36))]
+    return {"seats": out_seats, "ring": ring, "globe": {"center": gc, "radius": round(gc[1] - gt[1], 4)}}
 
 
 def robot_sheet(samples: int, view_dir: Vector, dst: Path) -> None:
@@ -673,6 +678,7 @@ def main() -> None:
     ap.add_argument("--preview", action="store_true")
     ap.add_argument("--samples", type=int, default=None, help="Cycles samples; defaults to 192 for final render")
     ap.add_argument("--only", choices=["landscape", "portrait", "robot"])
+    ap.add_argument("--anchors-only", action="store_true", help="rebuild anchors.json without rendering")
     args = ap.parse_args()
     samples = args.samples if args.samples is not None else (24 if args.preview else 192)
     if samples < 16 or samples > 512:
@@ -693,11 +699,16 @@ def main() -> None:
         seats = build_room(k)
         cam = camera(k, loc, target, lens)
         raw = WORK / f"{variant}.png"
+        if args.anchors_only:
+            k.scene.render.resolution_x, k.scene.render.resolution_y = res
+            bpy.context.view_layer.update()  # a render would refresh the camera matrices; do it by hand
+            anchors[variant] = anchors_for(k, cam, seats)
+            continue
         render(k, raw, (int(res[0] * scale), int(res[1] * scale)), samples)
         anchors[variant] = anchors_for(k, cam, seats)
         bloom(raw, PUBLIC / ("room.webp" if variant == "landscape" else "room-portrait.webp"), 80 if variant == "landscape" else 76,
               None if args.preview else size)
-    if not args.only or args.only == "robot":
+    if not args.anchors_only and (not args.only or args.only == "robot"):
         robot_sheet(24 if args.preview else min(samples, 96), view, PUBLIC / "robot.webp")
     ANCHORS.write_text(json.dumps(anchors, indent=1) + "\n")
 

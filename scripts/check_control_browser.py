@@ -107,6 +107,17 @@ async def exercise(port: int, output: Path) -> None:
                             "(el) => el.getBoundingClientRect().width"
                         )
                         assert diameter > 120, f"Mobile hologram is too small: {diameter:.1f}px"
+                    # Robots and their tags stand clear of every panel drawn over the room.
+                    hidden = await room.evaluate(
+                        """(scene) => {
+                          const boxes = sel => [...scene.querySelectorAll(sel)]
+                            .map(el => el.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+                          const panels = boxes('.fc-head, .fc-kpis > div, .fc-sources, .fc-roster, .fc-activity, .fc-queue');
+                          const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+                          return boxes('.fc-tag').filter(tag => panels.some(p => hit(tag, p))).length;
+                        }"""
+                    )
+                    assert hidden == 0, f"{hidden} agent tag(s) under a panel at {name}"
                     await page.screenshot(
                         path=str(output / f"control-{name}.png"),
                         full_page=True,

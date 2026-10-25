@@ -1,25 +1,23 @@
 name: Render Control Room
 
+# Renders on demand and uploads the artwork for review. It never commits: a commit pushed with
+# GITHUB_TOKEN triggers no workflows, so the PR head would carry no CI. Commit the reviewed
+# assets from a workstation instead (python tools/render_control_room/render.py).
 on:
-  push:
-    branches: [codex/floorcontrol-reference-fidelity-spec]
-    paths:
-      - tools/render_control_room/render.py
-      - .github/workflows/render-control-room.yml
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   render:
-    if: github.repository == 'dossantostampafl-lab/Proto' && github.ref == 'refs/heads/codex/floorcontrol-reference-fidelity-spec'
+    if: github.repository == 'dossantostampafl-lab/Proto'
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
       - uses: actions/checkout@v5
         with:
-          persist-credentials: true
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
@@ -61,26 +59,6 @@ jobs:
           npm run contract-check
           npm run build
           npm run bundle-check
-      - name: Commit reproducible artwork only into review branch
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add apps/web/public/floorcontrol/room.webp apps/web/public/floorcontrol/room-portrait.webp apps/web/public/floorcontrol/robot.webp apps/web/src/views/floorControl/anchors.json
-          if ! git diff --cached --quiet; then
-            git commit -m 'build(floor): render approved command-room assets and anchors'
-            git fetch origin codex/floorcontrol-reference-fidelity-spec
-            git rebase origin/codex/floorcontrol-reference-fidelity-spec
-            git push origin HEAD:codex/floorcontrol-reference-fidelity-spec
-          fi
-      # The artwork commit rebases onto the latest review branch. If frontend or
-      # browser tests changed meanwhile, the earlier dist is no longer current.
-      - name: Rebuild frontend after updating the review branch
-        working-directory: apps/web
-        run: |
-          npm run typecheck
-          npm run contract-check
-          npm run build
-          npm run bundle-check
       - name: Capture desktop/mobile actual UI without WebGL
         run: |
           python -m pip install -e '.[dev]' playwright
@@ -93,3 +71,10 @@ jobs:
           name: control-room-review-screenshots
           path: /tmp/proto-floor-screenshots/*.png
           if-no-files-found: ignore
+      - name: Attach rendered artwork and anchors
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-room-artwork
+          path: |
+            apps/web/public/floorcontrol/*.webp
+            apps/web/src/views/floorControl/anchors.json

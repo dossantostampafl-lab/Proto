@@ -1,13 +1,6 @@
 name: Control Room Browser Regression
 
 on:
-  push:
-    branches: [codex/floorcontrol-reference-fidelity-spec]
-    paths:
-      - apps/web/src/views/floorControl/**
-      - apps/web/src/styles.css
-      - scripts/check_control_browser.py
-      - .github/workflows/control-browser.yml
   pull_request:
     branches: [main]
     paths:

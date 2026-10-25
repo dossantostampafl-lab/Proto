@@ -750,7 +750,7 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fc-sources li i.on { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
 .fc-sources li i.off { background: #f87171; }
 .fc-sources li em { grid-column: 2; font: 500 9px var(--mono); color: #94a3b8; font-style: normal; }
-.fc-tag { position: absolute; left: 0; transform: translateX(-50%); z-index: 2; padding: 6px 10px; border-radius: 8px; background: rgba(6, 14, 30, 0.92); border: 1px solid rgba(148, 163, 184, 0.28); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); display: grid; gap: 2px; min-width: 120px; max-width: 190px; }
+.fc-tag { position: absolute; left: 0; transform: translateX(-50%); z-index: 2; padding: 6px 10px; border-radius: 8px; background: rgba(6, 14, 30, 0.92); border: 1px solid rgba(148, 163, 184, 0.28); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); display: grid; gap: 2px; min-width: 120px; max-width: 172px; }
 .fc-tag small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fc-tag b { font: 800 11px var(--mono); letter-spacing: 0.08em; color: #f8fafc; display: flex; align-items: center; gap: 5px; }
 .fc-tag b i { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; }
