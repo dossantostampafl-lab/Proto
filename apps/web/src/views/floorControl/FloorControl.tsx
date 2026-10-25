@@ -181,13 +181,15 @@ function Queue({ actions, agents }: { actions: FloorAction[]; agents: Agent[] })
 }
 
 type Pt = [number, number];
-type Layout = { seats: { floor: "binance" | "xp"; seat: Pt; hub: Pt; height: number }[]; ring?: Pt[]; globe: { center: Pt; radius: number } };
+type Layout = { seats: { floor: "binance" | "xp"; seat: Pt; hub: Pt; height: number }[]; ring?: Pt[]; globe: { center: Pt; radius: number };
+  // The globe alone through one turn, as a sheet of frames, and where it sits on the image (l, t, r, b).
+  globeSpin?: { box: [number, number, number, number]; frames: number } };
 const RENDERED = ANCHORS as Partial<Record<"landscape" | "portrait", Layout>>;
-const LANDSCAPE = { src: "floorcontrol/room.webp", aspect: 16 / 9, layout: RENDERED.landscape as Layout };
+const LANDSCAPE = { src: "floorcontrol/room.webp", spin: "floorcontrol/globe.webp", aspect: 16 / 9, layout: RENDERED.landscape as Layout };
 const ROOMS = {
   landscape: LANDSCAPE,
   // Phones get their own render; until it exists they crop the landscape one.
-  portrait: RENDERED.portrait ? { src: "floorcontrol/room-portrait.webp", aspect: 9 / 16, layout: RENDERED.portrait } : LANDSCAPE,
+  portrait: RENDERED.portrait ? { src: "floorcontrol/room-portrait.webp", spin: "floorcontrol/globe-portrait.webp", aspect: 9 / 16, layout: RENDERED.portrait } : LANDSCAPE,
 };
 const SPRITE = `${import.meta.env.BASE_URL}floorcontrol/robot.webp`;
 // The robot sprite frame is 2.6 m tall (orthographic scale); a robot stands 1.9 m in the anchors.
@@ -372,11 +374,35 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const gr = room.layout.globe.radius * rect.h;
   // Decorative glow must remain readable on narrower, wider-framed portrait renders.
   const glowSize = size.w <= 760 ? Math.max(140, gr * 2.6) : gr * 2.6;
+  // The globe turns once every 30 s: two layers of the rendered sheet cross-fade between frames,
+  // driven straight on the DOM so the room does not re-render each frame.
+  const spin = room.layout.globeSpin;
+  const spinA = useRef<HTMLElement>(null), spinB = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const a = spinA.current, b = spinB.current;
+    if (!spin || !a || !b) return;
+    const at = (el: HTMLElement, f: number) => { el.style.backgroundPositionX = `${(f / (spin.frames - 1)) * 100}%`; };
+    if (!animate) { at(a, 0); b.style.opacity = "0"; return; }
+    let raf = 0;
+    const start = performance.now();
+    const step = (t: number) => {
+      const p = (((t - start) / 30000) * spin.frames) % spin.frames, f = Math.floor(p);
+      at(a, f); at(b, (f + 1) % spin.frames); b.style.opacity = (p - f).toFixed(3);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [spin, animate]);
+  const spinBox = spin && (() => {
+    const [l, t] = at([spin.box[0], spin.box[1]]), [r, b] = at([spin.box[2], spin.box[3]]);
+    return { left: l, top: t, width: r - l, height: b - t, backgroundImage: `url(${import.meta.env.BASE_URL}${room.spin})`, backgroundSize: `${spin.frames * 100}% 100%` };
+  })();
 
   return (
     <div ref={wrap} className={`fl-scene fc-scene${animate ? "" : " fc-still"}`} role="group" aria-label={`Controle do pregão: ${agents.length} agentes, ${summary ? `${summary.total} ordens executadas` : "totais indisponíveis"}`}>
       <img className="fc-room" src={`${import.meta.env.BASE_URL}${room.src}`} alt="" aria-hidden="true" decoding="async"
         style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+      {spinBox && <><i ref={spinA} className="fc-globe-spin" aria-hidden="true" style={spinBox} /><i ref={spinB} className="fc-globe-spin" aria-hidden="true" style={{ ...spinBox, opacity: 0 }} /></>}
       <i className="fc-globe" aria-hidden="true" style={{ left: gx, top: gy, width: glowSize, height: glowSize }} />
       <svg className="fc-paths" aria-hidden="true" width={size.w} height={size.h}>
         {agents.map(a => {

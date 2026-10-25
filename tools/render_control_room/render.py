@@ -176,6 +176,8 @@ class Kit:
         self.scene = bpy.context.scene
         self.meshes: dict[str, bpy.types.Mesh] = {}
         self.mats: dict[str, bpy.types.Material] = {}
+        self.earth: bpy.types.Object | None = None
+        self.wire: bpy.types.Object | None = None
         for name, op, kw in [
             ("cube", bpy.ops.mesh.primitive_cube_add, {"size": 1}),
             ("cyl", bpy.ops.mesh.primitive_cylinder_add, {"radius": 0.5, "depth": 1, "vertices": 32}),
@@ -482,9 +484,9 @@ def build_room(k: Kit) -> list[dict]:
     # Globe: enlarge the focal point while keeping projection anchors in sync.
     # Re-render both variants after changing geometry; never hand-edit anchors.json.
     # Globe: earth, wire shell, light column.
-    k.obj("sphere", "earth", (0, 0, GLOBE_Z), (GLOBE_R, GLOBE_R, GLOBE_R), (-0.12, 0, -0.37))
+    k.earth = k.obj("sphere", "earth", (0, 0, GLOBE_Z), (GLOBE_R, GLOBE_R, GLOBE_R), (-0.12, 0, -0.37))
     bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=GLOBE_R + 0.4, location=(0, 0, GLOBE_Z))
-    wire = bpy.context.active_object
+    wire = k.wire = bpy.context.active_object
     mod = wire.modifiers.new("w", "WIREFRAME")
     mod.thickness = 0.025
     wire.data.materials.append(k.mats["wire"])
@@ -502,6 +504,8 @@ def build_room(k: Kit) -> list[dict]:
                     dy = yc + side * 0.6
                     k.obj("cube", "desk", (x, dy, 0.76), (2.35, 1.1, 0.06))
                     k.obj("cube", "deskbody", (x, dy, 0.38), (2.25, 1.0, 0.72))
+                    # Warm strip along the desk's foot, glowing on the glossy floor.
+                    k.obj("cube", "amber", (x, dy + side * 0.52, 0.04), (2.1, 0.04, 0.03))
                     for kx in (-0.55, 0.0, 0.55)[:: 1]:
                         my = yc + side * 0.15
                         # Monitor leans back, away from its seat; the screen faces the seat.
@@ -609,10 +613,10 @@ def bloom(src: Path, dst: Path, quality: int, size: tuple[int, int] | None = Non
     img = Image.open(src).convert("RGB")
     a = np.asarray(img).astype(np.float32) / 255
     lum = a.max(axis=2, keepdims=True)
-    bright = np.clip((lum - 0.62) / 0.38, 0, 1) * a
+    bright = np.clip((lum - 0.56) / 0.44, 0, 1) * a
     base = Image.fromarray((bright * 255).astype(np.uint8))
     glow = np.zeros_like(a)
-    for radius, weight in [(6, 0.55), (18, 0.45), (48, 0.35)]:
+    for radius, weight in [(6, 0.6), (18, 0.55), (48, 0.42)]:
         glow += np.asarray(base.filter(ImageFilter.GaussianBlur(radius))).astype(np.float32) / 255 * weight
     out = 1 - (1 - a) * (1 - np.clip(glow, 0, 1))  # screen blend
     res = Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8))
@@ -655,6 +659,46 @@ def anchors_for(k: Kit, cam, seats: list[dict]) -> dict:
     # Posts on the floor ring around the globe, where agents stand when the panels cover their desks.
     ring = [project(k, cam, math.cos(a) * RING_R, math.sin(a) * RING_R, 0) for a in (i / 36 * math.tau for i in range(36))]
     return {"seats": out_seats, "ring": ring, "globe": {"center": gc, "radius": round(gc[1] - gt[1], 4)}}
+
+
+GLOBE_FRAMES = 36
+
+
+def globe_sheet(k: Kit, cam, res: tuple[int, int], samples: int, dst: Path, frame_h: int) -> dict:
+    """The globe alone (transparent, same camera, cropped) through one turn, as a horizontal sheet.
+
+    The web view plays it over the room image at the returned box, so the globe turns while the
+    room stays a still render. Frame 0 matches the globe baked into the room.
+    """
+    s = k.scene
+    keep = {k.earth.name, k.wire.name}
+    for o in s.objects:
+        o.hide_render = o.name not in keep and o.type != "CAMERA"
+    s.render.film_transparent = True
+    # Crop to the globe and its wire shell, with a small margin.
+    right, up = cam.matrix_world.to_3x3().col[0], cam.matrix_world.to_3x3().col[1]
+    centre, reach = Vector((0, 0, GLOBE_Z)), GLOBE_R + 0.6
+    pts = [world_to_camera_view(s, cam, centre + d * reach) for d in (right, -right, up, -up)]
+    x0, x1 = max(0.0, min(p.x for p in pts) - 0.01), min(1.0, max(p.x for p in pts) + 0.01)
+    y0, y1 = max(0.0, min(p.y for p in pts) - 0.01), min(1.0, max(p.y for p in pts) + 0.01)
+    s.render.use_border, s.render.use_crop_to_border = True, True
+    s.render.border_min_x, s.render.border_max_x, s.render.border_min_y, s.render.border_max_y = x0, x1, y0, y1
+    base = k.earth.rotation_euler.z
+    frames = []
+    for f in range(GLOBE_FRAMES):
+        k.earth.rotation_euler.z = base + f / GLOBE_FRAMES * math.tau
+        path = WORK / f"globe{f}.png"
+        render(k, path, res, samples)
+        img = Image.open(path).convert("RGBA")
+        frames.append(img.resize((round(img.width * frame_h / img.height), frame_h), Image.LANCZOS))
+    w = frames[0].width
+    sheet = Image.new("RGBA", (w * GLOBE_FRAMES, frame_h))
+    for f, img in enumerate(frames):
+        sheet.paste(img, (f * w, 0))
+    sheet.save(dst, "WEBP", quality=78, method=6)
+    k.earth.rotation_euler.z = base
+    s.render.use_border = False
+    return {"box": [round(x0, 4), round(1 - y1, 4), round(x1, 4), round(1 - y0, 4)], "frames": GLOBE_FRAMES}
 
 
 def robot_sheet(samples: int, view_dir: Vector, dst: Path) -> None:
@@ -748,6 +792,9 @@ def main() -> None:
         anchors[variant] = anchors_for(k, cam, seats)
         bloom(raw, PUBLIC / ("room.webp" if variant == "landscape" else "room-portrait.webp"), 80 if variant == "landscape" else 76,
               None if args.preview else size)
+        anchors[variant]["globeSpin"] = globe_sheet(
+            k, cam, (int(res[0] * scale), int(res[1] * scale)), max(16, samples // 2),
+            PUBLIC / ("globe.webp" if variant == "landscape" else "globe-portrait.webp"), 220 if variant == "landscape" else 180)
     if not args.anchors_only and (not args.only or args.only == "robot"):
         robot_sheet(24 if args.preview else min(samples, 96), view, PUBLIC / "robot.webp")
     ANCHORS.write_text(json.dumps(anchors, indent=1) + "\n")
