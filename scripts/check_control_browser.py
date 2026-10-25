@@ -96,6 +96,12 @@ async def exercise(port: int, output: Path) -> None:
                         "document.documentElement.scrollWidth <= window.innerWidth"
                     ), "unwanted horizontal scroll"
                     if width == 390:
+                        for panel, label in ((".fc-sources", "Fontes"), (".fc-activity", "Atividade")):
+                            toggle = room.get_by_role("button", name=label, exact=True)
+                            await toggle.click()
+                            await expect(room.locator(panel)).to_be_visible()
+                            await toggle.click()
+                            await expect(room.locator(panel)).to_be_hidden()
                         await expect(room.locator(".fc-bot > i").first).to_be_visible(timeout=15000)
                         diameter = await room.locator(".fc-globe").evaluate(
                             "(el) => el.getBoundingClientRect().width"
