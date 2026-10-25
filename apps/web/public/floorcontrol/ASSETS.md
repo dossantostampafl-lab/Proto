@@ -17,3 +17,9 @@ the same script writes.
 
 Coastlines on the globe and on the world-map screens come from Natural Earth 1:110m land
 (`tools/render_control_room/ne_110m_land.geojson`, public domain, https://www.naturalearthdata.com).
+
+Models and lighting baked into the room come from Poly Haven, all CC0 (https://polyhaven.com/license),
+downloaded by `tools/render_control_room/fetch_assets.py`: `potted_plant_01` (plants),
+`modern_arm_chair_01` (desk chairs, recoloured), `sofa_02` (lounge) and the `blue_photo_studio`
+HDRI (reflections only; the camera never sees it). Without them the renderer falls back to its
+own primitives.
