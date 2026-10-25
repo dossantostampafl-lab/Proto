@@ -913,3 +913,13 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
   .fc-roster-select { grid-template-columns: minmax(0,1fr); gap: 0; }
   .fc-agent-detail { top: 195px; padding: 12px; }
 }
+
+/* Small-screen access to live sources and journal: hidden by default, not removed. */
+.fc-panel-mobile-toggle { display: none; }
+@media (max-width: 760px) {
+  .fc-panel-mobile-toggle { display: inline-flex; pointer-events: auto; appearance: none; border: 1px solid rgba(97,189,255,.55); background: rgba(8,25,55,.9); color: #def3ff; border-radius: 4px; padding: 3px 6px; font: 700 9px var(--mono); cursor: pointer; }
+  .fc-panel-mobile-toggle[aria-expanded="true"] { background: #246497; border-color: #83dcff; }
+  .fc-panel-mobile-toggle:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+  .fc-scene .fc-sources.fc-mobile-open,
+  .fc-scene .fc-activity.fc-mobile-open { display: block; position: absolute; z-index: 8; top: 195px; bottom: auto; left: 8px; right: 8px; width: auto; max-height: 300px; overflow-y: auto; }
+}
