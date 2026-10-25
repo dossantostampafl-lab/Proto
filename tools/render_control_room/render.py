@@ -81,12 +81,12 @@ def earth_texture(path: Path) -> None:
     noise = Image.effect_noise((w, h), 90).filter(ImageFilter.GaussianBlur(6))
     mask = Image.composite(mask.filter(ImageFilter.MaxFilter(9)), mask.filter(ImageFilter.MinFilter(9)), noise.point(lambda v: 255 if v > 128 else 0))
     mask = mask.filter(ImageFilter.GaussianBlur(2))
-    land = Image.new("RGB", (w, h), (52, 190, 110))
+    land = Image.new("RGB", (w, h), (24, 170, 171))
     tone = Image.effect_noise((w, h), 60).filter(ImageFilter.GaussianBlur(10)).convert("RGB")
     land = Image.blend(land, Image.merge("RGB", [tone.getchannel(0).point(lambda v: v // 3), tone.getchannel(0), tone.getchannel(0).point(lambda v: v // 2)]), 0.25)
     img.paste(land, (0, 0), mask)
     coast = mask.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(1.5))
-    img.paste(Image.new("RGB", (w, h), (180, 255, 220)), (0, 0), coast.point(lambda v: min(255, v * 3)))
+    img.paste(Image.new("RGB", (w, h), (151, 255, 243)), (0, 0), coast.point(lambda v: min(255, v * 3)))
     grid = ImageDraw.Draw(img)
     for lon in range(-180, 181, 15):
         x = (lon + 180) / 360 * w
@@ -279,7 +279,7 @@ def build_room(k: Kit) -> list[dict]:
     k.emissive("cyanSoft", "#2b7de9", 1.6)
     k.emissive("ringBright", "#4cc3ff", 2.6)
     for i, p in enumerate(screens):
-        k.emissive(f"screen{i}", strength=3.2, image=p)
+        k.emissive(f"screen{i}", strength=1.65, image=p)
     k.emissive("beam", "#38bdf8", 2.0, alpha=0.12)
     k.emissive("wire", "#38bdf8", 2.0, alpha=0.1)
 
@@ -415,6 +415,28 @@ def build_room(k: Kit) -> list[dict]:
         rz = a + math.pi / 2
         k.obj("cube", "console", (x, y, 0.45), (1.5, 0.9, 0.9), (0, 0, rz))
         k.obj("plane", f"screen{(i + 1) % 4}", (math.cos(a) * 13.55, math.sin(a) * 13.55, 1.15), (1.4, 0.8, 1), (math.radians(60), 0, a - math.pi / 2))
+
+    # Detailed rear operator rows between the circular hub and video wall.
+    # Consoles are unlabelled environment geometry. They neither imply a
+    # connected agent nor report an executed order; those remain live DOM data.
+    for rear_row, rear_y in enumerate((16.1, 18.35)):
+        for col, console_x in enumerate((-10.5, -7.0, -3.5, 0.0, 3.5, 7.0, 10.5)):
+            k.obj("cube", "desk", (console_x, rear_y, 0.75), (3.15, 1.12, 0.10))
+            k.obj("cube", "deskbody", (console_x, rear_y, 0.42), (3.04, 1.03, 0.60))
+            for monitor in (-1, 0, 1):
+                mx = console_x + monitor * 0.86
+                k.obj("cube", "black", (mx, rear_y + 0.32, 1.35),
+                      (0.78, 0.10, 0.54), (math.radians(-12), 0, 0))
+                k.obj("plane", f"screen{(col + rear_row + monitor + 4) % 4}",
+                      (mx, rear_y + 0.26, 1.35), (0.73, 0.51, 1),
+                      (math.radians(75), 0, 0))
+            k.obj("cube", "black", (console_x, rear_y - 0.91, 0.57),
+                  (0.70, 0.56, 0.16))
+            k.obj("cube", "black", (console_x, rear_y - 1.15, 0.95),
+                  (0.70, 0.11, 0.67))
+    for marker_x in (-12.6, 12.6):
+        k.obj("cube", "amber", (marker_x, 17.2, 0.05),
+              (0.065, 6.2, 0.04))
 
     # Segmented cyan architectural floor arcs around the central hub.
     for radius, count, width in [(10.8, 96, 0.22), (14.8, 120, 0.24), (18.0, 144, 0.18)]:
