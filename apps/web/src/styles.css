@@ -717,6 +717,7 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fc-globe { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; mix-blend-mode: screen; background: radial-gradient(circle, rgba(125, 211, 252, 0.34) 0%, rgba(56, 189, 248, 0.16) 38%, rgba(0, 0, 0, 0) 70%); animation: fc-pulse 3.2s ease-in-out infinite; }
 @keyframes fc-pulse { 0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(0.96); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.04); } }
 .fc-still .fc-globe { animation: none; }
+.fc-globe-spin { position: absolute; pointer-events: none; background-repeat: no-repeat; background-position: 0 0; }
 .fc-paths { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .fc-paths line { stroke: #f59e0b; stroke-width: 2.5; stroke-dasharray: 7 6; filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.8)); }
 .fc-paths circle { fill: rgba(56, 189, 248, 0.15); stroke: #38bdf8; stroke-width: 3; filter: drop-shadow(0 0 6px #38bdf8); }
@@ -926,3 +927,17 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
   .fc-scene .fc-sources.fc-mobile-open,
   .fc-scene .fc-activity.fc-mobile-open { display: block; position: absolute; z-index: 8; top: 195px; bottom: auto; left: 8px; right: 8px; width: auto; max-height: 300px; overflow-y: auto; }
 }
+
+/* Wide screens: compact overlay panels, so more of the rendered room shows (as in the reference). */
+@media (min-width: 1101px) {
+  .fc-kpis > div { min-height: 0; padding: 12px 16px; gap: 5px; }
+  .fc-kpis > div:first-child { width: clamp(200px, 18%, 290px); }
+  .fc-kpis > div:last-child { width: clamp(250px, 24%, 360px); }
+  .fc-kpis b { font-size: clamp(26px, 2.5vw, 42px); }
+  .fc-sources { width: clamp(180px, 16%, 240px); padding: 10px 12px; }
+  .fc-sources ul { gap: 4px; }
+  .fc-roster { width: clamp(200px, 19%, 270px); padding: 10px 12px; bottom: 128px; }
+  .fc-roster li { padding: 4px 0; }
+  .fc-activity { width: clamp(230px, 22%, 320px); padding: 10px 12px; bottom: 128px; }
+}
+

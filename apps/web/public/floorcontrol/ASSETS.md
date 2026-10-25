@@ -7,6 +7,7 @@ code, no third-party models, textures or photos). Licence: same as this reposito
 |---|---|
 | `room.webp` | Landscape room render with anonymous unidentifiable operator silhouettes; no live labels, robots, text or numbers |
 | `room-portrait.webp` | Portrait render focusing on the globe and command hub for phones |
+| `globe.webp`, `globe-portrait.webp` | The globe alone through one turn (36 frames, transparent), played over the room |
 | `robot.webp` | PROTO's own robot, four walk frames, transparent background |
 
 Screens in the render show abstract glowing panels only. Operator silhouettes are static set dressing, not agents or proof of active work. Every value on the view (totals, agents,
