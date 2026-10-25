@@ -93,7 +93,7 @@ function Kpis({ summary, ledger }: { summary: Summary | null; ledger: Ledger | n
   );
 }
 
-function Sources({ state, stateFresh, xp, summary }: { state: FloorState | null; stateFresh: boolean; xp: XpLane; summary: Summary | null }) {
+function Sources({ state, stateFresh, xp, summary, mobileOpen }: { state: FloorState | null; stateFresh: boolean; xp: XpLane; summary: Summary | null; mobileOpen: boolean }) {
   const wd = state?.watchdog;
   const rows: { name: string; status: string; ok: boolean | null }[] = [
     { name: "Binance Spot · testnet", status: state ? (stateFresh ? "LIVE" : "STALE") : "UNAVAILABLE", ok: state ? stateFresh : null },
@@ -103,7 +103,7 @@ function Sources({ state, stateFresh, xp, summary }: { state: FloorState | null;
     { name: "Watchdog", status: wd ? (wd.active ? (wd.last_trip ? `ATIVO · último trip ${wd.last_trip.at.slice(0, 10)}` : "ATIVO") : "INATIVO") : "UNAVAILABLE", ok: wd ? wd.active : null },
   ];
   return (
-    <aside className="fc-sources" aria-label="Fontes">
+    <aside className={`fc-sources${mobileOpen ? " fc-mobile-open" : ""}`} aria-label="Fontes">
       <header><span aria-hidden="true">⌖</span> FONTES</header>
       <ul>{rows.map(r => <li key={r.name}><i className={r.ok === null ? "" : r.ok ? "on" : "off"} />{r.name}<em>{r.status}</em></li>)}</ul>
     </aside>
@@ -128,10 +128,10 @@ function AgentRoster({ agents, actions, b3, xpLive, available, selectedId, onSel
 }
 
 
-function Activity({ actions, fresh }: { actions: FloorAction[]; fresh: boolean }) {
+function Activity({ actions, fresh, mobileOpen }: { actions: FloorAction[]; fresh: boolean; mobileOpen: boolean }) {
   const recent = actions.slice(-5).reverse();
   return (
-    <aside className="fc-activity" aria-label="Atividade do pregão">
+    <aside className={`fc-activity${mobileOpen ? " fc-mobile-open" : ""}`} aria-label="Atividade do pregão">
       <header>ATIVIDADE EM TEMPO REAL <small>{fresh ? "LIVE" : "LAST KNOWN"}</small></header>
       {recent.length === 0 ? <p className="fc-note">Nenhum evento registrado.</p> :
         <ol>{recent.map(a => <li key={a.seq}>
@@ -240,6 +240,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const [running, setRunning] = useState(true);
   const [now, setNow] = useState(() => new Date());
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<"sources" | "activity" | null>(null);
   useEffect(() => { const t = window.setInterval(() => setNow(new Date()), 30000); return () => window.clearInterval(t); }, []);
 
   const roster = dataOf(useDeskFeed("/v1/agents/roster", parseRoster, POLL).state);
@@ -362,10 +363,12 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
           <li className={b3 ? "live" : "stale"}>B3 {b3 ? "PREGÃO ABERTO" : "FECHADA"}</li>
         </ul>
         <time>{date}</time>
+        <button type="button" className="fc-panel-mobile-toggle" aria-expanded={mobilePanel === "sources"} onClick={() => setMobilePanel(v => v === "sources" ? null : "sources")}>Fontes</button>
+        <button type="button" className="fc-panel-mobile-toggle" aria-expanded={mobilePanel === "activity"} onClick={() => setMobilePanel(v => v === "activity" ? null : "activity")}>Atividade</button>
         <button type="button" className="fc-pause" aria-pressed={paused} disabled={reduced} title={reduced ? "Movimento reduzido pelo sistema" : undefined} onClick={() => setPaused(p => !p)}>{paused ? "Retomar animação" : "Pausar animação"}</button>
       </header>
       <Kpis summary={summary} ledger={ledger} />
-      <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} />
+      <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} mobileOpen={mobilePanel === "sources"} />
       <AgentRoster agents={agents} actions={actions} b3={b3} xpLive={xpLive} available={roster !== null} selectedId={selectedAgentId} onSelect={setSelectedAgentId} />
       {selectedAgent && (
         <aside className="fc-agent-detail" aria-label={`Detalhes do agente ${selectedAgent.name ?? selectedAgent.id}`}>
@@ -383,7 +386,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
           <p>{lastFor(selectedAgent, actions)?.headline ?? "Sem atividade registrada para este instrumento."}</p>
         </aside>
       )}
-      <Activity actions={actions} fresh={stateFresh} />
+      <Activity actions={actions} fresh={stateFresh} mobileOpen={mobilePanel === "activity"} />
       <Queue actions={actions} agents={agents} />
       {!loaded && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
       {failed && <p className="fl-3d-loading" role="alert">Imagem da sala indisponível. Os dados continuam abaixo e na vista Realista.</p>}
