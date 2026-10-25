@@ -111,15 +111,17 @@ function Sources({ state, stateFresh, xp, summary }: { state: FloorState | null;
 }
 
 
-function AgentRoster({ agents, actions, b3, xpLive, available }: { agents: Agent[]; actions: FloorAction[]; b3: boolean; xpLive: boolean; available: boolean }) {
+function AgentRoster({ agents, actions, b3, xpLive, available, selectedId, onSelect }: { agents: Agent[]; actions: FloorAction[]; b3: boolean; xpLive: boolean; available: boolean; selectedId: string | null; onSelect: (id: string) => void }) {
   return (
     <aside className="fc-roster" aria-label="Agentes do pregão">
       <header>AGENTES <strong>{available ? agents.length : "—"}</strong></header>
       {!available ? <p className="fc-note">AGENT ROSTER UNAVAILABLE</p> : agents.length === 0 ? <p className="fc-note">Nenhum agente cadastrado.</p> :
         <ul>{agents.slice(0, 6).map(a => <li key={a.id}>
           <i className={a.status === "ACTIVE" ? "on" : ""} aria-hidden="true" />
-          <b>{a.name ?? a.id}</b>
-          <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
+          <button type="button" className="fc-roster-select" aria-pressed={selectedId === a.id} onClick={() => onSelect(a.id)}>
+            <b>{a.name ?? a.id}</b>
+            <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
+          </button>
         </li>)}</ul>}
     </aside>
   );
@@ -237,6 +239,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const [paused, setPaused] = useState(reduced);
   const [running, setRunning] = useState(true);
   const [now, setNow] = useState(() => new Date());
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   useEffect(() => { const t = window.setInterval(() => setNow(new Date()), 30000); return () => window.clearInterval(t); }, []);
 
   const roster = dataOf(useDeskFeed("/v1/agents/roster", parseRoster, POLL).state);
@@ -244,6 +247,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const summaryFeed = useDeskFeed("/v1/floor/summary", parseSummary, POLL);
   const summary = dataOf(summaryFeed.state);
   const agents = useMemo(() => roster?.agents ?? [], [roster]);
+  const selectedAgent = agents.find(agent => agent.id === selectedAgentId) ?? null;
   const b3 = b3Open(now);
   const busySymbols = useMemo(() => new Set(STATIONS.filter(s => active(s.id)).map(s => latest[s.id]?.symbol).filter((s): s is string => Boolean(s))), [active, latest]);
 
@@ -340,11 +344,11 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
         return (
           <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`} style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)` }}>
             <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0`, filter: a.status === "ACTIVE" ? `hue-rotate(${BOT_HUES[index % BOT_HUES.length]}deg) drop-shadow(0 4px 6px rgba(0,0,0,.55))` : "grayscale(1) brightness(.7)" }} />
-            {(onHub || seat?.tag) && <div className="fc-tag" style={{ bottom: h * 0.82 }}>
+            {(onHub || seat?.tag) && <button type="button" className="fc-tag" style={{ bottom: h * 0.82 }} aria-pressed={selectedAgentId === a.id} aria-label={`Abrir agente ${a.name ?? a.id}`} onClick={() => setSelectedAgentId(a.id)}>
               <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>
               <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
               <em>{brl(a.equity)} · capital virtual</em>
-            </div>}
+            </button>}
           </div>
         );
       })}
@@ -362,7 +366,23 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
       </header>
       <Kpis summary={summary} ledger={ledger} />
       <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} />
-      <AgentRoster agents={agents} actions={actions} b3={b3} xpLive={xpLive} available={roster !== null} />
+      <AgentRoster agents={agents} actions={actions} b3={b3} xpLive={xpLive} available={roster !== null} selectedId={selectedAgentId} onSelect={setSelectedAgentId} />
+      {selectedAgent && (
+        <aside className="fc-agent-detail" aria-label={`Detalhes do agente ${selectedAgent.name ?? selectedAgent.id}`}>
+          <header>
+            <b>AGENTE · {selectedAgent.name ?? selectedAgent.id}</b>
+            <button type="button" onClick={() => setSelectedAgentId(null)} aria-label="Fechar detalhes do agente">×</button>
+          </header>
+          <dl>
+            <dt>Identificador</dt><dd>{selectedAgent.id}</dd>
+            <dt>Instrumento</dt><dd>{selectedAgent.symbol}</dd>
+            <dt>Ambiente</dt><dd>{selectedAgent.floor === "xp" ? "XP / B3" : "Binance"}</dd>
+            <dt>Situação</dt><dd>{statusLine(selectedAgent, lastFor(selectedAgent, actions), b3, xpLive)}</dd>
+            <dt>Capital virtual</dt><dd>{brl(selectedAgent.equity)}</dd>
+          </dl>
+          <p>{lastFor(selectedAgent, actions)?.headline ?? "Sem atividade registrada para este instrumento."}</p>
+        </aside>
+      )
       <Activity actions={actions} fresh={stateFresh} />
       <Queue actions={actions} agents={agents} />
       {!loaded && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
