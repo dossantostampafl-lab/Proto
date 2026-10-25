@@ -265,6 +265,8 @@ def build_room(k: Kit) -> list[dict]:
     k.principled("desk", "#2a3442", rough=0.3, metal=0.3)
     k.principled("deskbody", "#151c27", rough=0.6)
     k.principled("black", "#0b0e14", rough=0.45)
+    k.principled("operator", "#121b2b", rough=0.74)
+    k.principled("operatorFace", "#886b62", rough=0.85)
     k.principled("console", "#2b3a52", rough=0.3, metal=0.5)
     k.principled("glass", "#bfe3ff", rough=0.03, transmission=1.0)
     k.principled("pot", "#e8ecef", rough=0.35)
@@ -405,6 +407,15 @@ def build_room(k: Kit) -> list[dict]:
                     k.obj("cube", "black", (x, cy, 0.5), (0.6, 0.6, 0.1))
                     k.obj("cube", "black", (x, cy + side * 0.3, 0.85), (0.6, 0.08, 0.65))
                     k.obj("cyl", "black", (x, cy, 0.25), (0.12, 0.12, 0.5))
+                    # Anonymous seated silhouettes approximate the dense occupancy
+                    # of the approved preview; no identifiable faces or live values.
+                    if (c + 2 * p + (1 if side > 0 else 0)) % 3 != 0:
+                        k.obj("sphere", "operator", (x, cy - side * 0.18, 1.10), (0.37, 0.31, 0.51))
+                        k.obj("sphere", "operatorFace", (x, cy - side * 0.22, 1.64), (0.21, 0.20, 0.23))
+                        k.obj("sphere", "operator", (x, cy - side * 0.17, 1.76), (0.23, 0.22, 0.10))
+                        for dx in (-0.44, 0.44):
+                            k.obj("sphere", "operator", (x + dx, cy - side * 0.42, 1.07), (0.13, 0.35, 0.16))
+
                     block_seats.append({"x": x, "y": yc + side * 2.25, "floor": floor})
         # Spread a block's seats: outer columns first.
         block_seats.sort(key=lambda s: -abs(s["x"] - bx))
@@ -596,8 +607,8 @@ def main() -> None:
     anchors = json.loads(ANCHORS.read_text()) if ANCHORS.exists() else {}
     view = Vector((0, 0, 0))
     for variant, loc, target, lens, res, size in [
-        ("landscape", (0, -29, 48), (0, 0, 0), 38, (1920, 1080), (1920, 1080)),
-        ("portrait", (0, -20, 47), (0, 2, 0), 25, (1080, 1920), (900, 1600)),
+        ("landscape", (0, -29, 48), (0, 0, 0), 48, (1920, 1080), (1920, 1080)),
+        ("portrait", (0, -14, 32), (0, 1, 0), 70, (1080, 1920), (900, 1600)),
     ]:
         if variant == "landscape":
             view = Vector(target) - Vector(loc)
