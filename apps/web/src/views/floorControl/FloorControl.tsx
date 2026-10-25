@@ -202,8 +202,10 @@ function seatsFor(agents: Agent[], layout: Layout, place: (p: Pt) => Pt, w: numb
   const [gx, gy] = place(layout.globe.center);
   // On screen with room for the tag above, clear of the totals (phones) and of the sources panel (wide screens, bottom right).
   const wide = w > 760;
-  const onScreen = ([x, y]: Pt) => x > w * 0.06 && x < w * 0.94 && y > h * (wide ? 0.26 : 0.52) && y < h * 0.8
+  const onScreen = ([x, y]: Pt) => x > w * 0.06 && x < w * 0.94 && y > h * (wide ? 0.26 : 0.35) && y < h * 0.82
     && !(wide && x > w - 250 && y > h * 0.42);
+  // Phones keep the upper station tiers visible below the compact top KPI cards;
+  // the older 52% cutoff concealed every real desk and projected robots onto the Earth.
   // Phones show the name only, so their tags need less room.
   const gapX = wide ? 170 : 92, gapY = wide ? 80 : 36;
   const clear = ([x, y]: Pt) => placed.every(([px, py]) => Math.abs(px - x) > gapX || Math.abs(py - y) > gapY);
