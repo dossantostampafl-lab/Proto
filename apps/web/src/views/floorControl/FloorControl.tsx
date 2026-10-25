@@ -347,6 +347,8 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
       </header>
       <Kpis summary={summary} ledger={ledger} />
       <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} />
+      <AgentRoster agents={agents} actions={actions} b3={b3} xpLive={xpLive} />
+      <Activity actions={actions} fresh={stateFresh} />
       <Queue actions={actions} agents={agents} />
       {!loaded && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
       {failed && <p className="fl-3d-loading" role="alert">Imagem da sala indisponível. Os dados continuam abaixo e na vista Realista.</p>}
