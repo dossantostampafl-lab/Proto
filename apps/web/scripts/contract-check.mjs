@@ -181,6 +181,7 @@ assert.match(control, /Pausar animação/, "the control room animation can be pa
 assert.doesNotMatch(floorView, /buildingFailed \|\| !canRender3d\(\) \? <BuildingUnavailable text="Controle/, "the rendered Control Room must never require WebGL");
 assert.match(control, /function AgentRoster\(/, "the approved view shows API-backed agents");
 assert.match(control, /function Activity\(/, "the approved view shows journal-backed recent activity");
+assert.match(control, /<AgentConversation key=\{a\.id\} agentId=\{a\.id\} \/>/, "each agent's detail opens the private ChatGPT explanation panel");
 assert.match(control, /<AgentRoster agents=\{agents\}/, "the real roster overlay is mounted");
 assert.match(control, /<Activity actions=\{actions\}/, "the real journal overlay is mounted");
 

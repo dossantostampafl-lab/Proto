@@ -9,7 +9,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Shared } from "../../main";
 import { dataOf, finiteDecimal, isRecord, rec, type XpLane, useDeskFeed } from "../deskData";
 import { type FloorAction, type FloorState, STATIONS, type StationId } from "../floorModel";
-import { type Agent, brl, type Ledger, limitsOf, parseLedger, parseRoster } from "../floorBuilding/data";
+import { type Agent, brl, type Ledger, limitsOf, parseLedger, parseRoster, sign } from "../floorBuilding/data";
+import { AgentConversation } from "../AgentConversation";
 
 const POLL = 10000;
 const LANE: Record<XpLane["state"], string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
@@ -72,7 +73,8 @@ export function statusLine(a: Agent, last: FloorAction | null, b3: boolean, xpLi
 const PHOTO = { src: "floorcontrol/room-photo.webp", w: 1672, h: 941 };
 type Rect = [number, number, number, number]; // x0, y0, x1, y1 in picture pixels
 // The panels sit on their counterparts by CSS (styles.css, "fc-photo"), in these same pixels.
-const AT = { head: [0, 0, 1672, 56] as Rect, detail: [640, 600, 1040, 790] as Rect };
+// The agent detail opens as a drawer over the right-hand column (sources and activity).
+const AT = { head: [0, 0, 1672, 56] as Rect, detail: [1262, 64, 1660, 806] as Rect };
 // On phones the panels move below the picture, so these blocks cover the picture's sample panels
 // (header, totals, sources, agents, activity, queue): none of its sample numbers ever shows.
 const SAMPLES: Rect[] = [[0, 0, 1672, 60], [22, 70, 373, 246], [609, 70, 1101, 208], [1302, 70, 1648, 336],
@@ -80,12 +82,12 @@ const SAMPLES: Rect[] = [[0, 0, 1672, 60], [22, 70, 373, 246], [609, 70, 1101, 2
 // The picture's four agent stations, each tag drawn exactly over the picture's own, in the colour of
 // the station's pedestal; further agents stand on the free floor of the ring in front of the globe.
 const STATIONS_AT: { tag: Rect; hue: number }[] = [
-  { tag: [515, 230, 733, 284], hue: 0 },     // upper left, yellow pedestal
-  { tag: [1007, 230, 1215, 284], hue: 175 }, // upper right, blue pedestal
-  { tag: [340, 485, 577, 537], hue: 85 },    // left, green pedestal
-  { tag: [1110, 487, 1360, 540], hue: 255 }, // right, purple pedestal
-  { tag: [560, 655, 760, 707], hue: 40 },
-  { tag: [925, 655, 1125, 707], hue: 145 },
+  { tag: [515, 230, 733, 306], hue: 0 },     // upper left, yellow pedestal
+  { tag: [1007, 230, 1215, 306], hue: 175 }, // upper right, blue pedestal
+  { tag: [340, 485, 577, 559], hue: 85 },    // left, green pedestal
+  { tag: [1110, 487, 1360, 562], hue: 255 }, // right, purple pedestal
+  { tag: [560, 655, 760, 729], hue: 40 },
+  { tag: [925, 655, 1125, 729], hue: 145 },
 ];
 const SPRITE = `${import.meta.env.BASE_URL}floorcontrol/robot.webp`;
 
@@ -113,6 +115,11 @@ function describe(a: FloorAction): string {
 function actor(a: FloorAction): string {
   return AGENT_NAME.exec(a.headline)?.[1]?.toUpperCase() ?? STATIONS.find(s => s.id === a.station)?.label ?? a.station;
 }
+
+const PNL = ["down", "", "up"] as const;
+const venue = (a: Agent) => (a.floor === "xp" ? "B3" : "BIN");
+const stamp = (iso: string | null) => (iso ? iso.replace("T", " ").slice(0, 16) : "—");
+const held = (a: Agent) => { const q = finiteDecimal(a.position); return q === null || sign(q) === 0 ? "sem posição" : `${q} ${a.symbol}`; };
 
 function Avatar({ hue, active }: { hue: number; active: boolean }) {
   return <i className="fc-avatar" aria-hidden="true"
@@ -189,6 +196,39 @@ function AgentRoster({ agents, actions, b3, xpLive, available, selectedId, onSel
             <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
           </button>
         </li>)}</ul>}
+    </aside>
+  );
+}
+
+/** Everything the roster and the journal say about one agent, plus its ChatGPT explanation panel. Read only. */
+function AgentDetail({ agent: a, last, line, style, onClose }: { agent: Agent; last: FloorAction | null; line: string; style?: React.CSSProperties; onClose: () => void }) {
+  return (
+    <aside className="fc-agent-detail" aria-label={`Detalhes do agente ${a.name ?? a.id}`} style={style}>
+      <header>
+        <b>AGENTE · {a.name ?? a.id}</b>
+        <button type="button" onClick={onClose} aria-label="Fechar detalhes do agente">×</button>
+      </header>
+      <p className={`fc-detail-state ${a.status === "ACTIVE" ? "on" : "off"}`}><i />{a.status === "ACTIVE" ? "Online" : "Eliminado"} · {line}</p>
+      <div className="fc-detail-kpis">
+        <div><small>P&amp;L</small><b className={PNL[sign(a.pnl) + 1]}>{brl(a.pnl, true)}</b></div>
+        <div><small>Capital virtual</small><b>{brl(a.equity)}</b></div>
+        <div><small>Posição</small><b>{held(a)}</b></div>
+      </div>
+      <dl>
+        <dt>Identificador</dt><dd>{a.id}</dd>
+        <dt>Ambiente</dt><dd>{a.floor === "xp" ? "XP / B3 (demo)" : "Binance Spot (testnet)"} · {a.symbol}</dd>
+        <dt>Estratégia</dt><dd>{a.kindLabel}</dd>
+        <dt>Geração</dt><dd>{a.generation ?? "—"}</dd>
+        <dt>Sobrevivência</dt><dd>{a.survival ?? "—"}</dd>
+        <dt>Realizado</dt><dd>{a.realized ?? "—"}</dd>
+        <dt>Taxas</dt><dd>{a.fees ?? "—"}</dd>
+        <dt>Custo da posição</dt><dd>{a.positionCost ?? "—"}</dd>
+        <dt>Avaliação</dt><dd>{a.valued ? "marcada a mercado" : "sem marcação"}</dd>
+        <dt>Última ação</dt><dd>{last ? `${last.at.slice(11, 16)} · ${STATIONS.find(s => s.id === last.station)?.label ?? last.station} · ${describe(last)}` : "nenhuma no journal"}</dd>
+        <dt>Criado</dt><dd>{stamp(a.created)}</dd>
+        {a.eliminated && <><dt>Eliminado</dt><dd>{stamp(a.eliminated)} · {a.reason ?? "—"}</dd></>}
+      </dl>
+      <AgentConversation key={a.id} agentId={a.id} />
     </aside>
   );
 }
@@ -309,9 +349,10 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
               <button type="button" className="fc-tag" aria-pressed={selectedAgentId === a.id} aria-label={`Abrir agente ${a.name ?? a.id}`} onClick={() => setSelectedAgentId(a.id)}>
                 <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>
                 <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
+                <em title={`${venue(a)} ${a.symbol} · capital ${brl(a.equity)}`}><span className={PNL[sign(a.pnl) + 1]}>{brl(a.pnl, true)}</span> · {a.symbol}</em>
               </button>
             ) : (
-              <span className="fc-tag"><b><i className="off" />ESTAÇÃO LIVRE</b><small>{roster ? "sem agente nesta estação" : "AGENT ROSTER UNAVAILABLE"}</small></span>
+              <span className="fc-tag"><b><i className="off" />ESTAÇÃO LIVRE</b><small>{roster ? "sem agente nesta estação" : "AGENT ROSTER UNAVAILABLE"}</small><em>—</em></span>
             )}
           </div>
         );
@@ -359,21 +400,8 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
         <Activity actions={actions} fresh={stateFresh} mobileOpen={mobilePanel === "activity"} />
         <Queue actions={actions} />
       </div>
-      {selectedAgent && (
-        <aside className="fc-agent-detail" aria-label={`Detalhes do agente ${selectedAgent.name ?? selectedAgent.id}`} style={phone ? undefined : place(AT.detail)}>
-          <header>
-            <b>AGENTE · {selectedAgent.name ?? selectedAgent.id}</b>
-            <button type="button" onClick={() => setSelectedAgentId(null)} aria-label="Fechar detalhes do agente">×</button>
-          </header>
-          <dl>
-            <dt>Identificador</dt><dd>{selectedAgent.id}</dd>
-            <dt>Instrumento</dt><dd>{selectedAgent.symbol}</dd>
-            <dt>Ambiente</dt><dd>{selectedAgent.floor === "xp" ? "XP / B3" : "Binance"}</dd>
-            <dt>Situação</dt><dd>{statusLine(selectedAgent, lastFor(selectedAgent, actions), b3, xpLive)}</dd>
-            <dt>Capital virtual</dt><dd>{brl(selectedAgent.equity)}</dd>
-          </dl>
-        </aside>
-      )}
+      {selectedAgent && <AgentDetail agent={selectedAgent} last={lastFor(selectedAgent, actions)} line={statusLine(selectedAgent, lastFor(selectedAgent, actions), b3, xpLive)}
+        style={phone ? undefined : place(AT.detail)} onClose={() => setSelectedAgentId(null)} />}
       {!loaded && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
       {failed && <p className="fl-3d-loading" role="alert">Imagem da sala indisponível. Os dados continuam nos painéis e na vista Realista.</p>}
     </div>
