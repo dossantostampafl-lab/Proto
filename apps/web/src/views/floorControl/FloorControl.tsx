@@ -300,6 +300,16 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const agents = useMemo(() => roster?.agents ?? [], [roster]);
   const selectedAgent = agents.find(agent => agent.id === selectedAgentId) ?? null;
   const b3 = b3Open(now);
+  // A cyan ripple at an agent when a real pipeline event arrives for its symbol (not on history).
+  const seen = useRef<number | null>(null);
+  const [pulse, setPulse] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const newest = actions.reduce((m, a) => Math.max(m, a.seq), -1);
+    if (seen.current === null) { seen.current = newest; return; }
+    const fresh = actions.filter(a => a.seq > (seen.current ?? -1) && a.symbol);
+    seen.current = Math.max(seen.current, newest);
+    if (fresh.length) setPulse(old => { const next = { ...old }; for (const a of fresh) next[a.symbol!] = a.seq; return next; });
+  }, [actions]);
   const busySymbols = useMemo(() => new Set(STATIONS.filter(s => active(s.id)).map(s => latest[s.id]?.symbol).filter((s): s is string => Boolean(s))), [active, latest]);
 
   // Size of the stage, and whether it is on screen with the tab visible (animation stops otherwise).
@@ -372,6 +382,16 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const xpLive = xp.state === "live";
   const [gx, gy] = at(room.layout.globe.center);
   const gr = room.layout.globe.radius * rect.h;
+  // The floor ring around the globe as the camera sees it: an ellipse through the rendered posts.
+  const hub = (() => {
+    const pts = (room.layout.ring ?? []).map(at);
+    if (pts.length < 8) return null;
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const l = Math.min(...xs), r = Math.max(...xs), t = Math.min(...ys), b = Math.max(...ys);
+    return { cx: (l + r) / 2, cy: (t + b) / 2, rx: (r - l) / 2, ry: (b - t) / 2 };
+  })();
+  // Points of light orbiting the globe's equator (decoration only; they carry no data).
+  const orbit = `M ${gx - gr * 1.55} ${gy + gr * 0.1} a ${gr * 1.55} ${gr * 0.38} 0 1 0 ${gr * 3.1} 0 a ${gr * 1.55} ${gr * 0.38} 0 1 0 ${-gr * 3.1} 0`;
   // Decorative glow must remain readable on narrower, wider-framed portrait renders.
   const glowSize = size.w <= 760 ? Math.max(140, gr * 2.6) : gr * 2.6;
   // The globe turns once every 30 s: two layers of the rendered sheet cross-fade between frames,
@@ -404,6 +424,13 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
         style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
       {spinBox && <><i ref={spinA} className="fc-globe-spin" aria-hidden="true" style={spinBox} /><i ref={spinB} className="fc-globe-spin" aria-hidden="true" style={{ ...spinBox, opacity: 0 }} /></>}
       <i className="fc-globe" aria-hidden="true" style={{ left: gx, top: gy, width: glowSize, height: glowSize }} />
+      <svg className="fc-fx" aria-hidden="true" width={size.w} height={size.h}>
+        {hub && <g className="fc-hub">
+          <ellipse className="fc-hub-dash" cx={hub.cx} cy={hub.cy} rx={hub.rx} ry={hub.ry} />
+          <ellipse className="fc-hub-wave" cx={hub.cx} cy={hub.cy} rx={hub.rx} ry={hub.ry} />
+        </g>}
+        {gr > 0 && Array.from({ length: 12 }, (_, k) => <circle key={k} className="fc-orbit" r={k % 3 ? 2 : 3.2} style={{ offsetPath: `path("${orbit}")`, animationDelay: `${(-k * 14) / 12}s` }} />)}
+      </svg>
       <svg className="fc-paths" aria-hidden="true" width={size.w} height={size.h}>
         {agents.map(a => {
           const spot = seatOf.get(a.id);
@@ -432,7 +459,8 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
         return (
           <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`}
             style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`, ["--bot-hue" as string]: `${50 + BOT_HUES[index % BOT_HUES.length]}`, ["--bot-size" as string]: `${h}px` }}>
-            <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0`, filter: a.status === "ACTIVE" ? `hue-rotate(${BOT_HUES[index % BOT_HUES.length]}deg) drop-shadow(0 4px 6px rgba(0,0,0,.55))` : "grayscale(1) brightness(.7)" }} />
+            {pulse[a.symbol] !== undefined && <span key={pulse[a.symbol]} className="fc-ripple" aria-hidden="true" />}
+            <i style={{ animationDelay: `${-index * 0.7}s`, width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0`, filter: a.status === "ACTIVE" ? `hue-rotate(${BOT_HUES[index % BOT_HUES.length]}deg) drop-shadow(0 4px 6px rgba(0,0,0,.55))` : "grayscale(1) brightness(.7)" }} />
             <button type="button" className="fc-tag" style={spot.below ? { top: 6 } : { bottom: h * 0.82 }} aria-pressed={selectedAgentId === a.id} aria-label={`Abrir agente ${a.name ?? a.id}`} onClick={() => setSelectedAgentId(a.id)}>
               <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>
               <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>

@@ -717,6 +717,23 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fc-globe { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; mix-blend-mode: screen; background: radial-gradient(circle, rgba(125, 211, 252, 0.34) 0%, rgba(56, 189, 248, 0.16) 38%, rgba(0, 0, 0, 0) 70%); animation: fc-pulse 3.2s ease-in-out infinite; }
 @keyframes fc-pulse { 0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(0.96); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.04); } }
 .fc-still .fc-globe { animation: none; }
+/* Living room: hub ring dashes turn and a light wave runs out, points of light orbit the globe,
+   robots breathe, and a ripple marks a real pipeline event on an agent's symbol. All of it stops
+   when the animation is paused or the system asks for reduced motion (.fc-still). */
+.fc-fx { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.fc-hub ellipse { fill: none; }
+.fc-hub-dash { stroke: rgba(125, 211, 252, 0.75); stroke-width: 2.5; stroke-dasharray: 14 22; filter: drop-shadow(0 0 4px #38bdf8); animation: fc-dash 24s linear infinite; }
+.fc-hub-wave { stroke: rgba(56, 189, 248, 0.6); stroke-width: 3; transform-box: fill-box; transform-origin: center; filter: drop-shadow(0 0 8px #38bdf8); animation: fc-wave 4.5s ease-out infinite; }
+@keyframes fc-dash { to { stroke-dashoffset: -720; } }
+@keyframes fc-wave { 0% { transform: scale(0.7); opacity: 0; } 15% { opacity: 0.9; } 100% { transform: scale(1.22); opacity: 0; } }
+.fc-orbit { fill: #bae6fd; filter: drop-shadow(0 0 4px #38bdf8); offset-rotate: 0deg; animation: fc-orbit 14s linear infinite; }
+@keyframes fc-orbit { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+.fc-bot > i { animation: fc-breathe 2.8s ease-in-out infinite; }
+@keyframes fc-breathe { 0%, 100% { margin-bottom: 0; } 50% { margin-bottom: 3px; } }
+.fc-ripple { position: absolute; left: 0; top: 0; width: calc(var(--bot-size, 40px) * 1.6); height: calc(var(--bot-size, 40px) * 0.56); border-radius: 50%; border: 3px solid #67e8f9; transform: translate(-50%, -50%) scale(0.4); opacity: 0; animation: fc-ripple 1.6s ease-out 2; pointer-events: none; }
+@keyframes fc-ripple { 0% { transform: translate(-50%, -50%) scale(0.4); opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1.8); opacity: 0; } }
+.fc-still .fc-hub-dash, .fc-still .fc-hub-wave, .fc-still .fc-orbit, .fc-still .fc-bot > i, .fc-still .fc-ripple { animation: none; }
+.fc-still .fc-hub-wave, .fc-still .fc-orbit { display: none; }
 .fc-globe-spin { position: absolute; pointer-events: none; background-repeat: no-repeat; background-position: 0 0; }
 .fc-paths { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .fc-paths line { stroke: #f59e0b; stroke-width: 2.5; stroke-dasharray: 7 6; filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.8)); }
