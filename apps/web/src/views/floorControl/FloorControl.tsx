@@ -1,5 +1,7 @@
 // "Controle": the mission-control view of the trading floor, the third view next to "Realista" and
-// "Prédio". Loaded on demand in its own chunk (FloorControl-*.js). Every number comes from the API:
+// "Prédio". Loaded on demand in its own chunk (FloorControl-*.js). The room is a pre-rendered image
+// (tools/render_control_room/render.py) with no people, text or numbers in it; robots, paths, tags
+// and every panel are drawn live over it at the anchors the renderer exported. Every number comes from the API:
 // GET /v1/floor/summary (orders and signals counted in the operational journal), the agent roster,
 // the OMS ledger and the live floor state. A missing source shows "—" and says so, never a guess.
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -7,7 +9,7 @@ import type { Shared } from "../../main";
 import { dataOf, finiteDecimal, isRecord, rec, type XpLane, useDeskFeed } from "../deskData";
 import { type FloorAction, type FloorState, STATIONS, type StationId } from "../floorModel";
 import { type Agent, brl, type Ledger, limitsOf, parseLedger, parseRoster } from "../floorBuilding/data";
-import { type Anchor, type ControlAgent, ControlEngine } from "./engine";
+import ANCHORS from "./anchors.json";
 
 const POLL = 10000;
 const LANE: Record<XpLane["state"], string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
@@ -138,18 +140,48 @@ function Queue({ actions, agents }: { actions: FloorAction[]; agents: Agent[] })
   );
 }
 
+type Pt = [number, number];
+type Layout = { seats: { floor: "binance" | "xp"; seat: Pt; hub: Pt; height: number }[]; globe: { center: Pt; radius: number } };
+const RENDERED = ANCHORS as Partial<Record<"landscape" | "portrait", Layout>>;
+const LANDSCAPE = { src: "floorcontrol/room.webp", aspect: 16 / 9, layout: RENDERED.landscape as Layout };
+const ROOMS = {
+  landscape: LANDSCAPE,
+  // Phones get their own render; until it exists they crop the landscape one.
+  portrait: RENDERED.portrait ? { src: "floorcontrol/room-portrait.webp", aspect: 9 / 16, layout: RENDERED.portrait } : LANDSCAPE,
+};
+const SPRITE = `${import.meta.env.BASE_URL}floorcontrol/robot.webp`;
+// The robot sprite frame is 2.6 m tall (orthographic scale); a robot stands 1.9 m in the anchors.
+const SPRITE_PER_HEIGHT = 2.6 / 1.9;
+
+/** Where the image lands inside the box with object-fit: cover. */
+function coverRect(w: number, h: number, aspect: number) {
+  const iw = w / h > aspect ? w : h * aspect, ih = iw / aspect;
+  return { x: (w - iw) / 2, y: (h - ih) / 2, w: iw, h: ih };
+}
+
+/** Which seat each agent takes: first free seat of its floor, in roster order (seats alternate sides). */
+function seatsFor(agents: Agent[], layout: Layout): Map<string, number> {
+  const out = new Map<string, number>();
+  const taken = new Set<number>();
+  for (const a of agents) {
+    const i = layout.seats.findIndex((s, j) => s.floor === a.floor && !taken.has(j));
+    if (i < 0) continue; // more agents than seats on this floor: the legend still lists them
+    taken.add(i); out.set(a.id, i);
+  }
+  return out;
+}
+
 export default function FloorControl({ market, state, stateFresh, actions, latest, active, xp }: {
   market: Shared["market"]; state: FloorState | null; stateFresh: boolean; actions: FloorAction[];
   latest: Partial<Record<StationId, FloorAction>>; active: (s: StationId) => boolean; xp: XpLane;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const engine = useRef<ControlEngine | null>(null);
-  const tags = useRef(new Map<string, HTMLElement>());
-  const [ready, setReady] = useState(false);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const reduced = useMemo(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   const [paused, setPaused] = useState(reduced);
+  const [running, setRunning] = useState(true);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = window.setInterval(() => setNow(new Date()), 30000); return () => window.clearInterval(t); }, []);
 
@@ -157,70 +189,97 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const ledger = dataOf(useDeskFeed("/v1/oms/ledger", parseLedger, POLL).state);
   const summaryFeed = useDeskFeed("/v1/floor/summary", parseSummary, POLL);
   const summary = dataOf(summaryFeed.state);
-  const agents = roster?.agents ?? [];
+  const agents = useMemo(() => roster?.agents ?? [], [roster]);
   const b3 = b3Open(now);
   const busySymbols = useMemo(() => new Set(STATIONS.filter(s => active(s.id)).map(s => latest[s.id]?.symbol).filter((s): s is string => Boolean(s))), [active, latest]);
-  const sceneAgents: ControlAgent[] = agents.map(a => ({ id: a.id, floor: a.floor, active: a.status === "ACTIVE", busy: busySymbols.has(a.symbol) }));
-  const sceneKey = JSON.stringify(sceneAgents);
 
+  // Size of the stage, and whether it is on screen with the tab visible (animation stops otherwise).
   useEffect(() => {
-    const el = canvasRef.current, box = wrap.current;
-    if (!el || !box) return;
-    let instance: ControlEngine;
-    try { instance = new ControlEngine(el, reduced); } catch { setFailed(true); return; }
-    engine.current = instance;
-    instance.onFirstFrame = () => setReady(true);
-    instance.onAnchors = (anchors: Record<string, Anchor>) => {
-      const width = box.clientWidth;
-      for (const [id, node] of tags.current) {
-        const a = anchors[id];
-        if (!a || !a.visible) { node.style.visibility = "hidden"; continue; }
-        // Keep the tag inside the room: a robot near the edge gets its tag nudged inwards.
-        const half = node.offsetWidth / 2 + 6;
-        const x = Math.min(Math.max(a.x, half), Math.max(half, width - half));
-        node.style.visibility = "visible";
-        node.style.transform = `translate(${x.toFixed(1)}px, ${a.y.toFixed(1)}px) translate(-50%, -100%)`;
-      }
-    };
-    const lost = (e: Event) => { e.preventDefault(); setFailed(true); };
-    el.addEventListener("webglcontextlost", lost);
-    const observer = new ResizeObserver(([entry]) => instance.resize(entry.contentRect.width, entry.contentRect.height));
+    const box = wrap.current;
+    if (!box) return;
+    const observer = new ResizeObserver(([entry]) => setSize({ w: entry.contentRect.width, h: entry.contentRect.height }));
     observer.observe(box);
     let onScreen = true;
-    const sync = () => instance.setRunning(onScreen && document.visibilityState === "visible");
+    const sync = () => setRunning(onScreen && document.visibilityState === "visible");
     const seen = new IntersectionObserver(([entry]) => { onScreen = entry.isIntersecting; sync(); });
     seen.observe(box);
     document.addEventListener("visibilitychange", sync);
-    let last: number | null = null;
-    const down = (e: PointerEvent) => { last = e.clientX; el.setPointerCapture(e.pointerId); };
-    const move = (e: PointerEvent) => { if (last !== null) { instance.orbit(e.clientX - last); last = e.clientX; } };
-    const up = () => { last = null; };
-    const wheel = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); instance.zoom(Math.exp(e.deltaY * 0.002)); } };
-    el.addEventListener("pointerdown", down); el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
-    el.addEventListener("wheel", wheel, { passive: false });
-    return () => {
-      observer.disconnect(); seen.disconnect();
-      document.removeEventListener("visibilitychange", sync);
-      el.removeEventListener("webglcontextlost", lost);
-      el.removeEventListener("pointerdown", down); el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
-      el.removeEventListener("wheel", wheel);
-      instance.dispose();
-      engine.current = null;
+    return () => { observer.disconnect(); seen.disconnect(); document.removeEventListener("visibilitychange", sync); };
+  }, []);
+
+  const room = size.w > 0 && size.w / Math.max(1, size.h) < 0.9 ? ROOMS.portrait : ROOMS.landscape;
+  const rect = coverRect(Math.max(1, size.w), Math.max(1, size.h), room.aspect);
+  const at = ([x, y]: Pt): Pt => [rect.x + x * rect.w, rect.y + y * rect.h];
+  const seatOf = useMemo(() => seatsFor(agents, room.layout), [agents, room]);
+  const animate = !paused && running;
+
+  // Walk progress per agent: 0 at its desk, 1 at the hub console. Busy agents walk out and back.
+  const [walk, setWalk] = useState<Record<string, number>>({});
+  const [frame, setFrame] = useState(0);
+  const busyKey = agents.map(a => `${a.id}:${a.status === "ACTIVE" && busySymbols.has(a.symbol) ? 1 : 0}`).join(",");
+  useEffect(() => {
+    const goal: Record<string, number> = {};
+    for (const a of agents) goal[a.id] = a.status === "ACTIVE" && busySymbols.has(a.symbol) ? 1 : 0;
+    if (!animate) { setWalk(goal); return; }
+    let raf = 0, last = performance.now(), tick = 0;
+    const step = (t: number) => {
+      const dt = Math.min(0.1, (t - last) / 1000); last = t;
+      tick += dt;
+      setWalk(old => {
+        const next: Record<string, number> = {};
+        for (const id of Object.keys(goal)) {
+          const cur = old[id] ?? 0, g = goal[id];
+          next[id] = g > cur ? Math.min(g, cur + dt * 0.22) : Math.max(g, cur - dt * 0.22);
+        }
+        return next;
+      });
+      setFrame(Math.floor(tick * 7) % 4);
+      raf = requestAnimationFrame(step);
     };
-  }, [reduced]);
-  useEffect(() => { engine.current?.setAgents(sceneAgents); }, [sceneKey, ready]);
-  useEffect(() => { engine.current?.setAnimate(!paused); }, [paused, ready]);
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busyKey, animate]);
 
   const mode = state == null ? "MODE UNAVAILABLE" : state.data_mode === "TESTNET" ? "TESTNET · NO REAL MONEY" : "PAPER / SIM · NO REAL MONEY";
   const date = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(now).toUpperCase();
-  const ref = (key: string) => (node: HTMLElement | null) => { if (node) tags.current.set(key, node); else tags.current.delete(key); };
   const xpLive = xp.state === "live";
+  const [gx, gy] = at(room.layout.globe.center);
+  const gr = room.layout.globe.radius * rect.h;
 
   return (
-    <div ref={wrap} className="fl-scene fc-scene" role="group" aria-label={`Controle do pregão: ${agents.length} agentes, ${summary ? `${summary.total} ordens executadas` : "totais indisponíveis"}`}>
-      <canvas ref={canvasRef} aria-hidden="true" />
+    <div ref={wrap} className={`fl-scene fc-scene${animate ? "" : " fc-still"}`} role="group" aria-label={`Controle do pregão: ${agents.length} agentes, ${summary ? `${summary.total} ordens executadas` : "totais indisponíveis"}`}>
+      <img className="fc-room" src={`${import.meta.env.BASE_URL}${room.src}`} alt="" aria-hidden="true" decoding="async"
+        style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+      <i className="fc-globe" aria-hidden="true" style={{ left: gx, top: gy, width: gr * 2.6, height: gr * 2.6 }} />
+      <svg className="fc-paths" aria-hidden="true" width={size.w} height={size.h}>
+        {agents.map(a => {
+          const i = seatOf.get(a.id);
+          if (i === undefined || !(a.status === "ACTIVE" && busySymbols.has(a.symbol))) return null;
+          const s = room.layout.seats[i], [x1, y1] = at(s.seat), [x2, y2] = at(s.hub);
+          return <g key={a.id}><line x1={x1} y1={y1} x2={x2} y2={y2} /><circle cx={x2} cy={y2} r={Math.max(6, s.height * rect.h * 0.22)} /></g>;
+        })}
+      </svg>
+      {agents.map(a => {
+        const i = seatOf.get(a.id);
+        if (i === undefined) return null;
+        const s = room.layout.seats[i], t = walk[a.id] ?? 0;
+        const [x1, y1] = at(s.seat), [x2, y2] = at(s.hub);
+        const x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
+        const h = s.height * rect.h * SPRITE_PER_HEIGHT;
+        const moving = t > 0 && t < 1;
+        const busy = busySymbols.has(a.symbol);
+        return (
+          <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`} style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)` }}>
+            <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0` }} />
+            <div className="fc-tag" style={{ bottom: h * 0.82 }}>
+              <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>
+              <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
+              <em>{brl(a.equity)} · capital virtual</em>
+            </div>
+          </div>
+        );
+      })}
       <header className="fc-head">
         <b>PROTO · CONTROLE</b>
         <ul aria-label="Data in this view">
@@ -235,18 +294,9 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
       </header>
       <Kpis summary={summary} ledger={ledger} />
       <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} />
-      <div className="fc-tags" aria-hidden="true">
-        {agents.map(a => (
-          <div key={a.id} ref={ref(a.id)} className={`fc-tag${a.status === "ACTIVE" ? "" : " out"}`}>
-            <b><i className={busySymbols.has(a.symbol) ? "busy" : ""} />{a.name ?? a.id}</b>
-            <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
-            <em>{brl(a.equity)} · capital virtual</em>
-          </div>
-        ))}
-      </div>
       <Queue actions={actions} agents={agents} />
-      {!ready && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
-      {failed && <p className="fl-3d-loading" role="alert">Controle 3D indisponível neste dispositivo (WebGL). Use a vista Realista.</p>}
+      {!loaded && !failed && <p className="fl-3d-loading" role="status">Carregando sala de controle…</p>}
+      {failed && <p className="fl-3d-loading" role="alert">Imagem da sala indisponível. Os dados continuam abaixo e na vista Realista.</p>}
     </div>
   );
 }

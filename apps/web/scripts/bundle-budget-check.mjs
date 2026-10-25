@@ -17,7 +17,9 @@ const MAX_FLOOR3D_JS_BYTES = 800 * 1024;
 const MAX_FLOOR3D_ASSET_BYTES = 3 * 1024 * 1024;
 const MAX_BUILDING_JS_BYTES = 150 * 1024;
 const MAX_CONTROL_JS_BYTES = 120 * 1024;
-const MAX_TOTAL_BYTES = MAX_INITIAL_BYTES + MAX_FLOOR3D_JS_BYTES + MAX_FLOOR3D_ASSET_BYTES + MAX_BUILDING_JS_BYTES + MAX_CONTROL_JS_BYTES;
+// The control room's rendered images and robot sprite (dist/floorcontrol/), fetched only by that view.
+const MAX_CONTROL_ASSET_BYTES = 1.4 * 1024 * 1024;
+const MAX_TOTAL_BYTES = MAX_INITIAL_BYTES + MAX_FLOOR3D_JS_BYTES + MAX_FLOOR3D_ASSET_BYTES + MAX_BUILDING_JS_BYTES + MAX_CONTROL_JS_BYTES + MAX_CONTROL_ASSET_BYTES;
 
 async function filesRecursively(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -36,7 +38,8 @@ const chunkOf = file => /^(Floor3D|Floor3DThree|Floor3DAssets)-[^.]*\.js$/.exec(
 const isFloorAsset = file => relative(DIST, file).split(sep)[0] === "floor3d";
 const isBuilding = file => /^FloorBuilding-[^.]*\.js$/.test(basename(file));
 const isControl = file => /^FloorControl-[^.]*\.js$/.test(basename(file));
-let total = 0, initial = 0, floor3dJs = 0, floor3dAssets = 0, buildingJs = 0, controlJs = 0;
+const isControlAsset = file => relative(DIST, file).split(sep)[0] === "floorcontrol";
+let total = 0, initial = 0, floor3dJs = 0, floor3dAssets = 0, buildingJs = 0, controlJs = 0, controlAssets = 0;
 const seen = new Set();
 for (const file of files) {
   const info = await stat(file);
@@ -57,6 +60,10 @@ for (const file of files) {
     assert.ok(info.size <= MAX_CONTROL_JS_BYTES, `${file} exceeds ${MAX_CONTROL_JS_BYTES} bytes`);
     assert.doesNotMatch(index, /FloorControl-/, "the control view must not be preloaded by index.html");
     assert.doesNotMatch(await readFile(file, "utf8"), /WebGLRenderer\.prototype|class WebGLRenderer/, "the control view reuses the Floor3DThree chunk, never a second copy of three.js");
+  } else if (isControlAsset(file)) {
+    controlAssets += info.size;
+    assert.ok(info.size <= 700 * 1024, `${file}: a single control-room image stays under 700 KB`);
+    assert.doesNotMatch(index, /floorcontrol\//, "the control-room images must not be preloaded by index.html");
   } else if (isFloorAsset(file)) {
     floor3dAssets += info.size;
     assert.ok(info.size <= 1024 * 1024, `${file}: a single 3D asset stays under 1 MB`);
@@ -73,8 +80,10 @@ assert.ok(buildingJs > 0, "the building view must emit its own FloorBuilding chu
 assert.ok(controlJs > 0, "the control view must emit its own FloorControl chunk");
 for (const chunk of Object.keys(FLOOR3D_JS)) assert.ok(seen.has(chunk), `the 3D floor must emit its ${chunk} chunk`);
 assert.ok(files.some(f => f.endsWith(`${sep}floor3d${sep}ASSETS.md`)), "3D assets must ship with their sources and licences (floor3d/ASSETS.md)");
+assert.ok(files.some(f => f.endsWith(`${sep}floorcontrol${sep}ASSETS.md`)), "control-room images must ship with their source (floorcontrol/ASSETS.md)");
+assert.ok(controlAssets <= MAX_CONTROL_ASSET_BYTES, `dist/floorcontrol totals ${controlAssets} bytes, over ${MAX_CONTROL_ASSET_BYTES}`);
 assert.ok(initial <= MAX_INITIAL_BYTES, `assets loaded up front total ${initial} bytes, over ${MAX_INITIAL_BYTES}`);
 assert.ok(floor3dJs <= MAX_FLOOR3D_JS_BYTES, `3D floor JS totals ${floor3dJs} bytes, over ${MAX_FLOOR3D_JS_BYTES}`);
 assert.ok(floor3dAssets <= MAX_FLOOR3D_ASSET_BYTES, `dist/floor3d totals ${floor3dAssets} bytes, over ${MAX_FLOOR3D_ASSET_BYTES}`);
 assert.ok(total <= MAX_TOTAL_BYTES, `dist totals ${total} bytes, over ${MAX_TOTAL_BYTES}`);
-console.log(`frontend bundle budget: ok (${initial} bytes up front, 3D floor JS ${floor3dJs} bytes, building JS ${buildingJs} bytes, 3D assets ${floor3dAssets} bytes, ${total} bytes across ${files.length} files)`);
+console.log(`frontend bundle budget: ok (${initial} bytes up front, 3D floor JS ${floor3dJs} bytes, building JS ${buildingJs} bytes, control images ${controlAssets} bytes, 3D assets ${floor3dAssets} bytes, ${total} bytes across ${files.length} files)`);
