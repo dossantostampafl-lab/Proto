@@ -184,6 +184,7 @@ const SPRITE = `${import.meta.env.BASE_URL}floorcontrol/robot.webp`;
 // The robot sprite frame is 2.6 m tall (orthographic scale); a robot stands 1.9 m in the anchors.
 // Robots are drawn twice their scale so they read at a glance, as in a control-room overview.
 const SPRITE_PER_HEIGHT = (2.6 / 1.9) * 2;
+const BOT_HUES = [0, 175, 85, 255, 40, 145];
 
 /** Where the image lands inside the box with object-fit: cover. */
 function coverRect(w: number, h: number, aspect: number) {
@@ -313,18 +314,18 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
           return <g key={a.id}><line x1={x1} y1={y1} x2={x2} y2={y2} /><circle cx={x2} cy={y2} r={Math.max(6, s.height * rect.h * 0.22)} /></g>;
         })}
       </svg>
-      {agents.map(a => {
+      {agents.map((a, index) => {
         const seat = seatOf.get(a.id);
         if (seat === undefined) return null;
         const s = room.layout.seats[seat.i], t = walk[a.id] ?? 0;
         const [x1, y1] = at(s.seat), [x2, y2] = at(s.hub);
         const x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
-        const h = s.height * rect.h * SPRITE_PER_HEIGHT;
+        const h = Math.min(84, Math.max(20, s.height * rect.h * SPRITE_PER_HEIGHT));
         const moving = t > 0 && t < 1;
         const busy = busySymbols.has(a.symbol);
         return (
           <div key={a.id} className={`fc-bot${a.status === "ACTIVE" ? "" : " out"}`} style={{ transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)` }}>
-            <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0` }} />
+            <i style={{ width: h, height: h, backgroundImage: `url(${SPRITE})`, backgroundPosition: `${((moving && animate ? frame : 0) * 100) / 3}% 0`, filter: a.status === "ACTIVE" ? `hue-rotate(${BOT_HUES[index % BOT_HUES.length]}deg) drop-shadow(0 4px 6px rgba(0,0,0,.55))` : "grayscale(1) brightness(.7)" }} />
             {seat.tag && <div className="fc-tag" style={{ bottom: h * 0.82 }}>
               <b><i className={busy ? "busy" : ""} />{a.name ?? a.id}</b>
               <small>{statusLine(a, lastFor(a, actions), b3, xpLive)}</small>
