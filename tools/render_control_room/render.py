@@ -337,6 +337,48 @@ def build_room(k: Kit) -> list[dict]:
         for y in (-17.5, -9.5, 7.5, 15.5):
             k.obj("cube", "amber", (side * 15.4, y, 0.05), (0.055, 5.5, 0.025))
 
+    # Two tiers of side galleries frame the central holographic room.  The raised
+    # desks are architectural details, not invented agents or API events.
+    # Keep each platform outside the hub (inner edge x=16.4) and preserve
+    # open walkways between the front and back sections.
+    for side in (-1, 1):
+        for gallery_y in (-12.3, 9.6):
+            deck_x, deck_length = side * 24.3, 9.0
+            k.obj("cube", "rim", (deck_x, gallery_y, 2.62), (15.8, deck_length, 0.34))
+            k.obj("cube", "console", (deck_x, gallery_y, 2.82), (15.3, deck_length - 0.3, 0.08))
+            # Thin glazed balustrade, a bright cyan cap and an amber step edge.
+            inner_x = side * 16.45
+            k.obj("cube", "glass", (inner_x, gallery_y, 3.26), (0.10, deck_length, 0.88))
+            k.obj("cube", "cyanSoft", (inner_x, gallery_y, 3.72), (0.13, deck_length, 0.065))
+            k.obj("cube", "amber", (deck_x, gallery_y - deck_length * 0.5, 2.83),
+                  (15.8, 0.09, 0.07))
+            # Console banks viewed from an elevated, oblique camera angle.
+            for col in range(5):
+                x = side * (18.35 + col * 2.65)
+                for row in (-1, 1):
+                    y = gallery_y + row * 1.5
+                    k.obj("cube", "desk", (x, y, 3.31), (2.20, 1.00, 0.12))
+                    k.obj("cube", "deskbody", (x, y, 3.10), (2.14, 0.92, 0.34))
+                    k.obj("cube", "black", (x, y + 0.18, 3.93), (1.70, 0.09, 0.69),
+                          (math.radians(-12), 0, 0))
+                    k.obj("plane", f"screen{(col + (row > 0) + (side > 0)) % 4}",
+                          (x, y + 0.10, 3.94), (1.60, 0.62, 1),
+                          (math.radians(75), 0, 0))
+                    k.obj("cube", "black", (x, y - 0.74, 3.22), (0.67, 0.54, 0.20))
+                    k.obj("cube", "black", (x, y - 1.03, 3.49), (0.67, 0.10, 0.68))
+            # Visible posts beneath the catwalk make the extra level read
+            # as architecture rather than floating screens.
+            for support_x in (side * 17.0, side * 31.4):
+                for support_y in (gallery_y - 3.9, gallery_y + 3.9):
+                    k.obj("cube", "rim", (support_x, support_y, 1.20),
+                          (0.24, 0.24, 2.4))
+            bpy.ops.object.light_add(type="AREA", location=(deck_x, gallery_y, 7.1))
+            gallery_light = bpy.context.active_object
+            gallery_light.data.shape = "RECTANGLE"
+            gallery_light.data.size, gallery_light.data.size_y = 13.5, 7.0
+            gallery_light.data.energy = 480
+            gallery_light.data.color = (0.66, 0.83, 1.0)
+
     # Hub: sunken well, rim, glowing rings, dashed ring, arc segments.
     k.obj("cyl64", "well", (0, 0, 0.005), (11.9, 11.9, 0.01))
     k.obj("cyl64", "rim", (0, 0, 0.12), (12.3, 12.3, 0.24))
