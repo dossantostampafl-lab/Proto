@@ -31,3 +31,10 @@ Five user-supplied screenshots in the conversation (24 October 2026) show a high
 7. Include before/after screenshots and test evidence in the implementation PR. Do not claim visual parity based on code checks alone.
 
 This document authorizes no deployment or merge by itself.
+
+## Frozen approved 16:9 mockup (25 October 2026)
+The user approved the subsequent PROTO preview image as-is and requested full implementation without further stylistic changes. This supersedes interpretation choices in earlier drafts. Maintain its spatial hierarchy: compact dark top status line; top-left large total card; top-center today's activity card; top-right sources card; enormous central cyan Earth enclosed by a glowing circular command hub; operator desks on left/right/rear tiers; the four floating agent markers; left-bottom agent list; right-bottom live activity list; full-width event queue footer.
+
+The reference image contains **illustrative, non-PROTO recruiting/application metrics**. Those values, platform names, agent names and activity strings MUST NOT be baked into the application or artwork. Preserve their **visual arrangement only**, mapping to existing PROTO orders/agents/venues/journal feeds. The mockup is a visual design approval, not authorization to report fake trades, market execution, or agent activity.
+
+Implementation source-of-truth: Blender scene geometry and exported anchors for background/sprite positions; React/CSS for all data and UI. A successful build alone does not prove equivalence to the approved preview. Verify against an actual browser screenshot before changing PR from draft to ready.
