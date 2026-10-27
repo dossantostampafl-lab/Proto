@@ -6,9 +6,10 @@ This document is the consolidated release-readiness snapshot for Proto. It descr
 
 Release candidates must preserve all of the following:
 
-- no broker/exchange credentials;
+- no real-money order routing: execution stays on paper, the Binance Spot testnet, the XP/B3 demo
+  account and the opt-in Alpaca US paper account, each order behind a Risk Permit consumed by the OMS;
+- testnet/demo/paper credentials only inside the isolated executor, never in the API, agents or prompts;
 - no wallets, custody, deposits or withdrawals;
-- no real-money order routing;
 - public live market functionality remains read-only;
 - prediction-market research remains isolated from wagering/gambling execution services;
 - API/UI safety surfaces continue to report real-money execution as disabled.

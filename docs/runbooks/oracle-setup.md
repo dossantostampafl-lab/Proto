@@ -287,8 +287,9 @@ To deploy new secrets without a new image, run `sudo proto-deploy --force` on th
 2. Run XP's installer, `xpmt5setup.exe`. Windows must show **Verified publisher: MetaQuotes Ltd.**
 3. Log in to the **demo** server first. Write down the server names (demo and real) and whether
    the account is *netting* or *hedge*. The account password stays on this VM.
-4. Leave **Algotrading** off until the MT5 bridge exists. The bridge is the narrow RPC on port
-   8200, and it is not built yet.
+4. Leave **Algotrading** off until the MT5 bridge runs. The bridge (`apps/mt5_bridge`) is the
+   narrow RPC on port 8200 and refuses any non-demo account. The supported free path keeps the
+   terminal and the bridge on your PC instead: `docs/runbooks/xp-node-on-pc.md`.
 
 ## Checks
 
