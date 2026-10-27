@@ -452,7 +452,8 @@ class Settings(BaseSettings):
         url = self.database_url.strip()
         return ":memory:" in url or url in {"sqlite://", "sqlite+aiosqlite://"}
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Validation errors must not echo inputs: a rejected (short) token would land in logs.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
 
 settings = Settings()

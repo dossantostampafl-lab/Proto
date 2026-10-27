@@ -264,13 +264,18 @@ async def operator_authentication_policy(request: Request, call_next) -> Respons
 async def operational_audit_policy(request: Request, call_next) -> Response:
     """Record completed state-changing commands without inspecting private bodies."""
     response = await call_next(request)
-    event_type = _OPERATIONAL_EVENTS.get(request.url.path) if request.method == "POST" else None
-    if event_type is not None:
+    command = _OPERATIONAL_EVENTS.get(request.url.path) if request.method == "POST" else None
+    if command is not None:
+        # A refused command (401, 409, 422, 503...) changed nothing. Journaling it under the
+        # command's own name recorded e.g. KILL_SWITCH_TRIGGERED for a request the operator
+        # check had turned away; the attempt stays audited under its own type.
+        rejected = response.status_code >= 400
         try:
             await record_operational_event(
-                event_type=event_type,
+                event_type="OPERATOR_COMMAND_REJECTED" if rejected else command,
                 source="proto-api",
                 payload={
+                    "command": command,
                     "method": request.method,
                     "path": request.url.path,
                     "status_code": response.status_code,

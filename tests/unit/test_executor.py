@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from apps.executor.main import create_app
-from apps.executor.runtime import Executor
+from apps.executor.runtime import Executor, ExecutorHalted
 from apps.executor.settings import ExecutorSettings
 from services.execution import OrderType, TimeInForce, TradeIntent, VenueId
 from services.risk import PermitSigner
@@ -146,6 +146,32 @@ def test_divergence_halts_until_the_venue_agrees_again(fake, db) -> None:
         fake.balances["USDT"] += Decimal("1")
         assert client.post("/v1/halt/release", headers=AUTH).json()["venue_halted"] is False
         assert client.post("/v1/orders", json=body(intent()), headers=AUTH).status_code == 200
+
+
+async def test_a_restart_never_releases_a_halt(fake, db) -> None:
+    """The watchdog's halt (venue still consistent) used to live in memory only: restarting the
+    process was an implicit release. It is stored with the ledger until an operator releases it."""
+
+    first = executor(fake, db)
+    await first.start()
+    assert await first.watchdog_halt("wd-1", ["daily_loss:USDT"]) is True
+    await first.stop()
+
+    second = executor(fake, db)
+    await second.start()
+    assert second.halted == "watchdog: daily_loss:USDT"
+    assert (await second.reconcile())["consistent"] is True  # consistent, yet still halted
+    trade = intent()
+    with pytest.raises(ExecutorHalted):
+        await second.submit(trade, SIGNER.issue(trade, now=datetime.now(UTC)))
+    assert any(e["event_type"] == "HALT_RESTORED" for e in second.events)
+    await second.release_halt()  # the operator's release is what clears it, durably
+    await second.stop()
+
+    third = executor(fake, db)
+    await third.start()
+    assert third.halted is None
+    await third.stop()
 
 
 async def test_restart_recovers_resting_orders_and_polling_applies_fills(fake, db) -> None:
@@ -322,3 +348,29 @@ def test_executor_with_a_public_key_accepts_only_risk_engine_signatures(fake, db
             "/v1/orders", json=body(other, signer.issue(other, now=datetime.now(UTC))), headers=AUTH
         )
         assert accepted.json()["order"]["status"] == "FILLED"
+
+
+def test_settings_errors_never_echo_a_secret() -> None:
+    """A too-short token must not appear in the ValidationError text (it is logged at start)."""
+
+    from apps.watchdog.settings import WatchdogSettings
+
+    short = "short-but-secret-value-XYZ"
+    with pytest.raises(ValidationError) as caught:
+        ExecutorSettings(api_token=short, permit_signing_key=KEY, symbols="BTCUSDT")
+    assert "api_token" in str(caught.value) and short not in str(caught.value)
+    with pytest.raises(ValidationError) as caught:
+        WatchdogSettings(api_url="http://api", api_token=short)
+    assert "api_token" in str(caught.value) and short not in str(caught.value)
+
+
+def test_open_orders_filter_lists_only_working_orders_untruncated(fake, db) -> None:
+    with TestClient(create_app(executor(fake, db))) as client:
+        trade = intent()
+        permit = SIGNER.issue(trade, now=datetime.now(UTC))
+        assert client.post("/v1/orders", json=body(trade, permit), headers=AUTH).status_code == 200
+        everything = client.get("/v1/orders?limit=500", headers=AUTH).json()
+        assert [o["status"] for o in everything["orders"]] == ["FILLED"]
+        assert "open_only" not in everything
+        working = client.get("/v1/orders?limit=500&open=true", headers=AUTH).json()
+        assert working["open_only"] is True and working["orders"] == []

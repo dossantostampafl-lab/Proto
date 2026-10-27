@@ -4,6 +4,7 @@ import asyncio
 import os
 from logging.config import fileConfig
 
+import sqlalchemy as sa
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -17,6 +18,8 @@ from services.agents.roster import roster_metadata
 from services.chatgpt.conversations import metadata as conversation_metadata
 from services.events import journal_metadata
 from services.oms import ledger_metadata
+from services.oms.ledger import ExactDecimal
+from services.orchestration import DecisionMemoryBase, OrchestrationBase
 from services.promotion import promotion_metadata
 from services.risk import control_metadata
 
@@ -34,12 +37,25 @@ target_metadata = [
     LiveBase.metadata,
     Base.metadata,
     canonical_metadata,
+    OrchestrationBase.metadata,
+    DecisionMemoryBase.metadata,
     journal_metadata,
     ledger_metadata,
     promotion_metadata,
     roster_metadata,
     control_metadata,
 ]
+
+
+def compare_type(_context, _inspected_column, _metadata_column, inspected_type, metadata_type):
+    """ExactDecimal is NUMERIC(38, 18) on PostgreSQL and text on SQLite, where a database built
+    by migration 0008 keeps NUMERIC: neither is drift. Every other type: Alembic's default."""
+
+    if isinstance(metadata_type, ExactDecimal):
+        if isinstance(inspected_type, sa.Numeric):
+            return (inspected_type.precision, inspected_type.scale) != (38, 18)
+        return not isinstance(inspected_type, sa.String)
+    return None
 
 
 def run_migrations_offline() -> None:
@@ -49,18 +65,36 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        compare_type=True,
+        compare_type=compare_type,
     )
 
     with context.begin_transaction():
         context.run_migrations()
 
 
+def _widen_version_table(connection: Connection) -> None:
+    """Alembic's default alembic_version.version_num is VARCHAR(32), but revision ids such as
+    0004_session_scoped_fill_idempotency are longer: on PostgreSQL the upgrade failed at 0004.
+    Create (or widen) the table first; Alembic then uses it as is. SQLite does not enforce it."""
+
+    if connection.dialect.name != "postgresql":
+        return
+    connection.exec_driver_sql(
+        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(64) NOT NULL, "
+        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+    )
+    connection.exec_driver_sql(
+        "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"
+    )
+    connection.commit()
+
+
 def do_run_migrations(connection: Connection) -> None:
+    _widen_version_table(connection)
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        compare_type=True,
+        compare_type=compare_type,
     )
 
     with context.begin_transaction():

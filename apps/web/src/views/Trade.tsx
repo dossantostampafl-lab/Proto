@@ -44,10 +44,18 @@ function NumberField({ label, value, onChange }: { label: string; value: string;
 }
 
 export function Trade({ market, markets, selected, select }: Shared) {
-  const paper = usePoll<Paper>("/paper/status").data;
-  const strategy = usePoll<StrategyStatus>("/v1/strategy/status").data;
-  const drill = usePoll<DrillReport>("/v1/drills/e2e/latest").data;
-  const portfolio = usePoll<Portfolio>("/v1/portfolio").data;
+  const paperPoll = usePoll<Paper>("/paper/status");
+  // A failed read is not a stopped engine: unknown reads "—" and orders stay disabled.
+  const paper = paperPoll.status === 200 ? paperPoll.data : null;
+  // Which venue the autonomous chain really uses, from the floor state (paper venue or the executor's testnet).
+  const floor = usePoll<{ data_mode?: string }>("/v1/floor/state", 15000);
+  const dataMode = floor.status === 200 ? floor.data?.data_mode : undefined;
+  const strategyPoll = usePoll<StrategyStatus>("/v1/strategy/status");
+  const strategy = strategyPoll.status === 200 ? strategyPoll.data : null;
+  const drillPoll = usePoll<DrillReport>("/v1/drills/e2e/latest");
+  const drill = drillPoll.status === 200 ? drillPoll.data : null;
+  const portfolioPoll = usePoll<Portfolio>("/v1/portfolio");
+  const portfolio = portfolioPoll.status === 200 ? portfolioPoll.data : null;
   const analytics = usePoll<Analytics>(`/live/analytics/${selected}`).data;
   const [qty, setQty] = useState("0.001");
 
@@ -71,15 +79,16 @@ export function Trade({ market, markets, selected, select }: Shared) {
       <Panel title="Paper engine" source="paper">
         <div className="grid4">
           <Stat label="Mode" value={paper?.mode ?? "—"} />
-          <Stat label="Engine" value={engineOn ? "RUNNING" : "STOPPED"} className={engineOn ? "up" : "warn"} />
-          <Stat label="Autopilot" value={paper?.autopilot_running ? "RUNNING" : "STOPPED"} />
+          <Stat label="Engine" value={!paper ? "—" : engineOn ? "RUNNING" : "STOPPED"} className={!paper ? "" : engineOn ? "up" : "warn"} />
+          <Stat label="Autopilot" value={!paper ? "—" : paper.autopilot_running ? "RUNNING" : "STOPPED"} />
           <Stat label="Kill switch" value={paper?.kill_switch ?? "—"} />
         </div>
         <div className="row">
-          <Button label="START PAPER" path="/paper/start" kind="primary" disabled={engineOn}>Start engine</Button>
-          <Button label="STOP PAPER" path="/paper/stop" disabled={!engineOn}>Stop engine</Button>
+          <Button label="START PAPER" path="/paper/start" kind="primary" disabled={!paper || engineOn}>Start engine</Button>
+          <Button label="STOP PAPER" path="/paper/stop" disabled={paper != null && !engineOn}>Stop engine</Button>
           <Button label="RESET SIMULATION" path="/simulation/reset">Reset session</Button>
         </div>
+        {paperPoll.status !== null && !paper && <p className="hint warn">PAPER ENGINE STATUS UNAVAILABLE · {paperPoll.status || "network error"}</p>}
       </Panel>
 
       <Panel title="Manual order" source="paper">
@@ -95,10 +104,10 @@ export function Trade({ market, markets, selected, select }: Shared) {
           <Button label={`BUY ${selected}`} path="/v1/simulate" body={order("BUY")} kind="buy" disabled={!canOrder}>Buy · paper</Button>
           <Button label={`SELL ${selected}`} path="/v1/simulate" body={order("SELL")} kind="sell" disabled={!canOrder}>Sell · paper</Button>
         </div>
-        {!canOrder && <p className="hint">{engineOn ? "Needs a live quote and a research market for this symbol." : "Start the paper engine to place orders."}</p>}
+        {!canOrder && <p className="hint">{!paper ? "Paper engine status unknown: orders stay disabled." : !engineOn ? "Start the paper engine to place orders." : !(quantity > 0) ? "Enter a quantity above zero." : "Needs a live quote and a research market for this symbol."}</p>}
       </Panel>
 
-      <Panel title="Autonomy" source="testnet">
+      <Panel title="Autonomy" source={dataMode === "TESTNET" ? "testnet" : dataMode ? "paper" : "unavailable"}>
         <ul className="floor-controls">
           <li><span>Own strategy</span><b className={strategy?.running ? "up" : "muted"}>{strategy == null ? "—" : strategy.running ? `on · ${strategy.strategy_id}` : "off"}</b></li>
           <li><span>Market source</span><b>{strategy?.market_source ?? "—"}</b></li>
@@ -111,11 +120,11 @@ export function Trade({ market, markets, selected, select }: Shared) {
             {drill.steps.map(s => <li key={s.step} className={s.ok ? "up" : "down"}>{s.ok ? "✓" : "✗"} {s.step}</li>)}
           </ol>
         )}
-        <p className="hint">Signals from TradingView and the own strategy go through the agents, a Risk Engine permit and the executor on the Binance testnet. No real money.</p>
+        <p className="hint">Signals from TradingView and the own strategy go through the agents, a Risk Engine permit and {dataMode === "TESTNET" ? "the executor on the Binance testnet" : dataMode ? "the paper venue" : "the configured venue (mode unavailable)"}. No real money.</p>
       </Panel>
 
       <Panel title="Positions" source="paper" className="wide">
-        <Positions positions={Array.isArray(portfolio?.positions) ? portfolio.positions : []} />
+        {portfolio ? <Positions positions={Array.isArray(portfolio.positions) ? portfolio.positions : []} /> : <Empty>{portfolioPoll.status === null ? "Reading the paper book…" : `PAPER BOOK UNAVAILABLE · ${portfolioPoll.status || "network error"}`}</Empty>}
       </Panel>
     </div>
   );

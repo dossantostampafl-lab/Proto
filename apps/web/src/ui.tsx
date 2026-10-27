@@ -24,8 +24,11 @@ export const CommandContext = createContext<Commander>({ busy: null, run: async 
 export const useCommand = () => useContext(CommandContext);
 
 // ---------- primitives ----------
-type Source = "live" | "research" | "paper" | "testnet";
-const SOURCE_LABEL: Record<Source, string> = { live: "LIVE PUBLIC", research: "SYNTHETIC RESEARCH", paper: "PAPER / SIM", testnet: "TESTNET · NO REAL MONEY" };
+type Source = "live" | "research" | "paper" | "testnet" | "unavailable";
+const SOURCE_LABEL: Record<Source, string> = {
+  live: "LIVE PUBLIC", research: "SYNTHETIC RESEARCH", paper: "PAPER / SIM",
+  testnet: "TESTNET · NO REAL MONEY", unavailable: "MODE UNAVAILABLE",
+};
 
 export function Tag({ source }: { source: Source }) {
   return <span className={`tag ${source}`}>{SOURCE_LABEL[source]}</span>;
@@ -41,8 +44,16 @@ export function Panel({ title, source, className = "", children, actions }: { ti
 }
 
 export function Stat({ label, value, className = "" }: { label: string; value: ReactNode; className?: string }) {
-  return <div className="stat"><span>{label}</span><b className={className}>{value}</b></div>;
+  // Long values are ellipsed; the full text stays reachable on hover.
+  const title = typeof value === "string" || typeof value === "number" ? String(value) : undefined;
+  return <div className="stat"><span>{label}</span><b className={className} title={title}>{value}</b></div>;
 }
+
+/** Whether a public market frame is recent enough to be called live (its own timestamp, 30 s). */
+export const freshFrame = (timestamp: string | undefined, maxMs = 30000) => {
+  const at = timestamp ? Date.parse(timestamp) : NaN;
+  return Number.isFinite(at) && Date.now() - at < maxMs;
+};
 
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;

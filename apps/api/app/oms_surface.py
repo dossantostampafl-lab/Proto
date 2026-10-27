@@ -19,6 +19,7 @@ venue credentials.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -29,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from services.execution import RiskPermit, TradeIntent, VenueId
 from services.execution.catalog import PAPER_INSTRUMENTS
 from services.execution.constitution import REFERENCE_CAPITAL, reference_capital_in
+from services.execution.contracts import TERMINAL_ORDER_STATUSES
 from services.execution.venue import PaperVenueAdapter
 from services.oms import (
     InMemoryCheckpoints,
@@ -341,6 +343,50 @@ def _marked_elsewhere(instrument, quote_asset: str, venue: VenueId) -> bool:
     )
 
 
+# Whether the Risk Engine's AccountState counts resting buys toward the position limit
+# (`open_buys`). Until it does, nothing is read for it and the account view is unchanged.
+_ACCOUNT_OPEN_BUYS = "open_buys" in {f.name for f in dataclasses.fields(AccountState)}
+
+
+class _OpenOrdersUnreadable(Exception):
+    """A working order whose instrument, side or quantities cannot be read."""
+
+
+async def _open_buys(venue: VenueId, quote_asset: str) -> dict[str, Decimal]:
+    """Base quantity of BUY orders still working at the venue, per instrument of `quote_asset`.
+
+    Every non-terminal order counts, UNKNOWN included: an order whose fate is unknown may still
+    fill. Raises ExecutorUnavailable/ExecutorRefused when the executor's orders cannot be read,
+    and _OpenOrdersUnreadable for a working order it cannot interpret (never guessed as none).
+    """
+
+    if executor_mode():
+        body = await _call_client(venue).orders(500, open_only=True)
+        rows = list(body.get("orders", []))
+        if not body.get("open_only") and len(rows) >= 500:
+            # An executor without the open-orders filter returns only its latest 500 orders: an
+            # older order still working could be missing, so the list is not trusted.
+            raise _OpenOrdersUnreadable("truncated order list")
+    else:
+        oms, _, _ = await components()
+        rows = [o.to_dict() for o in oms.orders]
+    instruments = {k for k, v in _instruments_of(venue).items() if v.quote_asset == quote_asset}
+    terminal = {status.value for status in TERMINAL_ORDER_STATUSES}
+    open_buys: dict[str, Decimal] = {}
+    for row in rows:
+        if row.get("status") in terminal:
+            continue
+        try:
+            instrument_id, side = row["instrument_id"], row["side"]
+            remaining = Decimal(str(row["quantity"])) - Decimal(str(row["filled_quantity"]))
+        except (KeyError, TypeError, ArithmeticError, ValueError) as exc:
+            raise _OpenOrdersUnreadable(str(row.get("client_order_id"))) from exc
+        if side != "BUY" or instrument_id not in instruments or remaining <= 0:
+            continue
+        open_buys[instrument_id] = open_buys.get(instrument_id, Decimal("0")) + remaining
+    return open_buys
+
+
 async def account_state(quote_asset: str) -> AccountState:
     """Conservative account view in one quote currency, marked at live mid prices.
 
@@ -395,6 +441,15 @@ async def account_state(quote_asset: str) -> AccountState:
             continue
         exposure += quantity * (quote.bid + quote.ask) / 2
 
+    pending: dict[str, object] = {}
+    if _ACCOUNT_OPEN_BUYS:
+        try:
+            pending["open_buys"] = await _open_buys(venue, quote_asset)
+        except (ExecutorUnavailable, ExecutorRefused, _OpenOrdersUnreadable) as exc:
+            # Resting buys unknown: block new risk like an unmarked holding.
+            logger.error("open orders unavailable: %s", type(exc).__name__)
+            marked = False
+
     today = datetime.now(UTC).date()
     key = _checkpoint_key(quote_asset, openings, venue)
     saved = await checkpoints.get(key)
@@ -407,6 +462,7 @@ async def account_state(quote_asset: str) -> AccountState:
             gross_exposure=Decimal("Infinity"),
             positions=positions,
             reference_capital=reference,
+            **pending,
         )
     equity = cash + exposure
     if day != today:
@@ -421,6 +477,7 @@ async def account_state(quote_asset: str) -> AccountState:
         gross_exposure=exposure,
         positions=positions,
         reference_capital=reference,
+        **pending,
     )
 
 
@@ -572,7 +629,13 @@ async def list_orders(limit: int = 50, venue: str = "BINANCE_SPOT") -> dict[str,
         }
     oms, _, _ = await components()
     orders = oms.orders[-max(1, min(limit, 500)) :]
-    return {"orders": [o.to_dict() for o in reversed(orders)], **_BOUNDARY}
+    return {
+        "orders": [o.to_dict() for o in reversed(orders)],
+        "venue": chosen.value,
+        # Same labels as the executor branch: these are the in-process paper venue's orders.
+        "execution_backend": "paper",
+        **_BOUNDARY,
+    }
 
 
 @router.get("/ledger")

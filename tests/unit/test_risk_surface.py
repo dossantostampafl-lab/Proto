@@ -136,6 +136,19 @@ def test_status_reports_constitution_and_never_real_money() -> None:
     assert status["constitution"]["max_gross_leverage"] == "1.0"
     assert status["policy"]["signing_key"] == "configured"
     assert status["real_money_execution"] is False
+    assert status["account_source"] == "PAPER"
+
+
+def test_status_names_the_testnet_executor_as_the_account_source(monkeypatch) -> None:
+    executor = Settings(
+        operator_api_token=TOKEN,
+        risk_permit_signing_key="s" * 32,
+        oms_execution_backend="executor",
+        executor_url="http://executor:8100",
+        executor_api_token="e" * 32,
+    )
+    monkeypatch.setattr(risk_surface, "settings", executor)
+    assert risk_surface.risk_status()["account_source"] == "TESTNET"
 
 
 def test_production_requires_a_strong_signing_key_when_set() -> None:

@@ -64,7 +64,7 @@ export class BuildingEngine {
   private goal = { target: v3(0, 6, 0), viewH: 34 };
   private width = 1; private height = 1;
   private running = false; private animate = true; private dirty = true; private raf = 0; private first = true;
-  private clock = new THREE.Clock();
+  private clock = new THREE.Timer(); // THREE.Clock is deprecated
   private known = new Set<string>(); private rosterSeen = false;
   private sign: THREE.Group;
   private core: THREE.Mesh;
@@ -491,7 +491,7 @@ export class BuildingEngine {
   setRunning(on: boolean) {
     if (on === this.running) return;
     this.running = on;
-    if (on) { this.clock.getDelta(); this.loop(); } else cancelAnimationFrame(this.raf);
+    if (on) { this.clock.update(); this.loop(); } else cancelAnimationFrame(this.raf);
   }
   resize(w: number, h: number) {
     this.width = Math.max(1, w); this.height = Math.max(1, h);
@@ -528,7 +528,7 @@ export class BuildingEngine {
   private loop = () => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(this.clock.getDelta(), 0.1);
+    this.clock.update(); const dt = Math.min(this.clock.getDelta(), 0.1);
     const moving = this.step(dt);
     if (moving || this.animate || this.dirty) this.render();
   };

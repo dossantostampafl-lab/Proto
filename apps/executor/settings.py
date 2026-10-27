@@ -13,7 +13,9 @@ _MIN_SECRET = 32
 
 
 class ExecutorSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="EXECUTOR_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EXECUTOR_", extra="ignore", hide_input_in_errors=True
+    )
 
     # Only the testnet until a live scope is certified (Phase 6).
     environment: VenueEnvironment = VenueEnvironment.TESTNET

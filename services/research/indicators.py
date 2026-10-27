@@ -137,13 +137,15 @@ def percentile_rank(values: Sequence[float], window: int) -> list[float]:
     out = [NAN] * len(values)
     ordered: list[float] = []
     for i, value in enumerate(values):
-        if math.isnan(value):
-            continue
-        insort(ordered, value)
+        # Drop the value leaving the window first, even when value[i] itself is NaN: skipping
+        # it would keep a stale value in the window for good after a NaN in the middle.
         if i >= window:
             old = values[i - window]
             if not math.isnan(old):
                 del ordered[bisect_left(ordered, old)]
+        if math.isnan(value):
+            continue
+        insort(ordered, value)
         if len(ordered) >= window:
             out[i] = bisect_right(ordered, value) / len(ordered)
     return out

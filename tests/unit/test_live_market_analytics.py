@@ -50,3 +50,12 @@ def test_live_market_analytics_require_one_symbol() -> None:
 
     with pytest.raises(ValueError):
         calculate_live_market_analytics([btc, eth])
+
+
+def test_live_market_analytics_refuse_a_zero_mid() -> None:
+    start = datetime(2026, 8, 29, tzinfo=UTC)
+    good = _tick(timestamp=start, bid=99.5, ask=100.5, sequence=1)
+    zero = _tick(timestamp=start + timedelta(seconds=1), bid=0.0, ask=0.0, sequence=2)
+
+    with pytest.raises(ValueError, match="finite and positive"):
+        calculate_live_market_analytics([good, zero])

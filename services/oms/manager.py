@@ -62,6 +62,9 @@ class ManagedOrder:
     filled_quantity: Decimal = Decimal("0")
     filled_notional: Decimal = Decimal("0")
     fee: Decimal = Decimal("0")
+    # The asset `fee` is denominated in. Binance charges a buy's fee in the base asset (BTC),
+    # so reading `fee` as quote overstated positions. None while no fee was charged.
+    fee_asset: str | None = None
     venue_order_id: str | None = None
     reason: str | None = None
     history: list[str] = field(default_factory=list)
@@ -80,6 +83,7 @@ class ManagedOrder:
                 str(self.filled_notional / self.filled_quantity) if self.filled_quantity else None
             ),
             "fee": str(self.fee),
+            "fee_asset": self.fee_asset,
             "reserved": str(self.reserved - self.released),
             "venue_order_id": self.venue_order_id,
             "reason": self.reason,
@@ -152,6 +156,11 @@ class OrderManager:
                 raise OrderRejected(f"permit_{exc.code}") from exc
             instrument = self._instruments.get(intent.instrument_id)
             if instrument is None or intent.limit_price is None:
+                # The permit is spent: journal the refusal like a permit rejection.
+                await self._record(
+                    "ORDER_REFUSED",
+                    {"intent_id": str(intent.intent_id), "reason": "unsupported_intent"},
+                )
                 raise OrderRejected("unsupported_intent")
 
             order = self._new_order(intent, instrument)
@@ -180,7 +189,13 @@ class OrderManager:
                     )
                 )
             except Exception as exc:  # timeout, network, venue outage
-                logger.warning("submit outcome unknown for %s: %s", order.client_order_id, exc)
+                # Type and venue only: a venue error's text can echo the request it refused.
+                logger.warning(
+                    "submit outcome unknown for %s on %s: %s",
+                    order.client_order_id,
+                    self._ledger.venue.value,
+                    type(exc).__name__,
+                )
                 self._set_status(order, OrderStatus.UNKNOWN, reason=type(exc).__name__)
                 await self._commit(order)
                 return order
@@ -255,7 +270,12 @@ class OrderManager:
             return []
         recovered: list[ManagedOrder] = []
         async with self._lock:
+            # The order store has no fee-asset column; the ledger's FEE entries know it.
+            fee_assets = getattr(self._ledger, "fee_assets", None)
+            charged_in = await fee_assets() if fee_assets is not None else {}
             for order in await self._store.load():
+                if order.fee > 0:
+                    order.fee_asset = charged_in.get(order.client_order_id)
                 self._register(order)
                 if order.status in TERMINAL_ORDER_STATUSES or order.status is OrderStatus.UNKNOWN:
                     continue
@@ -375,6 +395,7 @@ class OrderManager:
             # Binance may charge the fee in the base asset (or another one, e.g. BNB).
             fee_asset = report.fee_asset or quote
             batch.append(self._entry(order, LedgerEntryKind.FEE, fee_asset, -fee, now, mark))
+            order.fee_asset = fee_asset
         if release > 0:
             batch.append(
                 self._entry(

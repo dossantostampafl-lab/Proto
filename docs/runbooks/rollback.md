@@ -32,8 +32,11 @@ environment.
 
 - **Release:** roll the API (and, separately, the executor) back to the previous image tag or
   commit, and keep the watchdog running throughout; it does not depend on either's code.
-- **Migrations:** they are additive (new tables only), so older code runs on a newer schema. Do
-  not downgrade a production database; prefer a forward fix. Check `alembic history` first.
+- **Migrations:** all but `0003`, `0004` and `0011` only add tables (those three change existing
+  columns or constraints), so older code runs on a newer schema. Do not downgrade a production database; prefer a
+  forward fix. Check `alembic history` first. The Oracle deployment never runs Alembic: the API and
+  the executor create missing tables at startup (`create_all`), so their databases carry no
+  `alembic_version` and `alembic upgrade head` there fails on the first existing table.
 - **Verify** after rolling back: `GET /health`, `GET /v1/watchdog/status` (active),
   `GET /v1/floor/state` (journal `VALID`), and `POST /v1/oms/reconcile` (consistent).
 
@@ -48,3 +51,22 @@ curl -fsS -X POST "$API/v1/risk/killswitch" -H "$OP" -H 'Content-Type: applicati
 Stopping the executor process is safe: on restart it reloads the order book, marks open orders
 `UNKNOWN`, resolves them by querying the venue and reconciles before accepting orders
 (`RECOVERY_DRILL`). Keep its database; never delete it to "start clean".
+
+### SQLite ledgers of the XP and Alpaca executors (one-way change)
+
+The XP and Alpaca executors keep their ledgers in SQLite, and since the 2026-10-27 finalization
+they store amounts as exact text:
+- **Before the change:** amounts were NUMERIC, which SQLite rounds through float.
+- **PostgreSQL** (the Binance executor) keeps NUMERIC and is unaffected.
+
+The consequence is one-way:
+- **Older ledger, newer image:** the new image reads it.
+- **Newer ledger, older image:** a ledger that the new image created can **not** be read by an older
+  image (`TypeError: must be real number, not str`).
+
+To roll an XP or Alpaca executor back past this change:
+1. Halt it from the API, as above.
+2. Keep the volume as evidence. Rename it rather than deleting it.
+3. Start the older image on a fresh volume. It recovers and reconciles from the venue.
+
+The paper and demo accounts hold no real money, so the venue remains the source of truth.

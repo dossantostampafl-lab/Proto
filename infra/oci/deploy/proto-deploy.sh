@@ -141,16 +141,32 @@ ensure_alpaca_executor() {  # ensure_alpaca_executor <image id>
     podman rm -f "$name" >/dev/null 2>&1 || true
     return 0
   fi
+  # Fetch first: a key fixed in the Vault (new secret version) must reach the container. The
+  # container keeps the env it was created with, so it is recreated when that env changes.
+  if ! alpaca_ready; then
+    # A failed fetch (Vault hiccup) keeps a healthy container on this image; only a container
+    # that is not running, or runs an older image, is removed.
+    if [ "$(podman container inspect --format '{{.Image}}' "$name" 2>/dev/null)" = "$image" ] \
+      && [ "$(podman container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ]; then
+      return 0
+    fi
+    podman rm -f "$name" >/dev/null 2>&1 || true
+    return 0
+  fi
+  local envsum
+  envsum="$(cat /run/proto/executor-alpaca.env "$alpaca_conf" | sha256sum | cut -c1-16)"
   if [ "$(podman container inspect --format '{{.Image}}' "$name" 2>/dev/null)" = "$image" ] \
     && [ "$(podman container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ] \
+    && [ "$(podman container inspect --format '{{index .Config.Labels "proto.envsum"}}' "$name" 2>/dev/null)" = "$envsum" ] \
     && ! $force; then
     return 0
   fi
-  alpaca_ready || { podman rm -f "$name" >/dev/null 2>&1 || true; return 0; }
   port="$(alpaca_port)"
   firewall-cmd -q --add-port="${port}/tcp" >/dev/null 2>&1 || true
   podman rm -f "$name" >/dev/null 2>&1 || true
-  podman run -d --name "$name" --restart=always --network host \
+  # on-failure:5, not always: a refused key (401) stops after five tries instead of hammering
+  # Alpaca; the next deploy tick (every 5 min) recreates it and tries again.
+  podman run -d --name "$name" --restart=on-failure:5 --network host --label "proto.envsum=$envsum" \
     --env-file /run/proto/executor-alpaca.env -v "${name}:/data:U" \
     -e EXECUTOR_VENUE=ALPACA_US -e EXECUTOR_ENVIRONMENT=TESTNET -e EXECUTOR_ACCOUNT=main \
     -e "EXECUTOR_SYMBOLS=$(alpaca_value ALPACA_SYMBOLS SPY,QQQ)" \

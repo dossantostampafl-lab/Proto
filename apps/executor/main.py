@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from services.execution import RiskPermit, TradeIntent
+from services.execution.contracts import TERMINAL_ORDER_STATUSES
 from services.oms import OrderRejected
 
 from .runtime import Executor, ExecutorHalted
@@ -80,7 +81,9 @@ class WatchdogHalt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     watchdog_id: str = Field(min_length=1, max_length=40)
-    reasons: list[str] = Field(min_length=1, max_length=50)
+    reasons: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        min_length=1, max_length=50
+    )
 
 
 def create_app(executor: Executor | None = None) -> FastAPI:
@@ -126,7 +129,16 @@ def create_app(executor: Executor | None = None) -> FastAPI:
         }
 
     @app.get("/v1/orders")
-    async def orders(executor_: Authorized, limit: int = 50):
+    async def orders(executor_: Authorized, limit: int = 50, open: bool = False):
+        if open:
+            # Every order still working, however old: the API's position-risk check must see all
+            # of them, so this list is never truncated (it is bounded by the venue's open orders).
+            rows = [o for o in executor_._oms().orders if o.status not in TERMINAL_ORDER_STATUSES]
+            return {
+                "orders": [o.to_dict() for o in reversed(rows)],
+                "open_only": True,
+                **_boundary(executor_),
+            }
         rows = executor_._oms().orders[-max(1, min(limit, 500)) :]
         return {"orders": [o.to_dict() for o in reversed(rows)], **_boundary(executor_)}
 
@@ -194,7 +206,7 @@ def create_app(executor: Executor | None = None) -> FastAPI:
 
     @app.post("/v1/watchdog/halt")
     async def watchdog_halt(body: WatchdogHalt, executor_: Watchdog):
-        changed = executor_.watchdog_halt(body.watchdog_id, body.reasons)
+        changed = await executor_.watchdog_halt(body.watchdog_id, body.reasons)
         return {"halted": executor_.halted, "already_halted": not changed, **_boundary(executor_)}
 
     @app.get("/v1/events")

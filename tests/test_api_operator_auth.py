@@ -48,3 +48,22 @@ def test_creation_bridge_keeps_independent_authentication(monkeypatch) -> None:
         and response.json().get("detail") == "Operator identity was not verified"
     )
     assert not operator_rejection
+
+
+def test_a_refused_command_is_not_journaled_as_executed(monkeypatch) -> None:
+    from apps.api.app.event_state import operational_journal
+
+    token = "o" * 32
+    monkeypatch.setattr(settings, "operator_api_token", token, raising=False)
+    with TestClient(app) as client:
+        refused = client.post("/killswitch/trigger")
+        [rejected] = operational_journal.journal.recent(1)
+        accepted = client.post("/killswitch/reset", headers={"X-Proto-Operator-Token": token})
+        [recorded] = operational_journal.journal.recent(1)
+    assert refused.status_code == 401
+    assert rejected.event_type == "OPERATOR_COMMAND_REJECTED"
+    assert rejected.payload["command"] == "KILL_SWITCH_TRIGGERED"
+    assert rejected.payload["status_code"] == 401
+    assert accepted.status_code == 200
+    assert recorded.event_type == "KILL_SWITCH_RESET"
+    assert recorded.payload["command"] == "KILL_SWITCH_RESET"

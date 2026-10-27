@@ -240,6 +240,85 @@ def test_credentials_come_from_the_shared_loader() -> None:
     assert loaded.api_key == KEY_ID and loaded.venue is VenueId.ALPACA_US
 
 
+# ---------- start-up 401 (production symptom): every code-side cause, pinned ----------
+
+ENV_KEY = "PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_KEY"
+ENV_SECRET = "PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_SECRET"
+
+
+async def test_the_vault_env_file_reaches_alpaca_byte_for_byte(tmp_path) -> None:
+    """The deploy's env file (VAR=value, maybe pasted with CR/LF or spaces) through the loader
+    and the executor's own factory: exact header names, values, host and path, nothing else."""
+
+    seen: list[httpx.Request] = []
+    fake = FakeAlpaca()
+
+    def spy(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return fake.handler(request)
+
+    env = {ENV_KEY: f"  {KEY_ID}\r\n", ENV_SECRET: f"{SECRET} \n"}
+    credentials = load_credentials(VenueId.ALPACA_US, VenueEnvironment.TESTNET, "main", env=env)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(spy))
+    venue = await AlpacaPaperAdapter.connect(credentials, symbols=["SPY"], client=client)
+    first = seen[0]
+    assert (first.method, str(first.url)) == ("GET", "https://paper-api.alpaca.markets/v2/account")
+    assert first.headers.raw.count((b"APCA-API-KEY-ID", KEY_ID.encode())) == 1
+    assert first.headers.raw.count((b"APCA-API-SECRET-KEY", SECRET.encode())) == 1
+    assert "authorization" not in first.headers  # no Bearer/Basic that Alpaca would weigh
+    await venue.aclose()
+    # The same through the `_FILE` form (tmpfs), with a trailing newline as `echo` writes it.
+    (tmp_path / "k").write_text(KEY_ID + "\n")
+    (tmp_path / "s").write_text(SECRET + "\n")
+    files = {f"{ENV_KEY}_FILE": str(tmp_path / "k"), f"{ENV_SECRET}_FILE": str(tmp_path / "s")}
+    loaded = load_credentials(VenueId.ALPACA_US, VenueEnvironment.TESTNET, "main", env=files)
+    assert (loaded.api_key, loaded.api_secret) == (KEY_ID, SECRET)
+
+
+@pytest.mark.parametrize(
+    "bad", [f'"{KEY_ID}"', f"'{KEY_ID}'", f"{KEY_ID} {SECRET}", f"​{KEY_ID}", "PK\tX"]
+)
+def test_a_malformed_value_is_refused_by_name_never_sent(bad) -> None:
+    env = {ENV_KEY: bad, ENV_SECRET: SECRET}
+    with pytest.raises(Exception, match=ENV_KEY) as caught:
+        load_credentials(VenueId.ALPACA_US, VenueEnvironment.TESTNET, "main", env=env)
+    assert KEY_ID not in str(caught.value) and SECRET not in str(caught.value)
+
+
+def test_a_live_or_swapped_key_pair_is_refused_before_any_request() -> None:
+    live = VenueCredentials(
+        venue=VenueId.ALPACA_US,
+        environment=VenueEnvironment.TESTNET,
+        account="main",
+        api_key="AKLIVEKEYID000000000",
+        api_secret=SECRET,
+    )
+    with pytest.raises(ValueError, match="LIVE Alpaca key id"):
+        AlpacaPaperAdapter(live, instruments={})
+    swapped = VenueCredentials(
+        venue=VenueId.ALPACA_US,
+        environment=VenueEnvironment.TESTNET,
+        account="main",
+        api_key=SECRET,
+        api_secret=KEY_ID,
+    )
+    with pytest.raises(ValueError, match="swapped"):
+        AlpacaPaperAdapter(swapped, instruments={})
+
+
+async def test_a_refused_key_at_start_says_what_to_check_without_the_key() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"message": "unauthorized."})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(refuse))
+    with pytest.raises(alpaca.AlpacaRefused) as caught:
+        await AlpacaPaperAdapter.connect(creds(), symbols=["SPY"], client=client)
+    message = str(caught.value)
+    assert caught.value.status == 401 and message.startswith("alpaca 401: unauthorized.")
+    assert ENV_KEY in message and "PAPER" in message
+    assert KEY_ID not in message and SECRET not in message
+
+
 # ---------- market clock (fail closed) ----------
 
 

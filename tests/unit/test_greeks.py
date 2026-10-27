@@ -28,3 +28,20 @@ def test_synthetic_greeks_reject_invalid_bump() -> None:
         assert "bump_size" in str(error)
     else:
         raise AssertionError("expected invalid bump_size to fail")
+
+
+def test_synthetic_greeks_reject_inputs_outside_the_model_domain() -> None:
+    import math
+
+    import pytest
+
+    for kwargs in (
+        {"volatility": -1e-4},  # used to collapse the vega bump to zero width
+        {"volatility": math.nan},
+        {"market_probability": 1.5},
+        {"market_probability": math.inf},
+        {"imbalance": 2.0},
+    ):
+        values = {"market_probability": 0.5, "volatility": 0.2, "imbalance": 0.0, **kwargs}
+        with pytest.raises(ValueError):
+            calculate_synthetic_greeks(**values)

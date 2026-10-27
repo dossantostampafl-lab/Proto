@@ -8,6 +8,7 @@ It fails closed:
 - every permit is verified (signature, fingerprint, expiry) and spent durably;
 - a reconciliation divergence halts new orders until an operator releases it,
   and the release itself is refused while the divergence still holds;
+- a halt (divergence or watchdog) is stored with the ledger, so a restart never releases it;
 - on start it recovers the persisted book and reconciles before taking orders;
 - a real-money adapter is refused outright.
 """
@@ -23,6 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from sqlalchemy import Column, MetaData, String, Table, delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from services.execution import ReleaseStage, RiskPermit, TradeIntent, VenueId
@@ -55,6 +57,18 @@ AdapterFactory = Callable[
 
 class ExecutorHalted(RuntimeError):
     pass
+
+
+# The executor's own halt latch, next to its ledger. One row per account while halted; only an
+# operator release (refused while diverged) deletes it, so a restart cannot act as a release.
+halt_metadata = MetaData()
+executor_halts = Table(
+    "executor_halts",
+    halt_metadata,
+    Column("account_id", String(120), primary_key=True),
+    Column("reason", String(300), nullable=False),
+    Column("halted_at", String(40), nullable=False),
+)
 
 
 async def binance_adapter(settings: ExecutorSettings) -> BinanceSpotAdapter:
@@ -148,6 +162,18 @@ class Executor:
         self._engine = engine
         async with engine.begin() as connection:
             await connection.run_sync(ledger_metadata.create_all)
+            await connection.run_sync(halt_metadata.create_all)
+            saved = (
+                await connection.execute(
+                    select(executor_halts.c.reason).where(
+                        executor_halts.c.account_id == self.settings.account_id
+                    )
+                )
+            ).scalar_one_or_none()
+        if saved is not None:
+            self.halted = saved
+            self._event("HALT_RESTORED", {"reason": saved})
+            logger.error("executor starts halted (persisted): %s", saved)
         account_id = self.settings.account_id
         ledger = SqlLedger(engine, account_id=account_id, venue=self.venue)
         if not await ledger.balances():
@@ -247,7 +273,7 @@ class Executor:
             self.last_consistent = not divergences
             self.last_divergences = [d.to_dict() for d in divergences]
             if divergences and self.halted is None:
-                self.halted = "reconciliation divergence"
+                await self._latch("reconciliation divergence")
                 self._event(
                     "RECONCILIATION_DIVERGENCE",
                     {"divergences": [d.to_dict() for d in divergences]},
@@ -260,12 +286,12 @@ class Executor:
                 "venue_halted": self.halted is not None,
             }
 
-    def watchdog_halt(self, watchdog_id: str, reasons: list[str]) -> bool:
+    async def watchdog_halt(self, watchdog_id: str, reasons: list[str]) -> bool:
         """Stop accepting orders. Returns False when already halted; never releases."""
 
         if self.halted is not None:
             return False
-        self.halted = f"watchdog: {', '.join(reasons)[:200]}"
+        await self._latch(f"watchdog: {', '.join(reasons)[:200]}")
         self._event("WATCHDOG_HALT", {"watchdog_id": watchdog_id, "reasons": reasons})
         logger.error("executor halted by the watchdog: %s", reasons)
         return True
@@ -289,9 +315,39 @@ class Executor:
         )
         if divergences:
             raise ExecutorHalted("still diverged from the venue")
+        if self._engine is not None:
+            async with self._engine.begin() as connection:
+                await connection.execute(
+                    delete(executor_halts).where(
+                        executor_halts.c.account_id == self.settings.account_id
+                    )
+                )
         self.halted = None
         self._event("HALT_RELEASED", {})
         return await self.reconcile()
+
+    async def _latch(self, reason: str) -> None:
+        """Halt now, in memory first (orders stop even if the write fails), then durably."""
+
+        self.halted = reason
+        if self._engine is None:
+            return
+        try:
+            async with self._engine.begin() as connection:
+                await connection.execute(
+                    delete(executor_halts).where(
+                        executor_halts.c.account_id == self.settings.account_id
+                    )
+                )
+                await connection.execute(
+                    insert(executor_halts).values(
+                        account_id=self.settings.account_id,
+                        reason=reason[:300],
+                        halted_at=self._clock().isoformat(),
+                    )
+                )
+        except Exception:  # the in-memory halt stands; a restart re-reconciles before orders
+            logger.exception("could not persist the executor halt")
 
     # --- audit -------------------------------------------------------------------
 

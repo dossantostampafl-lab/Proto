@@ -20,6 +20,7 @@ never enter live unless their bars are warmed with real klines.
 from __future__ import annotations
 
 import json
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -86,12 +87,25 @@ class LabSignalStrategy:
         return self._books.setdefault(instrument_id, _Book(bars=deque(maxlen=self.history)))
 
     def warm(self, instrument_id: str, bars: list[Bar]) -> None:
-        """Seed history with closed klines (e.g. public market data) so signals start sooner."""
+        """Seed history with closed klines (e.g. public market data) so signals start sooner.
 
-        self._book(instrument_id).bars.extend(bars[-self.history :])
+        Only bars older than what the book already holds (and than the bar still forming) are
+        taken, each open time once and in order, so a late or repeated warm-up never duplicates
+        or reorders history.
+        """
+
+        book = self._book(instrument_id)
+        cutoff = min(
+            ([book.bars[0].open_time] if book.bars else [])
+            + ([int(book.bar_start.timestamp() * 1000)] if book.bar_start else []),
+            default=None,
+        )
+        older = {b.open_time: b for b in bars if cutoff is None or b.open_time < cutoff}
+        merged = [older[t] for t in sorted(older)] + list(book.bars)
+        book.bars = deque(merged[-self.history :], maxlen=self.history)
 
     def observe(self, instrument_id: str, mid: float, at: datetime) -> Signal | None:
-        if not mid > 0:
+        if not (math.isfinite(mid) and mid > 0):
             return None
         book = self._book(instrument_id)
         start = _floor(at, self.bar)
@@ -108,7 +122,14 @@ class LabSignalStrategy:
                 0.0,
             )
             book.bars.append(closed)
-            signal = self._on_close(instrument_id, book, at, mid)
+            if start - book.bar_start == self.bar:
+                signal = self._on_close(instrument_id, book, at, mid)
+            elif book.holding:
+                # The feed skipped at least one bar: the bar that just closed is old news for an
+                # entry, but a holding still runs its exit rule and bar limit (only exits come out
+                # of _on_close while holding).
+                signal = self._on_close(instrument_id, book, at, mid)
+            # Flat after a gap: the old bar decides nothing.
             book.bar_start, book.open, book.high, book.low = start, mid, mid, mid
         book.high, book.low, book.last = max(book.high, mid), min(book.low, mid), mid
         if signal is None and book.holding and (mid <= book.stop or mid >= book.target):

@@ -2,8 +2,11 @@
 
 Research terminal for deterministic market simulation, paper trading, and historical replay.
 
-> Safety boundary: Proto never routes live orders and does not accept broker/exchange
-> credentials, deposits, withdrawals, custody, leverage, or real-money execution.
+> Safety boundary: Proto never routes real-money orders. Execution is limited to paper, the
+> Binance Spot **testnet**, the XP/B3 **demo** account and (opt-in) the Alpaca US **paper** account,
+> always through a Risk Permit consumed by the OMS. Testnet/demo/paper credentials live only in the
+> isolated executor (`apps/executor`), never in the API. Deposits, withdrawals, custody, leverage
+> above 1.0x and changes to the constitutional limits are outside the system (`AGENTS.md`).
 
 ## Quick start
 
@@ -19,7 +22,7 @@ In another terminal:
 
 ```bash
 cd apps/web
-npm install
+npm ci
 npm run dev
 ```
 
@@ -52,21 +55,12 @@ Core research/simulation routes live in `apps/api/app/core_routes.py`; everythin
 
 ## Deploy (Oracle Cloud)
 
-The root `Dockerfile` builds the dashboard and the API into one image. On an Oracle Cloud compute instance:
-
-```bash
-docker build -t proto .
-docker run -d --restart unless-stopped -p 8000:8000 \
-  -e PUBLIC_ORIGIN=https://<your-domain> \
-  -e OPERATOR_API_TOKEN=<32+ char secret> \
-  -e DATABASE_URL=postgresql+asyncpg://... \
-  proto
-```
-
-`PUBLIC_ORIGIN` allows the dashboard's WebSocket origin; `OPERATOR_API_TOKEN` is required for every
-state-changing command in production (enter it once in System → Operator). Optional build provenance:
-`PROTO_GIT_COMMIT_SHA`, `PROTO_GIT_BRANCH`, `PROTO_DEPLOYMENT_ID`, `PROTO_ENVIRONMENT`. Put TLS in front
-(Oracle Load Balancer or a reverse proxy) and open only 443 in the security list.
+The root `Dockerfile` builds the dashboard and the API into one image. Deploys are pull-based: the
+`Deploy` workflow only publishes `ghcr.io/<owner>/proto:stable` after a green CI run on `main`, and
+moves the executor's `:executor` tag only after an operator approves the `executor` environment.
+Each Oracle instance pulls its own tag on a timer, reads its secrets from OCI Vault into tmpfs and
+rolls back to the last healthy image on a failed health check. Setup, secrets and checks:
+[docs/runbooks/oracle-setup.md](docs/runbooks/oracle-setup.md).
 
 ## Safety modes
 
