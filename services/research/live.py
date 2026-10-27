@@ -124,8 +124,12 @@ class LabSignalStrategy:
             book.bars.append(closed)
             if start - book.bar_start == self.bar:
                 signal = self._on_close(instrument_id, book, at, mid)
-            # Otherwise the feed skipped at least one bar: the bar that just closed is old news
-            # and decides nothing (stops and targets below still protect a holding).
+            elif book.holding:
+                # The feed skipped at least one bar: the bar that just closed is old news for an
+                # entry, but a holding still runs its exit rule and bar limit (only exits come out
+                # of _on_close while holding).
+                signal = self._on_close(instrument_id, book, at, mid)
+            # Flat after a gap: the old bar decides nothing.
             book.bar_start, book.open, book.high, book.low = start, mid, mid, mid
         book.high, book.low, book.last = max(book.high, mid), min(book.low, mid), mid
         if signal is None and book.holding and (mid <= book.stop or mid >= book.target):

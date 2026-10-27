@@ -95,9 +95,13 @@ class EmaCrossStrategy:
                 signal = self._evaluate(instrument_id, book, at)
             else:
                 # The feed skipped at least one bar (outage, stale quotes, a closed session):
-                # the bar that just closed is old news, so it emits nothing and any pending
-                # cross is dropped rather than confirmed across the gap.
+                # a pending cross is not confirmed across the gap and no entry (LONG) comes out of
+                # the old bar, but a bearish cross still exits (SHORT only reduces exposure).
                 book.armed = None
+                exit_signal = self._evaluate(instrument_id, book, at)
+                book.armed = None
+                if exit_signal is not None and exit_signal.direction is SignalDirection.SHORT:
+                    signal = exit_signal
         book.last_mid = mid
         return signal
 

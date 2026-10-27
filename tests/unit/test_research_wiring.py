@@ -172,3 +172,17 @@ def test_lab_strategies_refuse_to_start_without_the_warm_up() -> None:
         Settings(agent_lab_strategies_enabled=True)
     assert Settings(agent_lab_strategies_enabled=True, agent_lab_warmup_klines=True)
     assert Settings(agent_lab_warmup_klines=True)  # warm-up alone changes nothing
+
+
+def test_live_adapter_still_exits_a_holding_on_a_bar_closed_after_a_feed_gap() -> None:
+    lab = LabSignalStrategy(SPEC, timeframe_minutes=1)
+    price = _rising(lab, 6) * 1.01
+    entry = lab.observe(BTC, price, START + timedelta(minutes=6, seconds=30))
+    assert entry is not None and entry.direction is SignalDirection.LONG
+    for minute in (7, 8, 9):  # a slow fall that stays above the stop
+        price *= 0.997
+        assert lab.observe(BTC, price, START + timedelta(minutes=minute, seconds=30)) is None
+    # The quotes stop for half an hour: the momentum exit still fires on the late bar.
+    late = lab.observe(BTC, price, START + timedelta(minutes=40, seconds=30))
+    assert late is not None and late.direction is SignalDirection.SHORT
+    assert lab.status()[BTC]["holding"] is False

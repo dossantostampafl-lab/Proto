@@ -212,3 +212,17 @@ def test_the_image_turns_the_loop_on_and_reads_binance_quotes() -> None:
     ):
         assert line in dockerfile
     assert "REAL_MONEY" not in dockerfile and "LIVE_TRADING" not in dockerfile
+
+
+def test_a_bearish_cross_on_the_bar_closed_after_a_gap_still_exits() -> None:
+    """Across a feed gap no entry is confirmed, but an exit (SHORT only reduces) still comes out."""
+
+    policy = EmaCrossPolicy(cooldown=timedelta(0))
+    prices = [100.0] * 25 + [100 + i * 0.05 for i in range(1, 11)] + [95.0]
+    contiguous = feed(EmaCrossStrategy(policy=policy), prices + [95.0])
+    assert [s.direction for s in contiguous] == [SignalDirection.LONG, SignalDirection.SHORT]
+    gapped = EmaCrossStrategy(policy=policy)
+    feed(gapped, prices)
+    late = T0 + timedelta(minutes=len(prices) + 30, seconds=30)  # quotes stopped for 30 min
+    exit_ = gapped.observe(BTC, 95.0, late)
+    assert exit_ is not None and exit_.direction is SignalDirection.SHORT
