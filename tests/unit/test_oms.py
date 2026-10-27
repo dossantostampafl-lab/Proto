@@ -317,6 +317,37 @@ async def test_ledger_balances_reservations_and_idempotency(ledger) -> None:
     assert (await ledger.balances())["USDT"].reserved == Decimal("600")
 
 
+async def test_amounts_survive_storage_exactly(ledger) -> None:
+    # SQLite's NUMERIC goes through float: 0.3 came back as 0.29999999999999998889..., so a
+    # reservation of the whole balance was refused as "insufficient available".
+    await ledger.post([entry(LedgerEntryKind.OPENING_BALANCE, "BTC", "0.3")])
+    await ledger.post([entry(LedgerEntryKind.RESERVATION, "BTC", "-0.3")])
+    await ledger.post([entry(LedgerEntryKind.OPENING_BALANCE, "BRL", "12345.678901234567891234")])
+    balances = await ledger.balances()
+    assert balances["BTC"].total == Decimal("0.3")
+    assert balances["BTC"].available == Decimal("0")
+    assert balances["BRL"].total == Decimal("12345.678901234567891234")
+
+
+async def test_sqlite_ledger_created_with_numeric_column_reads_amounts_exactly() -> None:
+    # Databases created by migration 0008 (or before ExactDecimal) keep a NUMERIC column.
+    from sqlalchemy import MetaData, Numeric
+
+    from services.oms.ledger import ledger_table
+
+    legacy = MetaData()
+    table = ledger_table.to_metadata(legacy)
+    table.c.amount.type = Numeric(38, 18)
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(legacy.create_all)
+    sql = SqlLedger(engine, account_id="paper-1", venue=VenueId.BINANCE_SPOT)
+    await sql.post([entry(LedgerEntryKind.OPENING_BALANCE, "BTC", "0.3")])
+    await sql.post([entry(LedgerEntryKind.RESERVATION, "BTC", "-0.3")])
+    assert (await sql.balances())["BTC"].total == Decimal("0.3")
+    await engine.dispose()
+
+
 async def test_fills_are_recorded_even_past_available(ledger) -> None:
     await ledger.post([entry(LedgerEntryKind.TRADE, "USDT", "-5")])
     assert (await ledger.balances())["USDT"].total == Decimal("-5")
