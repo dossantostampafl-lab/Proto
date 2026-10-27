@@ -333,7 +333,10 @@ def _constitution_violations(intent, account, controls, quote, decision) -> list
     if not reducing:
         equity = min(account.equity, REFERENCE_CAPITAL) if account.equity > 0 else Decimal("0")
         notional = intent.quantity * intent.limit_price
-        if notional * POLICY.stop_distance > equity * MAX_RISK_PER_POSITION:
+        # Per POSITION: what is already held in the instrument counts with the new order.
+        held = max(account.positions.get(intent.instrument_id, Decimal("0")), Decimal("0"))
+        position_notional = (held + intent.quantity) * intent.limit_price
+        if position_notional * POLICY.stop_distance > equity * MAX_RISK_PER_POSITION:
             problems.append("risk_per_position")
         if account.gross_exposure + notional > equity * MAX_GROSS_LEVERAGE:
             problems.append("gross_leverage")

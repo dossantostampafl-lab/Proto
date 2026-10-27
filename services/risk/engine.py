@@ -254,10 +254,13 @@ class RiskEngine:
                 equity = min(equity, canary_capital if known else Decimal("0"))
             notional = intent.quantity * (price or Decimal("0"))
             budget = equity * MAX_RISK_PER_POSITION
+            # Per POSITION, not per order: what is already held in the instrument counts too,
+            # so stacking small buys can never build a position above the 0.25% budget.
+            position_notional = (position + intent.quantity) * (price or Decimal("0"))
             check(
                 "risk_per_position",
-                notional * policy.stop_distance <= budget,
-                f"{notional * policy.stop_distance:.2f} > {budget:.2f}",
+                position_notional * policy.stop_distance <= budget,
+                f"{position_notional * policy.stop_distance:.2f} > {budget:.2f}",
             )
             check(
                 "gross_leverage",

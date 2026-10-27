@@ -189,6 +189,18 @@ def test_daily_loss_and_drawdown_breaches_are_reported_and_block_new_risk() -> N
     assert near.breach is None and near.approved
 
 
+def test_risk_per_position_counts_what_is_already_held() -> None:
+    # Budget 1250 notional (see above). 0.015 BTC held (~930) + 0.006 new (~372) > 1250:
+    # stacked small buys must not build a position above the 0.25% budget.
+    held = account(positions={BTC_ID: Decimal("0.015")}, gross_exposure=Decimal("930"))
+    stacked = evaluate(intent(quantity=Decimal("0.006")), acct=held)
+    assert "risk_per_position" in stacked.rejections
+    assert stacked.permit is None
+    # The same order on a flat book is fine, and a top-up within the budget still passes.
+    assert evaluate(intent(quantity=Decimal("0.006"))).approved is True
+    assert evaluate(intent(quantity=Decimal("0.005")), acct=held).approved is True
+
+
 def test_reduce_only_exits_stay_allowed_in_lockdown_but_not_under_kill_switch() -> None:
     exit_ = intent(
         side="SELL", reduce_only=True, quantity=Decimal("0.002"), limit_price=Decimal("62000.00")
