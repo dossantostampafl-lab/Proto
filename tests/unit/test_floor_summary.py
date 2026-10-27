@@ -42,6 +42,7 @@ def test_totals_split_by_venue_and_brasilia_day() -> None:
     assert out["orders_filled_today"] == 1
     assert out["orders_refused_today"] == 1
     assert out["signals_today"] == 2
+    assert (out["signals_today_tradingview"], out["signals_today_proto"]) == (1, 1)
     assert out["orders_filled_by_venue"] == {"BINANCE_SPOT": 2, "XP_B3": 1}
     assert out["window_full"] is False and out["window_events"] == 7
     assert out["since"] == "2026-10-20T12:00:00+00:00"

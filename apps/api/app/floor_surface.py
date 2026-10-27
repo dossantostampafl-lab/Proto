@@ -272,6 +272,7 @@ def summarize(events: Iterable[Any], *, day: str, window: int) -> dict[str, obje
     """
 
     total = today = refused_today = signals_today = seen = 0
+    signals_by_source = {"tradingview": 0, "proto": 0}
     by_venue: dict[str, int] = {}
     since: str | None = None
     for event in events:
@@ -288,11 +289,16 @@ def summarize(events: Iterable[Any], *, day: str, window: int) -> dict[str, obje
             refused_today += is_today
         elif event.event_type in _SIGNAL_EVENTS:
             signals_today += is_today
+            source = "tradingview" if event.event_type == "TRADINGVIEW_SIGNAL_ACCEPTED" else "proto"
+            signals_by_source[source] += is_today
     return {
         "orders_filled_total": total,
         "orders_filled_today": today,
         "orders_refused_today": refused_today,
         "signals_today": signals_today,
+        # The same signals by origin: TradingView alerts and PROTO's own strategy.
+        "signals_today_tradingview": signals_by_source["tradingview"],
+        "signals_today_proto": signals_by_source["proto"],
         "orders_filled_by_venue": by_venue,
         "day": day,
         "timezone": "America/Sao_Paulo",
