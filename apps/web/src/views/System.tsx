@@ -3,13 +3,16 @@ import { type Creation, type Deployment, type Health, type Memory, type Orchestr
 import { usePoll } from "../hooks";
 import { Button, Dot, Empty, Panel, Stat, useCommand } from "../ui";
 
-const yes = (v: boolean | undefined, on = "READY", off = "NOT READY") => <span className={v ? "up" : "warn"}>{v ? on : off}</span>;
+// Unknown (no read yet, or the field is missing) is "—", never "NOT READY".
+const yes = (v: boolean | undefined | null, on = "READY", off = "NOT READY") => (v == null ? "—" : <span className={v ? "up" : "warn"}>{v ? on : off}</span>);
 
 export function System({ health }: { health: Health | null }) {
   const deployment = usePoll<Deployment>("/deployment/info", 30000).data;
-  const universe = usePoll<Universe>("/universe", 10000).data;
+  const universePoll = usePoll<Universe>("/universe", 10000);
+  const universe = universePoll.status === 200 ? universePoll.data : null;
   const orchestration = usePoll<Orchestration>("/orchestration/status", 5000).data;
-  const memory = usePoll<Memory>("/orchestration/decision-memory/status", 10000).data;
+  const memoryPoll = usePoll<Memory>("/orchestration/decision-memory/status", 10000);
+  const memory = memoryPoll.status === 200 ? memoryPoll.data : null;
   const shadow = usePoll<Shadow>("/shadow/status", 5000).data;
   const creation = usePoll<Creation>("/creation/status", 10000).data;
   const { log } = useCommand();
@@ -55,10 +58,10 @@ export function System({ health }: { health: Health | null }) {
 
       <Panel title="Decision memory">
         <div className="grid4">
-          <Stat label="Configured" value={yes(memory?.configured, "YES", "NO")} />
-          <Stat label="Records" value={memory?.records ?? 0} />
-          <Stat label="Resolved" value={memory?.resolved ?? 0} />
-          <Stat label="Unresolved" value={memory?.unresolved ?? 0} />
+          <Stat label="Configured" value={memory ? yes(memory.configured, "YES", "NO") : "—"} />
+          <Stat label="Records" value={memory?.records ?? "—"} />
+          <Stat label="Resolved" value={memory?.resolved ?? "—"} />
+          <Stat label="Unresolved" value={memory?.unresolved ?? "—"} />
         </div>
         <p className="hint">Creation bridge: {creation?.configured ? "configured" : "not configured"} · {creation?.transport ?? "—"} · jobs {creation?.allowed_jobs?.join(", ") || "none"}</p>
       </Panel>
@@ -79,7 +82,7 @@ export function System({ health }: { health: Health | null }) {
               </tbody>
             </table>
           </div>
-        ) : <Empty>No instruments registered.</Empty>}
+        ) : <Empty>{universePoll.status === null ? "Reading the universe…" : universePoll.status === 200 ? "No instruments registered." : `UNIVERSE UNAVAILABLE · ${universePoll.status || "network error"}`}</Empty>}
         <p className="hint">Catalog membership never implies executable connectivity.</p>
       </Panel>
 

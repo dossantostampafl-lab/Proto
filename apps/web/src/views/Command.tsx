@@ -2,7 +2,7 @@ import type { Analytics, Portfolio, Sym } from "../api";
 import { SYMBOLS } from "../api";
 import { usePoll } from "../hooks";
 import type { Shared } from "../main";
-import { Button, clamp, Empty, Orbit, Panel, pct, Spark, Stat, num, signed, tone, usd } from "../ui";
+import { Button, clamp, Empty, freshFrame, Orbit, Panel, pct, Spark, Stat, num, signed, tone, usd } from "../ui";
 
 function Tile({ symbol, active, onSelect, mid, series }: { symbol: Sym; active: boolean; onSelect: () => void; mid: number | undefined; series: number[] }) {
   const a = usePoll<Analytics>(`/live/analytics/${symbol}`).data;
@@ -19,11 +19,14 @@ function Tile({ symbol, active, onSelect, mid, series }: { symbol: Sym; active: 
 export function Command({ market, markets, marketsStatus, runtime, selected, select }: Shared) {
   const frame = market.frames[selected];
   const analytics = usePoll<Analytics>(`/live/analytics/${selected}`).data;
-  const portfolio = usePoll<Portfolio>("/v1/portfolio").data;
+  const portfolioPoll = usePoll<Portfolio>("/v1/portfolio");
+  // A failed read hides the book instead of showing the last good value as current.
+  const portfolio = portfolioPoll.status === 200 ? portfolioPoll.data : null;
+  const live = freshFrame(frame?.timestamp);
   const research = markets.filter(m => m.symbol === selected);
   const lead = research[0];
   // Display-only composite (not a canonical risk limit): concentration and drawdown vs exposure.
-  const displayRisk = clamp(Math.max(
+  const displayRisk = portfolio == null ? null : clamp(Math.max(
     portfolio?.max_asset_concentration ?? 0,
     Math.abs(portfolio?.realized_drawdown ?? 0) / Math.max(Math.abs(portfolio?.gross_exposure ?? 1), 1),
   ));
@@ -37,11 +40,11 @@ export function Command({ market, markets, marketsStatus, runtime, selected, sel
         ))}
       </div>
 
-      <Panel title={`${selected}/USD`} source="live" className="hero">
+      <Panel title={`${selected}/USD`} source="live" className="hero" actions={!live && <span className="tag stale">STALE · LAST KNOWN</span>}>
         <div className="hero-quote">
           <strong>{usd(frame?.mid)}</strong>
           <span>bid {usd(frame?.bid)}</span><span>ask {usd(frame?.ask)}</span>
-          <span className="muted">{market.connected ? "streaming" : "REST reconciliation"}</span>
+          <span className="muted">{!frame ? "no public quote yet" : market.connected ? "streaming" : live ? "REST reconciliation" : `last known ${frame.timestamp.slice(11, 19)} UTC`}</span>
         </div>
         <Spark values={market.series[selected]} height={200} className="hero-chart" grid />
       </Panel>
@@ -63,7 +66,7 @@ export function Command({ market, markets, marketsStatus, runtime, selected, sel
         )}
       </Panel>
 
-      <Panel title="L1 microstructure" source="live" className="micro">
+      <Panel title="L1 microstructure" source="live" className="micro" actions={!live && <span className="tag stale">STALE · LAST KNOWN</span>}>
         <div className="imbalance" aria-label="Order-book imbalance">
           <i style={{ left: `${clamp(((analytics?.current_imbalance ?? 0) + 1) / 2) * 100}%` }} />
         </div>
@@ -78,12 +81,13 @@ export function Command({ market, markets, marketsStatus, runtime, selected, sel
       </Panel>
 
       <Panel title="Paper book" source="paper" className="book">
+        {portfolioPoll.status !== null && portfolioPoll.status !== 200 && <p className="hint warn">PAPER BOOK UNAVAILABLE · {portfolioPoll.status || "network error"}</p>}
         <div className="grid4">
           <Stat label="P&L after fees" value={usd(portfolio?.total_pnl_after_fees)} className={`big ${tone(portfolio?.total_pnl_after_fees)}`} />
           <Stat label="Gross exposure" value={usd(portfolio?.gross_exposure)} />
           <Stat label="Net exposure" value={usd(portfolio?.net_exposure)} />
           <Stat label="Open positions" value={portfolio?.open_position_count ?? "—"} />
-          <Stat label="Display risk score" value={pct(displayRisk, 0)} />
+          <Stat label="Display risk score" value={displayRisk == null ? "—" : pct(displayRisk, 0)} />
           <Stat label="Kill switch" value={runtime?.kill_switch ?? "—"} className={armed ? "up" : "down"} />
         </div>
         <div className="row">

@@ -233,27 +233,3 @@ export function drawCity(g: Ctx, w: number, h: number) {
   }
   g.fillStyle = "#15161b"; g.fillRect(0, base, w, h - base);
 }
-
-/** Warm oak planks with soft grain. */
-export function drawFloor(g: Ctx, w: number, h: number) {
-  g.fillStyle = "#5c4636"; g.fillRect(0, 0, w, h);
-  let seed = 3;
-  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  const rows = 8, plank = h / rows;
-  for (let r = 0; r < rows; r++) {
-    let x = -rnd() * 300;
-    while (x < w) {
-      const len = 220 + rnd() * 260;
-      const l = 0.9 + rnd() * 0.22;
-      g.fillStyle = `rgb(${Math.round(98 * l)},${Math.round(75 * l)},${Math.round(57 * l)})`;
-      g.fillRect(x, r * plank, len, plank);
-      for (let k = 0; k < 7; k++) {
-        g.fillStyle = `rgba(40,26,16,${0.05 + rnd() * 0.08})`;
-        g.fillRect(x, r * plank + rnd() * plank, len, 1 + rnd() * 2);
-      }
-      g.fillStyle = "rgba(25,16,10,0.6)"; g.fillRect(x, r * plank, 2, plank);
-      x += len;
-    }
-    g.fillStyle = "rgba(25,16,10,0.55)"; g.fillRect(0, r * plank, w, 2);
-  }
-}

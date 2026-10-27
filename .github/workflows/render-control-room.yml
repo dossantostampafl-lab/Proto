@@ -25,26 +25,21 @@ jobs:
         run: python -m pip install 'bpy==5.2.3' pillow numpy
       - name: Render native wide and portrait scenes plus robot animation
         run: python tools/render_control_room/render.py --samples 64
-      - name: Check render and anchors
+      - name: Check the assets the Controle view uses
+        # The view draws over the approved photo (room-photo.webp, committed, not rendered) and
+        # animates the rendered robot; room.webp, room-portrait.webp and anchors.json are no longer
+        # used (PR #338), so they are not checked.
         run: |
           python - <<'PY'
-          import json
           from pathlib import Path
           from PIL import Image
-          root = Path("apps/web")
-          limits = {"room.webp": 700_000, "room-portrait.webp": 700_000, "robot.webp": 700_000}
-          for name, limit in limits.items():
-              asset = root / "public/floorcontrol" / name
-              assert asset.exists() and asset.stat().st_size < limit, (str(asset), limit)
+          root = Path("apps/web/public/floorcontrol")
+          for name in ("room-photo.webp", "robot.webp"):
+              asset = root / name
+              assert asset.exists() and asset.stat().st_size < 700_000, (str(asset), 700_000)
               with Image.open(asset) as image:
                   image.verify()
               print(name, asset.stat().st_size, "bytes")
-          anchors = json.loads((root / "src/views/floorControl/anchors.json").read_text())
-          for kind in ("landscape", "portrait"):
-              view = anchors[kind]
-              assert view["seats"] and len(view["seats"]) >= 50, kind
-              assert 0 < view["globe"]["radius"] < 0.3, kind
-              assert all(len(seat["seat"]) == 2 for seat in view["seats"]), kind
           PY
       - uses: actions/setup-node@v5
         with:
@@ -71,10 +66,9 @@ jobs:
           name: control-room-review-screenshots
           path: /tmp/proto-floor-screenshots/*.png
           if-no-files-found: ignore
-      - name: Attach rendered artwork and anchors
+      - name: Attach rendered artwork
         uses: actions/upload-artifact@v4
         with:
           name: control-room-artwork
           path: |
             apps/web/public/floorcontrol/*.webp
-            apps/web/src/views/floorControl/anchors.json
