@@ -151,23 +151,30 @@ class BinanceSpotAdapter:
     # --- transport ------------------------------------------------------------
 
     async def _send(self, method: str, path: str, *, params=None, headers=None) -> Any:
+        # Messages name the endpoint only: a signed path carries the query and its signature,
+        # which must never reach logs, order reasons or the journal.
+        name = path.split("?", 1)[0]
         try:
             response = await self._client.request(
-                method, f"{self._base}{path}", params=params, headers=headers
+                method,
+                f"{self._base}{path}",
+                params=params,
+                headers=headers,
+                follow_redirects=False,
             )
         except httpx.TransportError as exc:  # timeouts, resets, DNS
-            raise VenueOutcomeUnknown(f"{method} {path}: {type(exc).__name__}") from exc
-        if response.status_code >= 500:
-            raise VenueOutcomeUnknown(f"{method} {path}: HTTP {response.status_code}")
+            raise VenueOutcomeUnknown(f"{method} {name}: {type(exc).__name__}") from exc
+        if response.status_code >= 500 or 300 <= response.status_code < 400:
+            raise VenueOutcomeUnknown(f"{method} {name}: HTTP {response.status_code}")
         try:
             body = response.json()
         except ValueError as exc:
-            raise VenueOutcomeUnknown(f"{method} {path}: unreadable response") from exc
+            raise VenueOutcomeUnknown(f"{method} {name}: unreadable response") from exc
         if response.status_code >= 400:
             code = body.get("code") if isinstance(body, dict) else None
             message = str(body.get("msg", "")) if isinstance(body, dict) else ""
             if code in _UNKNOWN_CODES:
-                raise VenueOutcomeUnknown(f"{method} {path}: {code} {message}")
+                raise VenueOutcomeUnknown(f"{method} {name}: {code} {message}")
             raise BinanceError(response.status_code, code, message)
         return body
 
