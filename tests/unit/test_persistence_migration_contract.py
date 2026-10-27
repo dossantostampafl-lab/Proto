@@ -69,4 +69,65 @@ def test_alembic_tracks_all_runtime_metadata() -> None:
     assert "LiveBase.metadata" in source
     assert "Base.metadata" in source
     assert "canonical_metadata" in source
+    assert "OrchestrationBase.metadata" in source
+    assert "DecisionMemoryBase.metadata" in source
     assert "target_metadata = [" in source
+
+
+def test_alembic_head_creates_every_table_the_runtime_creates(tmp_path, monkeypatch) -> None:
+    """A database built only by `alembic upgrade head` has every table `init_database` and
+    `init_control_database` create (decision_memory had no migration before 0015)."""
+
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from apps.api.app import persistence
+    from services.orchestration import DecisionMemoryBase, OrchestrationBase
+
+    database = tmp_path / "head.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{database}")
+    command.upgrade(Config("alembic.ini"), "head")
+
+    runtime_tables = {
+        table
+        for metadata in (
+            *persistence.CONTROL_PLANE_METADATA,
+            persistence.Base.metadata,
+            persistence.canonical_metadata,
+            OrchestrationBase.metadata,
+            DecisionMemoryBase.metadata,
+        )
+        for table in metadata.tables
+    }
+    engine = create_engine(f"sqlite:///{database}")
+    try:
+        migrated = set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+    assert runtime_tables <= migrated, sorted(runtime_tables - migrated)
+
+
+def test_decision_memory_migration_keeps_a_table_the_runtime_already_created(
+    monkeypatch,
+) -> None:
+    migration = _load_migration_module("0015_decision_memory")
+    assert migration.down_revision == "0014_agent_conversations"
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine, inspect
+
+    from services.orchestration import DecisionMemoryBase
+
+    table = DecisionMemoryBase.metadata.tables["decision_memory"]
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        table.create(connection)
+        monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(connection)))
+        migration.upgrade()  # no-op: the runtime already created it
+        migration.downgrade()
+        assert "decision_memory" not in inspect(connection).get_table_names()
+        migration.upgrade()
+        columns = {c["name"] for c in inspect(connection).get_columns("decision_memory")}
+        assert columns == set(table.columns.keys())

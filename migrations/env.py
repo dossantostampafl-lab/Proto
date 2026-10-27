@@ -17,6 +17,7 @@ from services.agents.roster import roster_metadata
 from services.chatgpt.conversations import metadata as conversation_metadata
 from services.events import journal_metadata
 from services.oms import ledger_metadata
+from services.orchestration import DecisionMemoryBase, OrchestrationBase
 from services.promotion import promotion_metadata
 from services.risk import control_metadata
 
@@ -34,6 +35,8 @@ target_metadata = [
     LiveBase.metadata,
     Base.metadata,
     canonical_metadata,
+    OrchestrationBase.metadata,
+    DecisionMemoryBase.metadata,
     journal_metadata,
     ledger_metadata,
     promotion_metadata,
