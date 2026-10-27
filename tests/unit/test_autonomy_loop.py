@@ -73,6 +73,27 @@ def test_no_signal_before_enough_bars_or_on_a_flat_market() -> None:
     assert EmaCrossStrategy().observe(BTC, 0.0, T0) is None
 
 
+def test_non_finite_mids_feed_nothing() -> None:
+    strategy = EmaCrossStrategy()
+    for bad in (float("inf"), float("-inf"), float("nan"), -1.0):
+        assert strategy.observe(BTC, bad, T0) is None
+    assert strategy.status() == {}
+
+
+def test_a_bar_that_closes_after_a_feed_gap_emits_nothing() -> None:
+    """Stale input abstains: a bar that closes only after the feed went quiet decides nothing."""
+
+    prices = [100.0] * 15 + [100 - i * 0.2 for i in range(1, 11)]
+    prices += [prices[-1] + i * 0.6 for i in range(1, 12)]
+    long = next(s for s in feed(EmaCrossStrategy(), prices) if s.direction is SignalDirection.LONG)
+    fired = int((long.observed_at - T0).total_seconds() // 60)  # the bar before it closes here
+    strategy = EmaCrossStrategy()
+    assert feed(strategy, prices[:fired]) == []
+    # The quotes stop for half an hour; the next one closes that bar half an hour late.
+    late = T0 + timedelta(minutes=fired + 30, seconds=30)
+    assert strategy.observe(BTC, prices[fired], late) is None
+
+
 def test_the_cooldown_stops_a_flapping_market_from_signalling_every_bar() -> None:
     strategy = EmaCrossStrategy(policy=EmaCrossPolicy(cooldown=timedelta(hours=1)))
     zigzag = [100.0] * 22 + [100 + (3 if i % 2 else -3) for i in range(30)]

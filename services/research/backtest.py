@@ -26,7 +26,6 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 
 from services.research.data import Bar
 from services.research.strategies import Plan
@@ -351,11 +350,3 @@ def metrics(result: Result, *, bar_minutes: float | None = None) -> dict[str, fl
         "days": span_days,
         "eliminated": float(result.eliminated),
     }
-
-
-def to_brl(quote: float, sizing: SizingModel = DEFAULT_SIZING) -> float:
-    return quote * sizing.fx_brl_per_quote
-
-
-def iso(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%Y-%m-%d")

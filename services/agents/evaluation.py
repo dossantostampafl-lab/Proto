@@ -21,8 +21,10 @@ from .review import AgentReviewer, ReviewContext, Verdict, apply_review
 @dataclass(frozen=True)
 class ReplayCase:
     context: ReviewContext
-    # Realized return of the trade's direction over the evaluation horizon,
-    # net of costs, as a fraction of notional (e.g. Decimal("-0.012")).
+    # Realized return of the trade itself over the evaluation horizon, net of
+    # costs, as a fraction of its notional (e.g. Decimal("-0.012")). It is
+    # already signed by the trade's side: a SELL that avoided a fall has a
+    # positive return. The evaluator never flips it again.
     realized_return: Decimal
 
 
@@ -76,8 +78,7 @@ async def evaluate_reviewer(
         price = intent.limit_price
         if price is None:
             raise ValueError("replay candidates must carry a limit price")
-        sign = Decimal("1") if intent.side == "BUY" else Decimal("-1")
-        per_unit = price * case.realized_return * sign
+        per_unit = price * case.realized_return
         baseline.append(intent.quantity * per_unit)
 
         review = await reviewer.review(case.context)
