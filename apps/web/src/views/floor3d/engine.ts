@@ -175,7 +175,7 @@ export class FloorEngine {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.92;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // three r18x dropped PCFSoft and fell back to PCF anyway
     this.frameMs = coarse ? 1000 / 32 : 0; // touch devices: ~30 fps is plenty and saves battery
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
