@@ -160,13 +160,22 @@ function Kpis({ summary, ledger }: { summary: Summary | null; ledger: Ledger | n
   );
 }
 
-function Sources({ state, stateFresh, xp, summary, mobileOpen }: { state: FloorState | null; stateFresh: boolean; xp: XpLane; summary: Summary | null; mobileOpen: boolean }) {
+/** The Binance row is the execution venue: the executor's testnet when the data mode says so (healthy
+ * only while its ledger reads), the in-process paper venue otherwise. A fresh floor state is not venue health. */
+function binanceRow(state: FloorState | null, stateFresh: boolean, ledger: Ledger | null): { ok: boolean | null; status: string; detail: string } {
+  if (!state) return { ok: null, status: "UNAVAILABLE", detail: "MODE UNAVAILABLE" };
+  if (state.data_mode !== "TESTNET") return { ok: null, status: stateFresh ? "não usado" : "Stale", detail: "paper venue" };
+  if (!ledger) return { ok: false, status: "UNAVAILABLE", detail: "testnet" };
+  return { ok: !ledger.unavailable && stateFresh, status: ledger.unavailable ? "Executor indisponível" : stateFresh ? "Online" : "Stale", detail: "testnet" };
+}
+
+function Sources({ state, stateFresh, xp, summary, ledger, mobileOpen }: { state: FloorState | null; stateFresh: boolean; xp: XpLane; summary: Summary | null; ledger: Ledger | null; mobileOpen: boolean }) {
   const wd = state?.watchdog;
   const rows: { icon: string; tone: string; name: string; status: string; ok: boolean | null; detail: string }[] = [
-    { icon: "B", tone: "bin", name: "Binance Spot", ok: state ? stateFresh : null, status: state ? (stateFresh ? "Online" : "Stale") : "UNAVAILABLE", detail: "testnet" },
+    { icon: "B", tone: "bin", name: "Binance Spot", ...binanceRow(state, stateFresh, ledger) },
     { icon: "XP", tone: "xp", name: "XP / B3", ok: xp.state === "live" ? true : xp.state === "unknown" ? null : false, status: xp.state === "live" ? "Online" : LANE[xp.state], detail: "demo" },
-    { icon: "TV", tone: "tv", name: "TradingView", ok: null, status: state?.stations.tradingview ? "Online" : "—", detail: state?.stations.tradingview ? `${state.stations.tradingview.at.slice(11, 16)} UTC` : "nenhum sinal" },
-    { icon: "P", tone: "own", name: "Estratégia própria", ok: summary ? true : null, status: summary ? "Online" : "—", detail: summary ? `${summary.signalsToday} hoje` : "—" },
+    { icon: "TV", tone: "tv", name: "TradingView", ok: null, status: state?.stations.tradingview ? "último sinal" : "—", detail: state?.stations.tradingview ? `${state.stations.tradingview.at.slice(11, 16)} UTC` : "nenhum sinal" },
+    { icon: "P", tone: "own", name: "Estratégia própria", ok: null, status: summary ? "sinais (TV + própria)" : "UNAVAILABLE", detail: summary ? `${summary.signalsToday} hoje` : "—" },
     { icon: "W", tone: "wd", name: "Watchdog", ok: wd ? wd.active : null, status: wd ? (wd.active ? "Ativo" : "Inativo") : "UNAVAILABLE", detail: wd?.last_trip ? `trip ${wd.last_trip.at.slice(5, 10)}` : "—" },
     { icon: "J", tone: "jr", name: "Journal", ok: state ? state.journal === "VALID" : null, status: state ? state.journal : "UNAVAILABLE", detail: state ? (state.data_mode === "TESTNET" ? "TESTNET · NO REAL MONEY" : "PAPER / SIM") : "MODE UNAVAILABLE" },
   ];
@@ -395,7 +404,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
 
       <div className="fc-panels">
         <Kpis summary={summary} ledger={ledger} />
-        <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} mobileOpen={mobilePanel === "sources"} />
+        <Sources state={state} stateFresh={stateFresh} xp={xp} summary={summary} ledger={ledger} mobileOpen={mobilePanel === "sources"} />
         <AgentRoster agents={agents} actions={actions} b3={b3} xpLive={xpLive} available={roster !== null} selectedId={selectedAgentId} onSelect={setSelectedAgentId} />
         <Activity actions={actions} fresh={stateFresh} mobileOpen={mobilePanel === "activity"} />
         <Queue actions={actions} />

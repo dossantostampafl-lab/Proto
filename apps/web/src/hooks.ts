@@ -26,6 +26,7 @@ export function usePoll<T>(path: string | null, ms = 3000): Poll<T> {
 }
 
 const MAX_POINTS = 120;
+const STREAM_FRESH_MS = 15000;
 type Book<T> = Record<Sym, T>;
 const book = <T,>(make: () => T): Book<T> => ({ BTC: make(), ETH: make(), SOL: make() });
 
@@ -33,11 +34,14 @@ const book = <T,>(make: () => T): Book<T> => ({ BTC: make(), ETH: make(), SOL: m
 export function useMarket() {
   const [frames, setFrames] = useState<Book<Frame | null>>(() => book(() => null));
   const [series, setSeries] = useState<Book<number[]>>(() => book(() => []));
-  const [connected, setConnected] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [streamAt, setStreamAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const cursor = useRef(book(() => ({ generation: -1, sequence: -1 })));
 
-  const ingest = useCallback((frame: Frame) => {
+  const ingest = useCallback((frame: Frame, streamed = false) => {
     if (!SYMBOLS.includes(frame.symbol) || !(frame.mid > 0)) return;
+    if (streamed) setStreamAt(Date.now());
     const last = cursor.current[frame.symbol];
     const stale = frame.connection_generation < last.generation
       || (frame.connection_generation === last.generation && frame.sequence <= last.sequence);
@@ -67,15 +71,15 @@ export function useMarket() {
     let attempt = 0;
     const connect = () => {
       socket = new WebSocket(`${WS_BASE}/ws/market-data`);
-      socket.onopen = () => { attempt = 0; setConnected(true); };
+      socket.onopen = () => { attempt = 0; setOpen(true); };
       socket.onmessage = event => {
         try {
           const msg = JSON.parse(String(event.data)) as { type: string; data?: Frame };
-          if (msg.type === "market-data" && msg.data) ingest(msg.data);
+          if (msg.type === "market-data" && msg.data) ingest(msg.data, true);
         } catch { /* malformed frame ignored */ }
       };
       socket.onclose = () => {
-        setConnected(false);
+        setOpen(false);
         if (!live) return;
         retry = window.setTimeout(connect, Math.min(15000, 750 * 2 ** attempt));
         attempt = Math.min(attempt + 1, 5);
@@ -86,7 +90,8 @@ export function useMarket() {
     // REST reconciliation keeps prices current when the socket is down.
     const reconcile = window.setInterval(async () => {
       const r = await get<{ markets: Frame[] }>("/live/market-data");
-      if (live && r.ok) r.data.markets.forEach(ingest);
+      if (live && r.ok) r.data.markets.forEach(f => ingest(f));
+      if (live) setNow(Date.now());
     }, 3000);
 
     return () => {
@@ -97,6 +102,9 @@ export function useMarket() {
     };
   }, [ingest]);
 
+  // "Connected" means the socket is open AND it delivered a frame recently: an open socket that
+  // carries no data (upstream feed down) is not a live stream, so the UI says REST / last known.
+  const connected = open && now - streamAt < STREAM_FRESH_MS;
   return { frames, series, connected };
 }
 

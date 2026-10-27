@@ -191,11 +191,15 @@ button, input, select { font: inherit; color: inherit; }
 .tag.live { color: var(--accent); background: rgba(169, 179, 190, 0.08); }
 .tag.research { color: var(--research); background: rgba(127, 138, 150, 0.08); }
 .tag.paper { color: var(--paper); background: rgba(255, 176, 32, 0.08); }
+.tag.stale, .tag.unavailable { color: var(--warn); background: rgba(255, 176, 32, 0.06); }
 
 .stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .stat span { font: 400 10px var(--mono); color: var(--muted); letter-spacing: 0.14em; text-transform: uppercase; }
 .stat b { font: 600 15px var(--mono); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stat b.big { font-size: 28px; }
+/* A status word inside a value (READY, RUNNING…) reads as the value, not as a label. */
+.stat b span { font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+.stat b span.up { color: var(--up); } .stat b span.warn { color: var(--warn); } .stat b span.down { color: var(--down); }
 .grid2, .grid3, .grid4 { display: grid; gap: 16px 20px; }
 .grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -498,6 +502,11 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 
 @media (max-width: 1100px) {
   .status .mode, .status time { display: none; }
+}
+/* Tablets (up to 1280 px): the views get their own row so the status never runs off screen. */
+@media (max-width: 1280px) {
+  .top { flex-wrap: wrap; gap: 10px 16px; }
+  .top nav { order: 3; width: 100%; overflow-x: auto; }
 }
 @media (max-width: 900px) {
   .top { flex-wrap: wrap; gap: 10px 16px; padding: 10px 16px; }

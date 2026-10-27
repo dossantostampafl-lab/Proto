@@ -15,7 +15,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 600,
     rolldownOptions: {
       output: {
-        advancedChunks: { groups: [{ name: "Floor3DThree", test: /node_modules[\\/]three[\\/]build[\\/]/ }] },
+        codeSplitting: { groups: [{ name: "Floor3DThree", test: /node_modules[\\/]three[\\/]build[\\/]/ }] },
       },
     },
   },

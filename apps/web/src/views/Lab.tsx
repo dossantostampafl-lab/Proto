@@ -56,7 +56,7 @@ export function Lab({ markets, marketsStatus, selected, select }: Shared) {
           <Stat label="Brier" value={num(calibration?.brier_score, 3)} />
           <Stat label="Log loss" value={num(calibration?.log_loss, 3)} />
           <Stat label="ECE" value={num(calibration?.expected_calibration_error, 3)} />
-          <Stat label="Samples" value={calibration?.observation_count ?? 0} />
+          <Stat label="Samples" value={calibration?.observation_count ?? "—"} />
         </div>
         {curve.length ? (
           <div className="reliability" aria-label="Reliability curve">
