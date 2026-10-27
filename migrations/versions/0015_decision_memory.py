@@ -46,6 +46,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for column in INDEXED_COLUMNS:
-        op.drop_index(f"ix_{TABLE_NAME}_{column}", table_name=TABLE_NAME)
-    op.drop_table(TABLE_NAME)
+    # No-op on purpose: upgrade() only creates decision_memory when the runtime had not already
+    # created it, so dropping it here could delete recorded decisions this revision never owned.
+    return None

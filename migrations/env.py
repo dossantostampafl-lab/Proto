@@ -72,7 +72,25 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _widen_version_table(connection: Connection) -> None:
+    """Alembic's default alembic_version.version_num is VARCHAR(32), but revision ids such as
+    0004_session_scoped_fill_idempotency are longer: on PostgreSQL the upgrade failed at 0004.
+    Create (or widen) the table first; Alembic then uses it as is. SQLite does not enforce it."""
+
+    if connection.dialect.name != "postgresql":
+        return
+    connection.exec_driver_sql(
+        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(64) NOT NULL, "
+        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+    )
+    connection.exec_driver_sql(
+        "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"
+    )
+    connection.commit()
+
+
 def do_run_migrations(connection: Connection) -> None:
+    _widen_version_table(connection)
     context.configure(
         connection=connection,
         target_metadata=target_metadata,

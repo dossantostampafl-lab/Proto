@@ -153,9 +153,34 @@ def test_decision_memory_migration_keeps_a_table_the_runtime_already_created(
     with engine.begin() as connection:
         table.create(connection)
         monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(connection)))
+        connection.execute(table.insert().values(**_decision_row(table)))
         migration.upgrade()  # no-op: the runtime already created it
-        migration.downgrade()
-        assert "decision_memory" not in inspect(connection).get_table_names()
+        migration.downgrade()  # no-op too: it never drops decisions it did not create
+        assert "decision_memory" in inspect(connection).get_table_names()
+        assert connection.execute(table.select()).fetchall()  # the recorded row survives
         migration.upgrade()
         columns = {c["name"] for c in inspect(connection).get_columns("decision_memory")}
         assert columns == set(table.columns.keys())
+
+
+def _decision_row(table) -> dict:
+    """One minimal row: every NOT NULL column without a default gets a plausible value."""
+
+    from datetime import UTC, datetime
+
+    values: dict = {}
+    for column in table.columns:
+        if column.nullable or column.default is not None or column.server_default is not None:
+            continue
+        python_type = column.type.python_type
+        if python_type is datetime:
+            values[column.name] = datetime(2026, 10, 27, tzinfo=UTC)
+        elif python_type in (int, float):
+            values[column.name] = 0
+        elif python_type is bool:
+            values[column.name] = False
+        elif python_type is dict:
+            values[column.name] = {}
+        else:
+            values[column.name] = f"x-{column.name}"
+    return values
