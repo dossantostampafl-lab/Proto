@@ -27,6 +27,7 @@ neither the API, nor the executor, nor the OMS, risk or venue code; a test enfor
 | Reconciliation | the executor reports a divergence | `reconciliation_divergence` |
 | Reconciliation age | its last reconciliation is older than 3 minutes | `reconciliation_stale` |
 | XP node (optional) | `WATCHDOG_XP_EXECUTOR_URL` set: a divergence on the XP (B3) executor, or its reconciliation older than 3 minutes during the B3 session (10:00-17:55 Brasilia, weekdays). An unreachable node (PC off) is only reported | `xp_reconciliation_divergence`, `xp_reconciliation_stale`: halt the XP executor only |
+| Alpaca executor (optional) | `WATCHDOG_ALPACA_EXECUTOR_URL` set: a divergence on the Alpaca (US, paper) executor, or its reconciliation older than 3 minutes during the US regular session (09:30-16:00 New York, weekdays). Unreachable is only reported | `alpaca_reconciliation_divergence`, `alpaca_reconciliation_stale`: halt the Alpaca executor only |
 
 `WATCHDOG_DAILY_LOSS_FRACTION` and `WATCHDOG_DRAWDOWN_FRACTION` can make the loss checks stricter
 (a fraction of the limit, at most 1). A looser value is refused.
