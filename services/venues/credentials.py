@@ -25,6 +25,10 @@ from pathlib import Path
 from services.execution import VenueId
 
 _SCOPE = re.compile(r"^[A-Z0-9_]{1,40}$")
+# A venue key or secret is one token of printable ASCII: no spaces, quotes or control
+# characters. Anything else (a value pasted with quotes, two values in one field, a stray
+# zero-width character) is refused here by name, instead of reaching the venue as a 401.
+_TOKEN = re.compile(r"^[!#-&(-~]+$")
 
 
 class VenueEnvironment(StrEnum):
@@ -61,16 +65,29 @@ def _prefix(venue: VenueId, environment: VenueEnvironment, account: str) -> str:
     return f"PROTO_CRED_{venue.value}_{environment.value}_{account_key}"
 
 
+def variable_prefix(credentials: VenueCredentials) -> str:
+    """The variable names these credentials came from (``<prefix>_API_KEY``), for error text."""
+
+    return _prefix(credentials.venue, credentials.environment, credentials.account)
+
+
 def _read(name: str, env: Mapping[str, str]) -> str:
     path = env.get(f"{name}_FILE")
     if path:
         try:
-            return Path(path).read_text(encoding="utf-8").strip()
-        except OSError as exc:
+            value = Path(path).read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError) as exc:
             raise CredentialsUnavailable(f"{name}_FILE is not readable") from exc
-    value = env.get(name, "").strip()
+        source = f"{name}_FILE"
+    else:
+        value, source = env.get(name, "").strip(), name
     if not value:
-        raise CredentialsUnavailable(f"{name} is not set")
+        raise CredentialsUnavailable(f"{source} is not set")
+    if not _TOKEN.match(value):
+        # Never echo the value: only which variable is malformed.
+        raise CredentialsUnavailable(
+            f"{source} holds spaces, quotes or non-ASCII characters: paste the bare value"
+        )
     return value
 
 
