@@ -6,6 +6,13 @@ from pydantic import ValidationError
 from apps.api.app.settings import Settings
 
 
+def test_validation_errors_never_echo_the_rejected_secret() -> None:
+    with pytest.raises(ValidationError) as rejected:
+        Settings(app_env="production", operator_api_token="leaky-short-token")
+    assert "OPERATOR_API_TOKEN" in str(rejected.value)
+    assert "leaky-short-token" not in str(rejected.value)
+
+
 def test_settings_rejects_unrecognized_runtime_mode() -> None:
     with pytest.raises(ValidationError):
         Settings(system_mode="LIVE")

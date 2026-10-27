@@ -26,6 +26,7 @@ from uuid import UUID, uuid5
 from sqlalchemy import Column, DateTime, MetaData, Numeric, String, Table, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.types import TypeDecorator
 
 from services.execution import LedgerEntry, LedgerEntryKind, VenueId
 
@@ -120,6 +121,43 @@ class InMemoryLedger:
     async def entries(self) -> list[LedgerEntry]:
         return sorted(self._entries.values(), key=lambda e: (e.recorded_at, str(e.entry_id)))
 
+    async def fee_assets(self) -> dict[str, str]:
+        """The asset each order's fee was charged in, by order reference."""
+
+        return {
+            e.reference_id: e.asset
+            for e in await self.entries()
+            if e.kind is LedgerEntryKind.FEE
+        }
+
+
+class ExactDecimal(TypeDecorator):
+    """NUMERIC(38, 18) on PostgreSQL; exact text on SQLite, whose NUMERIC goes through float.
+
+    A column created before this type (SQLite NUMERIC affinity) still hands back a float: it is
+    read as its shortest round-trip text, so 0.3 stays 0.3 instead of 0.299999999999999988.
+    """
+
+    impl = Numeric(38, 18)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "sqlite":
+            return dialect.type_descriptor(String(64))
+        return dialect.type_descriptor(Numeric(38, 18))
+
+    def process_bind_param(self, value, dialect):
+        if value is None or dialect.name != "sqlite":
+            return value
+        return format(Decimal(value), "f")
+
+    def process_result_value(self, value, dialect):
+        if value is None or isinstance(value, Decimal):
+            return value
+        if isinstance(value, float):
+            return Decimal(repr(value))
+        return Decimal(str(value))
+
 
 ledger_metadata = MetaData()
 
@@ -130,7 +168,7 @@ ledger_table = Table(
     Column("account_id", String(80), nullable=False, index=True),
     Column("venue", String(32), nullable=False),
     Column("asset", String(20), nullable=False, index=True),
-    Column("amount", Numeric(38, 18), nullable=False),
+    Column("amount", ExactDecimal(), nullable=False),
     Column("kind", String(24), nullable=False),
     Column("reference_id", String(80), nullable=False, index=True),
     Column("recorded_at", DateTime(timezone=True), nullable=False),
@@ -209,6 +247,20 @@ class SqlLedger:
                 )
             ).all()
         return summarize(_row_entry(a, k, amt, self) for a, k, amt in rows)
+
+    async def fee_assets(self) -> dict[str, str]:
+        """The asset each order's fee was charged in, by order reference."""
+
+        async with self.engine.connect() as connection:
+            rows = (
+                await connection.execute(
+                    select(ledger_table.c.reference_id, ledger_table.c.asset)
+                    .where(self._scope())
+                    .where(ledger_table.c.kind == LedgerEntryKind.FEE.value)
+                    .order_by(ledger_table.c.recorded_at)
+                )
+            ).all()
+        return {reference: asset for reference, asset in rows}
 
     async def has_entry(self, entry: UUID) -> bool:
         async with self.engine.connect() as connection:

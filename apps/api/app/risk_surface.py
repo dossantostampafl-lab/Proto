@@ -314,7 +314,9 @@ def risk_status() -> dict[str, object]:
         },
         "controls": {**gov.snapshot(), "runtime_kill_switch": runtime.kill_switch},
         "controls_persistence": controls_durability(),
-        "account_source": "paper_ledger",
+        # Where the account state is read from, as /health labels it (it was always
+        # "paper_ledger", even when the testnet executor's ledger was the source).
+        "account_source": "TESTNET" if settings.oms_execution_backend == "executor" else "PAPER",
         "decisions": len(_decisions),
         **_BOUNDARY,
     }

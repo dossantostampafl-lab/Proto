@@ -142,7 +142,10 @@ def test_execution_disabled_leaves_permits_unused(monkeypatch) -> None:
             if client.get("/v1/risk/decisions/recent").json()["decisions"]:
                 break
             time.sleep(0.01)
-        assert client.get("/v1/oms/orders").json()["orders"] == []
+        body = client.get("/v1/oms/orders").json()
+        assert body["orders"] == []
+        assert (body["venue"], body["execution_backend"]) == ("BINANCE_SPOT", "paper")
+        assert body["real_money_execution"] is False
 
 
 async def test_divergence_halts_the_venue(monkeypatch) -> None:
@@ -239,10 +242,89 @@ async def test_executor_mode_reads_the_opening_balance_when_reported(
         async def ledger(self) -> dict:
             return {"balances": {"USDT": {"total": "10000"}, "BTC": btc_row}}
 
+        async def orders(self, limit: int = 50) -> dict:
+            return {"orders": []}
+
     monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
     monkeypatch.setattr(oms_surface, "executor_client", lambda: FakeExecutor())
     state = await oms_surface.account_state("USDT")
     assert state.positions["BINANCE_SPOT:BTCUSDT"] == expected_position
+
+
+def _executor_order(status: str, side: str = "BUY", **extra) -> dict:
+    return {
+        "client_order_id": f"c-{status}-{side}",
+        "instrument_id": "BINANCE_SPOT:BTCUSDT",
+        "side": side,
+        "status": status,
+        "quantity": "0.010",
+        "filled_quantity": "0.004" if status == "PARTIALLY_FILLED" else "0",
+        **extra,
+    }
+
+
+async def test_executor_working_buys_count_toward_the_position_budget(monkeypatch) -> None:
+    configure(monkeypatch)
+    rows = [
+        _executor_order("ACKNOWLEDGED"),
+        _executor_order("PARTIALLY_FILLED"),
+        _executor_order("UNKNOWN"),  # may still fill: counted
+        _executor_order("FILLED"),
+        _executor_order("CANCELED"),
+        _executor_order("ACKNOWLEDGED", side="SELL"),
+        _executor_order("ACKNOWLEDGED", instrument_id="BINANCE_SPOT:BTCBRL"),  # BRL account
+    ]
+
+    class FakeExecutor:
+        async def ledger(self) -> dict:
+            return {"balances": {"USDT": {"total": "10000"}}}
+
+        async def orders(self, limit: int = 50) -> dict:
+            return {"orders": rows}
+
+    monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
+    monkeypatch.setattr(oms_surface, "executor_client", lambda: FakeExecutor())
+    state = await oms_surface.account_state("USDT")
+    assert state.open_buys == {"BINANCE_SPOT:BTCUSDT": Decimal("0.026")}
+    assert state.gross_exposure == 0
+
+    # A working order it cannot read blocks new risk instead of counting as nothing.
+    rows.append({"client_order_id": "c-x", "status": "ACKNOWLEDGED", "side": "BUY"})
+    assert (await oms_surface.account_state("USDT")).gross_exposure == Decimal("Infinity")
+
+
+async def test_paper_resting_buy_counts_toward_the_position_budget(monkeypatch) -> None:
+    configure(monkeypatch)
+    from uuid import uuid4
+
+    from services.execution import OrderStatus, OrderType, TradeIntent, VenueId
+    from services.oms.manager import ManagedOrder
+
+    oms, _, _ = await oms_surface.components()
+    trade = TradeIntent(
+        intent_id=uuid4(),
+        instrument_id="BINANCE_SPOT:BTCUSDT",
+        venue=VenueId.BINANCE_SPOT,
+        side="BUY",
+        quantity=Decimal("0.002"),
+        order_type=OrderType.LIMIT,
+        limit_price=Decimal("50000"),
+        strategy_id="hybrid-fusion-v1",
+        model_version="fusion-v1",
+        signal_ids=(uuid4(),),
+        created_at=datetime.now(UTC),
+    )
+    oms._register(
+        ManagedOrder(
+            intent=trade,
+            client_order_id=trade.client_order_id(0),
+            status=OrderStatus.ACKNOWLEDGED,
+            reserved_asset="USDT",
+            reserved=Decimal("100.5"),
+        )
+    )
+    state = await oms_surface.account_state("USDT")
+    assert state.open_buys == {"BINANCE_SPOT:BTCUSDT": Decimal("0.002")}
 
 
 async def test_checkpoints_saved_with_the_faucet_btc_do_not_read_as_a_loss(monkeypatch) -> None:

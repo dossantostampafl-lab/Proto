@@ -231,3 +231,19 @@ def test_the_justification_is_the_journaled_one_and_never_invented() -> None:
     assert halt[0]["why"] == ["daily_loss:USDT"]
     long = floor_actions(event("RISK_DECISION", {"rejections": ["x" * 900] * 9}))
     assert len(long[0]["why"]) == 8 and all(len(w) <= 400 for w in long[0]["why"])
+
+
+async def test_floor_state_says_promotion_is_unavailable_instead_of_empty(
+    configured, monkeypatch
+) -> None:
+    from apps.api.app import promotion_surface
+    from apps.api.app.floor_surface import floor_state
+
+    class Broken:
+        async def records(self):
+            raise ConnectionError("promotion store down")
+
+    monkeypatch.setattr(promotion_surface, "registry", lambda: Broken())
+    state = await floor_state()
+    # The UI prints "Promotion data unavailable." for null and "No scope registered" for [].
+    assert state["promotion"] is None

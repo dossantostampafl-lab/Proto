@@ -127,6 +127,17 @@ async def test_buy_then_sell_keeps_ledger_and_venue_reconciled() -> None:
     ]
 
 
+async def test_an_unsupported_intent_spends_its_permit_and_is_journaled() -> None:
+    events: list = []
+    oms, _ = await setup(events=events)
+    market = intent(order_type=OrderType.MARKET, limit_price=None)
+    with pytest.raises(OrderRejected, match="unsupported_intent"):
+        await oms.submit(market, SIGNER.issue(market, now=NOW))
+    assert events == [
+        ("ORDER_REFUSED", {"intent_id": str(market.intent_id), "reason": "unsupported_intent"})
+    ]
+
+
 async def test_insufficient_funds_rejects_before_reaching_the_venue() -> None:
     class Untouchable(PaperVenueAdapter):
         async def submit(self, order):
@@ -197,6 +208,26 @@ def venue_of(cls):
         clock=lambda: NOW,
         simulated_venue=VenueId.BINANCE_SPOT,
     )
+
+
+class LeakyVenue(PaperVenueAdapter):
+    """A venue error whose text echoes the signed request it refused."""
+
+    async def submit(self, order):
+        raise RuntimeError("400 for /api/v3/order?signature=deadbeef&apiKey=K")
+
+
+async def test_an_unknown_submit_logs_the_error_type_not_its_text(caplog, monkeypatch) -> None:
+    import logging
+
+    # Alembic's fileConfig in earlier migration tests disables loggers that already exist.
+    monkeypatch.setattr(logging.getLogger("proto.oms"), "disabled", False)
+    oms, _ = await setup(venue_of(LeakyVenue))
+    with caplog.at_level("WARNING", logger="proto.oms"):
+        order = await oms.submit(trade := intent(), SIGNER.issue(trade, now=NOW))
+    assert order.status is OrderStatus.UNKNOWN
+    assert "RuntimeError" in caplog.text and "BINANCE_SPOT" in caplog.text
+    assert "signature" not in caplog.text and "apiKey" not in caplog.text
 
 
 async def test_unknown_is_resolved_by_query_to_the_venue_fill() -> None:
@@ -317,6 +348,37 @@ async def test_ledger_balances_reservations_and_idempotency(ledger) -> None:
     assert (await ledger.balances())["USDT"].reserved == Decimal("600")
 
 
+async def test_amounts_survive_storage_exactly(ledger) -> None:
+    # SQLite's NUMERIC goes through float: 0.3 came back as 0.29999999999999998889..., so a
+    # reservation of the whole balance was refused as "insufficient available".
+    await ledger.post([entry(LedgerEntryKind.OPENING_BALANCE, "BTC", "0.3")])
+    await ledger.post([entry(LedgerEntryKind.RESERVATION, "BTC", "-0.3")])
+    await ledger.post([entry(LedgerEntryKind.OPENING_BALANCE, "BRL", "12345.678901234567891234")])
+    balances = await ledger.balances()
+    assert balances["BTC"].total == Decimal("0.3")
+    assert balances["BTC"].available == Decimal("0")
+    assert balances["BRL"].total == Decimal("12345.678901234567891234")
+
+
+async def test_sqlite_ledger_created_with_numeric_column_reads_amounts_exactly() -> None:
+    # Databases created by migration 0008 (or before ExactDecimal) keep a NUMERIC column.
+    from sqlalchemy import MetaData, Numeric
+
+    from services.oms.ledger import ledger_table
+
+    legacy = MetaData()
+    table = ledger_table.to_metadata(legacy)
+    table.c.amount.type = Numeric(38, 18)
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(legacy.create_all)
+    sql = SqlLedger(engine, account_id="paper-1", venue=VenueId.BINANCE_SPOT)
+    await sql.post([entry(LedgerEntryKind.OPENING_BALANCE, "BTC", "0.3")])
+    await sql.post([entry(LedgerEntryKind.RESERVATION, "BTC", "-0.3")])
+    assert (await sql.balances())["BTC"].total == Decimal("0.3")
+    await engine.dispose()
+
+
 async def test_fills_are_recorded_even_past_available(ledger) -> None:
     await ledger.post([entry(LedgerEntryKind.TRADE, "USDT", "-5")])
     assert (await ledger.balances())["USDT"].total == Decimal("-5")
@@ -404,6 +466,42 @@ async def test_filled_orders_and_spent_permits_survive_a_restart(engine) -> None
     with pytest.raises(OrderRejected, match="permit_intent_mismatch"):
         await restarted.submit(other, permit)
     assert (await ledger.balances())["BTC"].total == Decimal("0.01")
+
+
+class BaseFeeVenue(PaperVenueAdapter):
+    """Binance-style: a buy's fee is charged in the base asset (BTC), not the quote."""
+
+    async def submit(self, order):
+        report = await super().submit(order)
+        return report.model_copy(update={"fee": Decimal("0.00001"), "fee_asset": "BTC"})
+
+
+async def test_the_fee_asset_is_serialized_and_survives_a_restart(engine) -> None:
+    oms, ledger = await boot(engine)
+    quote_fee = await oms.submit(trade := intent(), SIGNER.issue(trade, now=NOW))
+    assert quote_fee.to_dict()["fee_asset"] == "USDT"
+
+    totals = {a: b.total for a, b in (await ledger.balances()).items()}
+    venue = BaseFeeVenue(
+        instruments=(BTC,),
+        quotes=lambda _id: QUOTE,
+        balances=totals,
+        fee_bps=Decimal("10"),
+        slippage_bps=Decimal("0"),
+        clock=lambda: NOW,
+        simulated_venue=VenueId.BINANCE_SPOT,
+    )
+    oms, ledger = await boot(engine, venue)
+    base_fee = await oms.submit(trade := intent(), SIGNER.issue(trade, now=NOW))
+    assert (base_fee.to_dict()["fee"], base_fee.to_dict()["fee_asset"]) == ("0.00001", "BTC")
+    # The fee came out of the BTC bought, not out of USDT.
+    assert (await ledger.balances())["BTC"].total == Decimal("0.01") + Decimal("0.00999")
+
+    restarted, _ = await boot(engine)
+    assert {o.client_order_id: o.to_dict()["fee_asset"] for o in restarted.orders} == {
+        quote_fee.client_order_id: "USDT",
+        base_fee.client_order_id: "BTC",
+    }
 
 
 async def test_open_orders_come_back_unknown_and_resolve_by_query(engine) -> None:
