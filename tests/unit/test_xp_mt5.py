@@ -14,7 +14,7 @@ from services.execution import OrderStatus, OrderType, TimeInForce, VenueId
 from services.execution.venue import VenueOrder
 from services.venues.binance import VenueOutcomeUnknown
 from services.venues.credentials import VenueEnvironment
-from services.venues.xp_mt5 import XpMt5Adapter, bridge_client, load_instruments
+from services.venues.xp_mt5 import BridgeRefused, XpMt5Adapter, bridge_client, load_instruments
 
 TOKEN = "b" * 40
 
@@ -198,6 +198,34 @@ def test_balances_and_quotes_read_through_the_bridge(tmp_path) -> None:
     assert asyncio.run(adapter.balances()) == {"BRL": Decimal("10000.0"), "PETR4F": Decimal("30.0")}
     quotes = asyncio.run(adapter.quotes(["PETR4F", "VALE3"]))
     assert set(quotes) == {"PETR4F"} and quotes["PETR4F"]["bid"] == "38.1"
+
+
+def test_a_login_that_leaves_demo_after_connect_latches_and_refuses_orders(tmp_path) -> None:
+    terminal = FakeTerminal()
+    adapter = connect(wire(terminal, tmp_path))
+    assert adapter.real_money_execution is False
+    terminal.mode = g.ACCOUNT_TRADE_MODE_REAL  # someone logged the terminal into a real account
+    with pytest.raises(VenueOutcomeUnknown, match="not DEMO"):
+        asyncio.run(adapter.balances())
+    assert adapter.real_money_execution is True
+    terminal.mode = g.ACCOUNT_TRADE_MODE_DEMO  # never latches back without a restart
+    report = asyncio.run(adapter.submit(order()))
+    assert report.status is OrderStatus.REJECTED and "not sent" in (report.reason or "")
+    assert terminal.sent == []
+
+
+def test_an_unreadable_bridge_answer_is_unknown_and_a_bare_4xx_a_refusal() -> None:
+    answers = {"/v1/orders/PXabc": httpx.Response(200, text="<html>")}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return answers.get(request.url.path, httpx.Response(400, text="bad"))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://bridge")
+    adapter = XpMt5Adapter(client, environment=VenueEnvironment.TESTNET, instruments={})
+    with pytest.raises(VenueOutcomeUnknown, match="unreadable"):
+        asyncio.run(adapter.query("PXabc"))
+    with pytest.raises(BridgeRefused):
+        asyncio.run(adapter.query("PXother"))
 
 
 def test_a_bridge_outage_is_an_unknown_outcome_never_a_rejection() -> None:
