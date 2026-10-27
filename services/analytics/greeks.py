@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 from services.quant.core import estimate_probability
 
@@ -46,6 +47,14 @@ def calculate_synthetic_greeks(
 ) -> SyntheticGreeks:
     if not 0.0 < bump_size < 0.1:
         raise ValueError("bump_size must be between zero and 0.1")
+    # The same domain the quant pipeline validates: outside it the bumps collapse (a negative
+    # volatility gives a zero-width difference) or the estimator silently clamps.
+    if not (isfinite(market_probability) and 0.0 <= market_probability <= 1.0):
+        raise ValueError("market_probability must be finite and within [0, 1]")
+    if not (isfinite(volatility) and volatility >= 0.0):
+        raise ValueError("volatility must be finite and non-negative")
+    if not (isfinite(imbalance) and -1.0 <= imbalance <= 1.0):
+        raise ValueError("imbalance must be finite and within [-1, 1]")
 
     probability_plus = min(market_probability + bump_size, 1.0 - 1e-6)
     probability_minus = max(market_probability - bump_size, 1e-6)

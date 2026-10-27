@@ -32,8 +32,11 @@ environment.
 
 - **Release:** roll the API (and, separately, the executor) back to the previous image tag or
   commit, and keep the watchdog running throughout; it does not depend on either's code.
-- **Migrations:** they are additive (new tables only), so older code runs on a newer schema. Do
-  not downgrade a production database; prefer a forward fix. Check `alembic history` first.
+- **Migrations:** all but `0003`, `0004` and `0011` only add tables (those three change existing
+  columns or constraints), so older code runs on a newer schema. Do not downgrade a production database; prefer a
+  forward fix. Check `alembic history` first. The Oracle deployment never runs Alembic: the API and
+  the executor create missing tables at startup (`create_all`), so their databases carry no
+  `alembic_version` and `alembic upgrade head` there fails on the first existing table.
 - **Verify** after rolling back: `GET /health`, `GET /v1/watchdog/status` (active),
   `GET /v1/floor/state` (journal `VALID`), and `POST /v1/oms/reconcile` (consistent).
 

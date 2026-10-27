@@ -1,5 +1,10 @@
 # LIVE_MONITORING History API Gate
 
+> **Scope (2026-10-27).** This gate covers only the import-isolated, read-only public monitor
+> `apps.api.app.live_app:app` (`Dockerfile.api`, `docker-compose.live.yml`). The full application
+> `apps.api.app.main:app` (root `Dockerfile`, deployed on Oracle Cloud) also runs paper, testnet,
+> demo and paper-broker execution behind the Risk Engine; see `docs/OPERATIONS.md`.
+
 The persisted history API is a read-only observability surface for public BTC/ETH/SOL market observations.
 
 ## Endpoint

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ PIPELINES = {
 }
 LLM_KEY_FILE = Path("/run/secrets/finrobot_llm_key")
 FMP_KEY_FILE = Path("/run/secrets/finrobot_fmp_key")
+MAX_TIMEOUT_SECONDS = 900.0
 
 
 def validate_request(ticker: str, pipeline: str, model: str) -> str:
@@ -76,6 +78,8 @@ async def run_research(
 ) -> dict[str, object]:
     """Call FinRobot's original typed pipeline (no alternative research engine)."""
     ticker = validate_request(ticker, pipeline, model)
+    if not (math.isfinite(timeout_seconds) and 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS):
+        return abstain(ticker, pipeline, "INVALID_REQUEST")
     try:
         llm_key = read_secret(llm_key_file)
         fmp_key = read_secret(fmp_key_file, optional=True)
@@ -88,17 +92,18 @@ async def run_research(
     try:
         from finrobot import FinRobot  # type: ignore[import-not-found]
 
-        async with FinRobot(
-            model=model,
-            provider_keys={provider: llm_key},
-            fmp_api_key=fmp_key,
-            log_to_file=False,
-            cache_db_path="/work/finrobot_cache.sqlite3",
-        ) as original:
-            method = getattr(original, PIPELINES[pipeline])
-            result: Any = await asyncio.wait_for(
-                method(ticker), timeout=timeout_seconds
-            )
+        # One budget for the whole SDK lifecycle: opening the client and its data providers
+        # (``__aenter__``) and closing them can block on the network too, not only the pipeline.
+        async with asyncio.timeout(timeout_seconds):
+            async with FinRobot(
+                model=model,
+                provider_keys={provider: llm_key},
+                fmp_api_key=fmp_key,
+                log_to_file=False,
+                cache_db_path="/work/finrobot_cache.sqlite3",
+            ) as original:
+                method = getattr(original, PIPELINES[pipeline])
+                result: Any = await method(ticker)
         report = result.format_summary()
         warnings = result.collect_warnings()
         if result.has_failures or warnings or not result.steps or not report.strip():
@@ -134,29 +139,35 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         ticker = validate_request(args.ticker, args.pipeline, args.model)
-        if not 10 <= args.timeout <= 900:
+        if not 10 <= args.timeout <= MAX_TIMEOUT_SECONDS:
             raise ValueError("timeout outside 10..900 seconds")
     except ValueError:
         print(json.dumps(abstain(args.ticker, args.pipeline, "INVALID_REQUEST")))
         return 2
 
     if args.validate_only:
-        print(json.dumps({
-            "status": "VALIDATED_ONLY",
-            "ticker": ticker,
-            "pipeline": args.pipeline,
-            "finrobot_commit": ORIGINAL_FINROBOT_COMMIT,
-            "execution_authority": False,
-            "research_only": True,
-        }))
+        print(
+            json.dumps(
+                {
+                    "status": "VALIDATED_ONLY",
+                    "ticker": ticker,
+                    "pipeline": args.pipeline,
+                    "finrobot_commit": ORIGINAL_FINROBOT_COMMIT,
+                    "execution_authority": False,
+                    "research_only": True,
+                }
+            )
+        )
         return 0
 
-    result = asyncio.run(run_research(
-        ticker=ticker,
-        pipeline=args.pipeline,
-        model=args.model,
-        timeout_seconds=args.timeout,
-    ))
+    result = asyncio.run(
+        run_research(
+            ticker=ticker,
+            pipeline=args.pipeline,
+            model=args.model,
+            timeout_seconds=args.timeout,
+        )
+    )
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["status"] == "RESEARCH_REPORT" else 2
 

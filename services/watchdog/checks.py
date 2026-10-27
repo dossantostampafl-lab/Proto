@@ -154,8 +154,7 @@ class Checks:
                 if start > 0:
                     check(
                         f"daily_loss_{asset}",
-                        (equity - start) / min(start, cap)
-                        <= -lim.max_daily_loss,
+                        (equity - start) / min(start, cap) <= -lim.max_daily_loss,
                         reason=f"daily_loss:{asset}",
                     )
                 if peak > 0:
@@ -193,7 +192,7 @@ class Checks:
                 last = ex.get("last_reconcile_at")
                 try:
                     age = obs.at - datetime.fromisoformat(str(last)) if last else None
-                except ValueError:
+                except (ValueError, TypeError):  # unreadable or naive: stale
                     age = None
                 check(
                     "executor_reconcile_age",
@@ -223,7 +222,7 @@ class Checks:
         last = xp.get("last_reconcile_at")
         try:
             age = obs.at - datetime.fromisoformat(str(last)) if last else None
-        except ValueError:
+        except (ValueError, TypeError):  # unreadable or naive: stale
             age = None
         stale = age is None or age > self.limits.max_reconcile_age
         if stale and _b3_session(obs.at):
@@ -251,7 +250,7 @@ class Checks:
         last = alpaca.get("last_reconcile_at")
         try:
             age = obs.at - datetime.fromisoformat(str(last)) if last else None
-        except ValueError:
+        except (ValueError, TypeError):  # unreadable or naive: stale
             age = None
         stale = age is None or age > self.limits.max_reconcile_age
         if stale and _us_session(obs.at):

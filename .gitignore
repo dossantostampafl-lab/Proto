@@ -3,6 +3,11 @@
 !.env.example
 secrets/
 *.key
+*.pem
+# Local SQLite databases (docs/OPERATIONS.md writes ./proto.db)
+*.db
+*.sqlite
+*.sqlite3
 __pycache__/
 *.py[cod]
 .pytest_cache/

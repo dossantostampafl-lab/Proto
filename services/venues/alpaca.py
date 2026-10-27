@@ -45,7 +45,7 @@ from services.execution.venue import VenueOrder
 from services.market_data.instruments import AssetClass, SessionType
 
 from .binance import VenueOutcomeUnknown
-from .credentials import VenueCredentials, VenueEnvironment
+from .credentials import VenueCredentials, VenueEnvironment, variable_prefix
 
 logger = logging.getLogger("proto.venues.alpaca")
 
@@ -145,6 +145,15 @@ class AlpacaPaperAdapter:
         if credentials.environment is not VenueEnvironment.TESTNET:
             # TESTNET here means Alpaca's paper account. There is no live path to fall back to.
             raise ValueError("Alpaca runs on the paper account only (environment TESTNET)")
+        # Alpaca key ids say which account they belong to: PK... paper, AK... live. A live key
+        # is never sent anywhere (the paper host would answer 401 anyway), and a pair whose
+        # secret looks like a key id was typed into the wrong secret: both fail here, by name.
+        if credentials.api_key.startswith("AK"):
+            raise ValueError("refused: a LIVE Alpaca key id (AK...); the paper key id is PK...")
+        if credentials.api_secret.startswith(("PK", "AK")) and not credentials.api_key.startswith(
+            "PK"
+        ):
+            raise ValueError("Alpaca key id and secret look swapped: _API_KEY holds the PK... id")
         self._credentials = credentials
         self._instruments = {k: v for k, v in instruments.items() if v.venue is VenueId.ALPACA_US}
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(10.0))
@@ -162,7 +171,20 @@ class AlpacaPaperAdapter:
         """Check the paper account can trade and load the tradable assets before any order."""
 
         adapter = cls(credentials, instruments={}, client=client, clock=clock)
-        account = await adapter._send("GET", _trading_url("/v2/account"))
+        try:
+            account = await adapter._send("GET", _trading_url("/v2/account"))
+        except AlpacaRefused as exc:
+            if exc.status not in (401, 403):
+                raise
+            # The headers, host and variable names are fixed in code (and tested): a refusal here
+            # means the key pair itself. Say what to check, never what the key is.
+            prefix = variable_prefix(credentials)
+            raise AlpacaRefused(
+                exc.status,
+                f"{exc.message or 'unauthorized'} - the paper host refused the key pair: "
+                f"{prefix}_API_KEY / _API_SECRET must be the current PAPER Key ID and Secret "
+                "(regenerating the paper key invalidates the old secret)",
+            ) from exc
         if account.get("status") != "ACTIVE" or account.get("trading_blocked"):
             raise RuntimeError("the Alpaca paper account is not active for trading")
         if str(account.get("currency", "USD")) != "USD":

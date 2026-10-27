@@ -189,6 +189,39 @@ def test_daily_loss_and_drawdown_breaches_are_reported_and_block_new_risk() -> N
     assert near.breach is None and near.approved
 
 
+def test_risk_per_position_counts_what_is_already_held() -> None:
+    # Budget 1250 notional (see above). 0.015 BTC held (~930) + 0.006 new (~372) > 1250:
+    # stacked small buys must not build a position above the 0.25% budget.
+    held = account(positions={BTC_ID: Decimal("0.015")}, gross_exposure=Decimal("930"))
+    stacked = evaluate(intent(quantity=Decimal("0.006")), acct=held)
+    assert "risk_per_position" in stacked.rejections
+    assert stacked.permit is None
+    # The same order on a flat book is fine, and a top-up within the budget still passes.
+    assert evaluate(intent(quantity=Decimal("0.006"))).approved is True
+    assert evaluate(intent(quantity=Decimal("0.005")), acct=held).approved is True
+
+
+def test_risk_per_position_counts_buys_still_working_at_the_venue() -> None:
+    # Nothing filled yet, but 0.015 BTC of buys rest (or are UNKNOWN): they count like a fill.
+    working = account(open_buys={BTC_ID: Decimal("0.015")})
+    assert (
+        "risk_per_position" in evaluate(intent(quantity=Decimal("0.006")), acct=working).rejections
+    )
+    # Exits are never blocked by the budget, working buys or not.
+    exit_ = intent(
+        side="SELL", reduce_only=True, quantity=Decimal("0.002"), limit_price=Decimal("62000.00")
+    )
+    held = account(positions={BTC_ID: Decimal("0.02")}, open_buys={BTC_ID: Decimal("0.02")})
+    assert evaluate(exit_, acct=held).approved is True
+
+
+def test_an_unknown_book_adds_no_risk() -> None:
+    # The API's outage shape (executor unreachable or a holding without a mark): exposure unknown.
+    unknown = account(gross_exposure=Decimal("Infinity"), positions={})
+    decision = evaluate(intent(quantity=Decimal("0.002")), acct=unknown)
+    assert "gross_leverage" in decision.rejections and decision.permit is None
+
+
 def test_reduce_only_exits_stay_allowed_in_lockdown_but_not_under_kill_switch() -> None:
     exit_ = intent(
         side="SELL", reduce_only=True, quantity=Decimal("0.002"), limit_price=Decimal("62000.00")
@@ -203,6 +236,27 @@ def test_reduce_only_exits_stay_allowed_in_lockdown_but_not_under_kill_switch() 
 def test_venue_cap_can_only_tighten() -> None:
     capped = evaluate(max_order_notional={"BINANCE_SPOT": Decimal("100")})
     assert "venue_order_notional" in capped.rejections
+
+
+def test_a_wide_spread_adds_no_risk_but_exits_stay_allowed() -> None:
+    wide = Quote(bid=Decimal("60000.00"), ask=Decimal("62000.20"), observed_at=NOW)  # ~328 bps
+    buy = evaluate(intent(), quote=wide)
+    assert "quote_spread" in buy.rejections and buy.permit is None
+    assert evaluate(intent(), quote=wide, max_spread_bps=Decimal("400")).approved is True
+    exit_ = intent(
+        side="SELL", reduce_only=True, quantity=Decimal("0.002"), limit_price=Decimal("60000.00")
+    )
+    held = account(positions={BTC_ID: Decimal("0.005")})
+    assert evaluate(exit_, acct=held, quote=wide).approved is True
+    with pytest.raises(ValueError):
+        RiskPolicy(max_spread_bps=Decimal("0"))
+
+
+def test_an_exchange_without_a_modelled_session_is_closed() -> None:
+    # Before: any other zone silently got B3's hours (10:00-17:55 there, open at NOW).
+    tokyo = PETR4.model_copy(update={"instrument_id": "XP_B3:TKY", "timezone": "Asia/Tokyo"})
+    assert session_open(tokyo, NOW.replace(hour=3)) is False  # 12:00 in Tokyo, a Tuesday
+    assert session_open(tokyo, NOW) is False
 
 
 def test_exchange_sessions_follow_b3_hours() -> None:

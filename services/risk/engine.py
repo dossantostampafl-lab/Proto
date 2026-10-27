@@ -46,6 +46,8 @@ class RiskPolicy:
     stop_distance: Decimal = Decimal("0.02")
     max_quote_age: timedelta = timedelta(seconds=10)
     price_collar_bps: Decimal = Decimal("50")
+    # Liquidity: a quote wider than this (ask - bid over mid) adds no new risk. Exits stay allowed.
+    max_spread_bps: Decimal = Decimal("200")
     # Optional per-venue cap on a single order's notional; may only tighten.
     max_order_notional: Mapping[str, Decimal] = field(default_factory=dict)
 
@@ -54,6 +56,8 @@ class RiskPolicy:
             raise ValueError("stop_distance must be in (0, 1)")
         if not Decimal("0") < self.price_collar_bps <= Decimal("500"):
             raise ValueError("price_collar_bps must be in (0, 500]")
+        if not Decimal("0") < self.max_spread_bps <= Decimal("500"):
+            raise ValueError("max_spread_bps must be in (0, 500]")
         if self.max_quote_age <= timedelta(0):
             raise ValueError("max_quote_age must be positive")
 
@@ -70,6 +74,9 @@ class AccountState:
     # REFERENCE_CAPITAL in this account's quote currency (`reference_capital_in`). 0: unknown
     # (no BRL rate), which sizes nothing new.
     reference_capital: Decimal = REFERENCE_CAPITAL
+    # Buy quantity still working at the venue per instrument (acknowledged, partially filled
+    # remainder, or UNKNOWN). It counts toward the position budget like a fill would.
+    open_buys: Mapping[str, Decimal] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -100,8 +107,8 @@ class RiskDecision:
 
 
 _B3_OPEN, _B3_CLOSE = time(10, 0), time(17, 55)
-# Regular sessions by the exchange's timezone (local wall-clock time, weekdays). B3 is the default
-# for any other zone, as before; New York is the US regular session (no pre/post-market).
+# Regular sessions by the exchange's timezone (local wall-clock time, weekdays). Any other zone
+# has no modelled session and is closed; New York is the US regular session (no pre/post-market).
 _SESSIONS: dict[str, tuple[time, time]] = {
     "America/Sao_Paulo": (_B3_OPEN, _B3_CLOSE),
     "America/New_York": (time(9, 30), time(16, 0)),
@@ -118,8 +125,12 @@ def session_open(instrument: TradableInstrument, now: datetime) -> bool:
 
     if instrument.session_type is SessionType.CONTINUOUS_24_7:
         return True
+    hours = _SESSIONS.get(instrument.timezone)
+    if hours is None:
+        # No modelled session for this exchange: closed (fail closed), never B3's hours by guess.
+        return False
     local = now.astimezone(ZoneInfo(instrument.timezone))
-    opens, closes = _SESSIONS.get(instrument.timezone, (_B3_OPEN, _B3_CLOSE))
+    opens, closes = hours
     return local.weekday() < 5 and opens <= local.time() < closes
 
 
@@ -246,6 +257,13 @@ class RiskEngine:
         checks["daily_loss"] = f"{daily_loss:.6f}"
         checks["drawdown"] = f"{drawdown:.6f}"
         if not reducing:
+            if quote_ok and quote is not None:
+                spread = (quote.ask - quote.bid) / ((quote.ask + quote.bid) / 2) * _BPS
+                check(
+                    "quote_spread",
+                    spread <= policy.max_spread_bps,
+                    f"{spread:.1f} bps > {policy.max_spread_bps} bps",
+                )
             check("no_lockdown", lockdown is None, lockdown.value if lockdown else "")
             equity = conservative_equity(account.equity, account.reference_capital)
             if canary:
@@ -254,10 +272,14 @@ class RiskEngine:
                 equity = min(equity, canary_capital if known else Decimal("0"))
             notional = intent.quantity * (price or Decimal("0"))
             budget = equity * MAX_RISK_PER_POSITION
+            # Per POSITION, not per order: what is already held in the instrument counts too,
+            # so stacking small buys can never build a position above the 0.25% budget.
+            working = max(account.open_buys.get(intent.instrument_id, Decimal("0")), Decimal("0"))
+            position_notional = (position + working + intent.quantity) * (price or Decimal("0"))
             check(
                 "risk_per_position",
-                notional * policy.stop_distance <= budget,
-                f"{notional * policy.stop_distance:.2f} > {budget:.2f}",
+                position_notional * policy.stop_distance <= budget,
+                f"{position_notional * policy.stop_distance:.2f} > {budget:.2f}",
             )
             check(
                 "gross_leverage",

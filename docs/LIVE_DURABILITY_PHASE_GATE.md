@@ -1,5 +1,10 @@
 # LIVE_MONITORING Durability & Recovery Phase Gate
 
+> **Scope (2026-10-27).** This gate covers only the import-isolated, read-only public monitor
+> `apps.api.app.live_app:app` (`Dockerfile.api`, `docker-compose.live.yml`). The full application
+> `apps.api.app.main:app` (root `Dockerfile`, deployed on Oracle Cloud) also runs paper, testnet,
+> demo and paper-broker execution behind the Risk Engine; see `docs/OPERATIONS.md`.
+
 ## Scope
 
 This phase adds durable storage and restart-safe historical recovery for the public read-only BTC/ETH/SOL monitor.

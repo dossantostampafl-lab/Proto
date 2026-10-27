@@ -17,6 +17,7 @@ from services.agents.roster import (
     slot_of,
 )
 from services.execution import Signal, SignalDirection, SignalSource
+from services.research.data import Bar
 from services.research.live import LAB_STRATEGY_PREFIX, LabSignalStrategy, lab_strategy_id
 from services.research.strategies import build
 
@@ -114,6 +115,54 @@ def test_live_adapter_rejects_bad_input() -> None:
     with pytest.raises(ValueError):
         LabSignalStrategy(SPEC, timeframe_minutes=0)
     assert LabSignalStrategy(SPEC, timeframe_minutes=60).observe(BTC, 0.0, START) is None
+
+
+def test_live_adapter_ignores_non_finite_mids() -> None:
+    lab = LabSignalStrategy(SPEC, timeframe_minutes=1)
+    for bad in (float("inf"), float("nan"), -5.0):
+        assert lab.observe(BTC, bad, START) is None
+    assert lab.status() == {}
+
+
+def _rising(lab: LabSignalStrategy, minutes: int) -> float:
+    price = 100.0
+    for minute in range(minutes):
+        price *= 1.01
+        assert lab.observe(BTC, price, START + timedelta(minutes=minute, seconds=30)) is None
+    return price
+
+
+def test_live_adapter_decides_nothing_on_a_bar_closed_after_a_feed_gap() -> None:
+    contiguous = LabSignalStrategy(SPEC, timeframe_minutes=1)
+    price = _rising(contiguous, 6)
+    fresh = contiguous.observe(BTC, price * 1.01, START + timedelta(minutes=6, seconds=30))
+    assert fresh is not None and fresh.direction is SignalDirection.LONG
+
+    gapped = LabSignalStrategy(SPEC, timeframe_minutes=1)
+    price = _rising(gapped, 6)
+    late = START + timedelta(minutes=40, seconds=30)  # the quotes stopped for half an hour
+    assert gapped.observe(BTC, price * 1.01, late) is None
+    assert gapped.status()[BTC] == {"bars": 6, "holding": False}
+
+
+def _kline(minute: int, close: float) -> Bar:
+    t = int((START + timedelta(minutes=minute)).timestamp() * 1000)
+    return Bar(t, close, close, close, close, 1.0)
+
+
+def test_warm_up_never_duplicates_or_reorders_history() -> None:
+    lab = LabSignalStrategy(SPEC, timeframe_minutes=1, history=10)
+    lab.warm(BTC, [_kline(m, 100.0 + m) for m in (3, 1, 2, 2)])
+    assert [b.open_time for b in lab._books[BTC].bars] == [
+        _kline(m, 0).open_time for m in (1, 2, 3)
+    ]
+    for minute in (5, 6, 7):  # live mids: bar 5 and 6 close
+        lab.observe(BTC, 110.0, START + timedelta(minutes=minute, seconds=10))
+    # A late warm-up returns overlapping klines (and the bar still forming): only older ones land.
+    lab.warm(BTC, [_kline(m, 1.0) for m in range(0, 9)])
+    times = [b.open_time for b in lab._books[BTC].bars]
+    assert times == sorted(set(times))
+    assert times == [_kline(m, 0).open_time for m in (0, 1, 2, 3, 5, 6)]
 
 
 def test_lab_strategies_refuse_to_start_without_the_warm_up() -> None:

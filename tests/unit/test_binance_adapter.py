@@ -103,7 +103,12 @@ async def test_definite_rejection_and_unknown_outcomes(fake) -> None:
     with pytest.raises(VenueOutcomeUnknown):
         await adapter.submit(order(client_order_id="PXother"))
     fake.submit_error = (502, {})
-    with pytest.raises(VenueOutcomeUnknown):
+    with pytest.raises(VenueOutcomeUnknown) as caught:
+        await adapter.submit(order(client_order_id="PXother"))
+    # The OMS logs this message: it names the endpoint, never the signed query.
+    assert str(caught.value) == "POST /api/v3/order: HTTP 502"
+    fake.submit_error = (307, {})
+    with pytest.raises(VenueOutcomeUnknown, match="HTTP 307"):
         await adapter.submit(order(client_order_id="PXother"))
 
 

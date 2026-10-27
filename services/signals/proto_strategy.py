@@ -14,6 +14,7 @@ flapping.
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -76,7 +77,7 @@ class EmaCrossStrategy:
     def observe(self, instrument_id: str, mid: float, at: datetime) -> Signal | None:
         """Feed one live mid. Returns a signal when a closed bar completes a strong cross."""
 
-        if not mid > 0:
+        if not (math.isfinite(mid) and mid > 0):
             return None
         book = self._books.setdefault(
             instrument_id, _Book(closes=deque(maxlen=self.policy.slow * 3))
@@ -87,9 +88,16 @@ class EmaCrossStrategy:
             book.bar_start = start
         elif start > book.bar_start and book.last_mid is not None:
             # The previous bar closed at its last mid.
+            contiguous = start - book.bar_start == self.policy.bar
             book.closes.append(book.last_mid)
             book.bar_start = start
-            signal = self._evaluate(instrument_id, book, at)
+            if contiguous:
+                signal = self._evaluate(instrument_id, book, at)
+            else:
+                # The feed skipped at least one bar (outage, stale quotes, a closed session):
+                # the bar that just closed is old news, so it emits nothing and any pending
+                # cross is dropped rather than confirmed across the gap.
+                book.armed = None
         book.last_mid = mid
         return signal
 

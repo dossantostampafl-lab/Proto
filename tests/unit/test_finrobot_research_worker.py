@@ -200,3 +200,62 @@ async def test_upstream_raises_without_leaking_secret(
     )
     assert response["status"] == "ABSTAIN"
     assert "secret-cannot-leak" not in json.dumps(response)
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_hangs_while_opening_abstains_within_the_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The timeout covers the whole SDK lifecycle, not only the pipeline call."""
+
+    import asyncio
+
+    key = tmp_path / "llm"
+    key.write_text("fake", encoding="utf-8")
+
+    class HangingFinRobot:
+        def __init__(self, **kwargs: object) -> None:
+            return None
+
+        async def __aenter__(self) -> HangingFinRobot:
+            await asyncio.sleep(3600)
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    fake = ModuleType("finrobot")
+    fake.FinRobot = HangingFinRobot  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "finrobot", fake)
+    response = await asyncio.wait_for(
+        runner.run_research(
+            ticker="AAPL",
+            pipeline="research",
+            model="anthropic:claude-sonnet-4-6",
+            timeout_seconds=0.05,
+            llm_key_file=key,
+            fmp_key_file=tmp_path / "no-fmp",
+        ),
+        timeout=5,
+    )
+    assert response["status"] == "ABSTAIN"
+    assert response["reason"] == "UPSTREAM_TIMEOUT"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", [0.0, -1.0, float("nan"), float("inf"), 901.0])
+async def test_an_invalid_timeout_abstains_before_reading_secrets(
+    monkeypatch: pytest.MonkeyPatch, budget: float
+) -> None:
+    def inaccessible_secret(*args: object, **kwargs: object) -> str:
+        raise AssertionError("no secret may be opened for an invalid request")
+
+    monkeypatch.setattr(runner, "read_secret", inaccessible_secret)
+    response = await runner.run_research(
+        ticker="AAPL",
+        pipeline="research",
+        model="anthropic:claude-sonnet-4-6",
+        timeout_seconds=budget,
+    )
+    assert response["status"] == "ABSTAIN"
+    assert response["reason"] == "INVALID_REQUEST"
