@@ -217,7 +217,11 @@ class LeakyVenue(PaperVenueAdapter):
         raise RuntimeError("400 for /api/v3/order?signature=deadbeef&apiKey=K")
 
 
-async def test_an_unknown_submit_logs_the_error_type_not_its_text(caplog) -> None:
+async def test_an_unknown_submit_logs_the_error_type_not_its_text(caplog, monkeypatch) -> None:
+    import logging
+
+    # Alembic's fileConfig in earlier migration tests disables loggers that already exist.
+    monkeypatch.setattr(logging.getLogger("proto.oms"), "disabled", False)
     oms, _ = await setup(venue_of(LeakyVenue))
     with caplog.at_level("WARNING", logger="proto.oms"):
         order = await oms.submit(trade := intent(), SIGNER.issue(trade, now=NOW))
