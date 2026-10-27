@@ -21,6 +21,7 @@ from services.agents.roster import (
     AGENT_STARTING_CAPITAL,
     B3_SLOTS,
     INITIAL_SLOTS,
+    US_SLOTS,
     AgentEliminated,
     AgentRoster,
     Slot,
@@ -57,11 +58,15 @@ async def _journal(event_type: str, payload: dict[str, Any], key: str) -> None:
 
 
 def roster_slots() -> tuple[Slot, ...]:
-    """The Binance slots, plus the B3 ones when B3 agents are on and the XP node is configured."""
+    """The Binance slots, plus the B3 ones when B3 agents are on and the XP node is configured,
+    plus the US ones when US agents are on and the Alpaca executor is configured."""
 
+    slots = INITIAL_SLOTS
     if settings.agent_b3_enabled and settings.xp_routing_enabled:
-        return INITIAL_SLOTS + B3_SLOTS
-    return INITIAL_SLOTS
+        slots += B3_SLOTS
+    if settings.agent_us_enabled and settings.alpaca_routing_enabled:
+        slots += US_SLOTS
+    return slots
 
 
 def roster() -> AgentRoster:

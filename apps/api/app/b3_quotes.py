@@ -45,7 +45,10 @@ def parse_quote(raw: dict[str, Any]) -> Quote | None:
 
 
 class B3QuoteFeed:
-    def __init__(self, fetch: Fetch, symbols: list[str], *, interval: float = POLL_SECONDS) -> None:
+    def __init__(
+        self, fetch: Fetch, symbols: list[str], *, interval: float = POLL_SECONDS, name: str = "b3"
+    ) -> None:
+        self._name = name
         self._fetch = fetch
         self._symbols = symbols
         self._interval = interval
@@ -78,12 +81,14 @@ class B3QuoteFeed:
                 raise
             except Exception:  # keep polling; quotes age out on their own timestamps
                 self.failures += 1
-                logger.exception("B3 quote refresh failed")
+                logger.exception("%s quote refresh failed", self._name)
             await asyncio.sleep(self._interval)
 
     def start(self) -> None:
         if self._task is None:
-            self._task = asyncio.get_running_loop().create_task(self._run(), name="proto-b3-quotes")
+            self._task = asyncio.get_running_loop().create_task(
+                self._run(), name=f"proto-{self._name}-quotes"
+            )
 
     async def stop(self) -> None:
         if self._task is not None:

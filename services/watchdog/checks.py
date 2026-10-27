@@ -57,6 +57,9 @@ class Observation:
     # The XP (B3) executor on the operator's PC, over Tailscale: same status route.
     xp_configured: bool = False
     xp: dict[str, Any] | None = None
+    # The Alpaca (US equities, paper) executor: same status route.
+    alpaca_configured: bool = False
+    alpaca: dict[str, Any] | None = None
 
 
 # B3 regular session (Brasilia), kept here on purpose: the watchdog depends on no Risk Engine code.
@@ -67,6 +70,16 @@ _B3_OPEN, _B3_CLOSE = time(10, 0), time(17, 55)
 def _b3_session(at: datetime) -> bool:
     local = at.astimezone(_B3_TZ)
     return local.weekday() < 5 and _B3_OPEN <= local.time() < _B3_CLOSE
+
+
+# US regular session (New York), for the same reason.
+_US_TZ = ZoneInfo("America/New_York")
+_US_OPEN, _US_CLOSE = time(9, 30), time(16, 0)
+
+
+def _us_session(at: datetime) -> bool:
+    local = at.astimezone(_US_TZ)
+    return local.weekday() < 5 and _US_OPEN <= local.time() < _US_CLOSE
 
 
 def _dec(value: object) -> Decimal | None:
@@ -216,4 +229,32 @@ class Checks:
         if stale and _b3_session(obs.at):
             trips.append("xp_reconciliation_stale")
         status["xp_reconciliation"] = "trip" if trips else "ok"
+        return trips, status
+
+    def evaluate_alpaca(self, obs: Observation) -> tuple[list[str], dict[str, str]]:
+        """Alpaca (US, paper) executor checks: trips halt the Alpaca executor only.
+
+        Same rules as the XP node. A divergence trips at once; a stale reconciliation only during
+        the US regular session. An unreachable executor is reported, not tripped: it cannot be
+        halted over a dead link, and the API already refuses US risk while it cannot read it.
+        """
+
+        if not obs.alpaca_configured:
+            return [], {}
+        alpaca = obs.alpaca
+        if alpaca is None or not alpaca.get("ready"):
+            return [], {"alpaca_executor": "unreachable"}
+        trips: list[str] = []
+        status = {"alpaca_executor": "halted" if alpaca.get("halted") else "ok"}
+        if alpaca.get("consistent") is False:
+            trips.append("alpaca_reconciliation_divergence")
+        last = alpaca.get("last_reconcile_at")
+        try:
+            age = obs.at - datetime.fromisoformat(str(last)) if last else None
+        except ValueError:
+            age = None
+        stale = age is None or age > self.limits.max_reconcile_age
+        if stale and _us_session(obs.at):
+            trips.append("alpaca_reconciliation_stale")
+        status["alpaca_reconciliation"] = "trip" if trips else "ok"
         return trips, status

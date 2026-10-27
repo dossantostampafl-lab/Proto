@@ -64,6 +64,8 @@ ACCOUNT_ID = "paper-binance-spot"
 EXECUTOR_ACCOUNT_ID = "executor-binance-spot"
 XP_ACCOUNT_ID = "executor-xp-b3"
 XP_VENUE = VenueId.XP_B3
+ALPACA_ACCOUNT_ID = "executor-alpaca-us"
+ALPACA_VENUE = VenueId.ALPACA_US
 VENUE = VenueId.BINANCE_SPOT
 _INSTRUMENTS = {k: v for k, v in PAPER_INSTRUMENTS.items() if v.venue is VENUE}
 _QUOTE_ASSETS = sorted({i.quote_asset for i in _INSTRUMENTS.values()})
@@ -108,8 +110,23 @@ def xp_enabled() -> bool:
     return settings.xp_routing_enabled
 
 
+def alpaca_enabled() -> bool:
+    return settings.alpaca_routing_enabled
+
+
+def _routed(venue: VenueId) -> bool:
+    """Whether the API may send work to this venue's executor."""
+
+    if venue is XP_VENUE:
+        return xp_enabled()
+    if venue is ALPACA_VENUE:
+        return alpaca_enabled()
+    return venue is VENUE
+
+
 def executor_client(venue: VenueId = VENUE) -> ExecutorClient:
-    """The isolated executor of one venue. Binance by default; XP_B3 only when configured."""
+    """The isolated executor of one venue. Binance by default; XP_B3 and ALPACA_US only when
+    configured."""
 
     global _executor_settings_id
     if _executor_settings_id != id(settings):
@@ -119,6 +136,8 @@ def executor_client(venue: VenueId = VENUE) -> ExecutorClient:
     if client is None:
         if venue is XP_VENUE:
             url, token = settings.xp_executor_url, settings.xp_executor_api_token
+        elif venue is ALPACA_VENUE:
+            url, token = settings.alpaca_executor_url, settings.alpaca_executor_api_token
         else:
             url, token = settings.executor_url, settings.executor_api_token
         if not url or not token:
@@ -140,6 +159,8 @@ def _checkpoint_store(venue: VenueId = VENUE) -> InMemoryCheckpoints | SqlCheckp
     if store is None:
         if venue is XP_VENUE:
             account = XP_ACCOUNT_ID
+        elif venue is ALPACA_VENUE:
+            account = ALPACA_ACCOUNT_ID
         else:
             account = EXECUTOR_ACCOUNT_ID if executor_mode() else ACCOUNT_ID
         engine = _control_engine()
@@ -152,9 +173,14 @@ def _checkpoint_store(venue: VenueId = VENUE) -> InMemoryCheckpoints | SqlCheckp
 
 
 def venue_for_quote(quote_asset: str) -> VenueId:
-    """BRL is XP's currency once XP routing is on; every other quote asset stays on Binance."""
+    """BRL is XP's currency once XP routing is on, USD Alpaca's once Alpaca routing is on; every
+    other quote asset stays on Binance (USDT is Binance's, never Alpaca's)."""
 
-    return XP_VENUE if xp_enabled() and quote_asset == "BRL" else VENUE
+    if xp_enabled() and quote_asset == "BRL":
+        return XP_VENUE
+    if alpaca_enabled() and quote_asset == "USD":
+        return ALPACA_VENUE
+    return VENUE
 
 
 def _instruments_of(venue: VenueId):
@@ -404,7 +430,7 @@ def quote_asset_of(intent: TradeIntent) -> str:
 
 
 async def _halt_venue(divergences: list[dict], venue: VenueId = VENUE) -> None:
-    """Kill the diverged venue only: a Binance divergence never stops XP, nor the reverse."""
+    """Kill the diverged venue only: a divergence on one venue never stops another."""
 
     from .risk_surface import governor_ready, persist_controls
 
@@ -451,12 +477,10 @@ async def reconcile(venue: VenueId = VENUE) -> dict[str, object]:
 async def _dispatch(intent: TradeIntent, permit: RiskPermit) -> dict | None:
     """Hand a permitted intent to the isolated executor of its venue."""
 
-    venue = XP_VENUE if intent.venue is XP_VENUE else VENUE
-    if venue is XP_VENUE and not xp_enabled():
-        await _record(
-            "ORDER_REFUSED",
-            {"intent_id": str(intent.intent_id), "reason": "xp_routing_not_configured"},
-        )
+    venue = intent.venue if intent.venue in (XP_VENUE, ALPACA_VENUE) else VENUE
+    if venue is not VENUE and not _routed(venue):
+        reason = f"{'xp' if venue is XP_VENUE else 'alpaca'}_routing_not_configured"
+        await _record("ORDER_REFUSED", {"intent_id": str(intent.intent_id), "reason": reason})
         return None
     try:
         body = await _call_client(venue).submit(intent, permit)
@@ -503,10 +527,12 @@ def _venue_param(venue: str) -> VenueId:
         chosen = VenueId(venue.upper())
     except ValueError as exc:
         raise HTTPException(422, "unknown venue") from exc
-    if chosen not in (VENUE, XP_VENUE):
-        raise HTTPException(422, "venue must be BINANCE_SPOT or XP_B3")
+    if chosen not in (VENUE, XP_VENUE, ALPACA_VENUE):
+        raise HTTPException(422, "venue must be BINANCE_SPOT, XP_B3 or ALPACA_US")
     if chosen is XP_VENUE and not xp_enabled():
         raise HTTPException(409, "XP routing is not configured")
+    if chosen is ALPACA_VENUE and not alpaca_enabled():
+        raise HTTPException(409, "Alpaca routing is not configured")
     return chosen
 
 
@@ -562,7 +588,7 @@ async def ledger_view() -> dict[str, object]:
         try:
             body = await _from_executor(executor_client().ledger())
         except HTTPException:
-            if not xp_enabled():  # unchanged without XP: one executor, one failure
+            if not (xp_enabled() or alpaca_enabled()):  # one executor, one failure
                 raise
             # With two venues one being down must not hide the other.
             return {}, EXECUTOR_ACCOUNT_ID, "TESTNET", True
@@ -588,6 +614,23 @@ async def ledger_view() -> dict[str, object]:
             "venue_halted": xp.get("venue_halted"),
         }
 
+    async def alpaca_part() -> dict[str, object] | None:
+        if not (executor_mode() and alpaca_enabled()):
+            return None
+        try:
+            body = await executor_client(ALPACA_VENUE).ledger()
+        except (ExecutorUnavailable, ExecutorRefused):
+            return {"venue": ALPACA_VENUE.value, "unavailable": True}
+        return {
+            "account_id": body.get("account_id", ALPACA_ACCOUNT_ID),
+            "venue": ALPACA_VENUE.value,
+            # Alpaca's paper account: simulated fills, no money (the executor's TESTNET scope).
+            "mode": "PAPER",
+            "balances": dict(body["balances"]),
+            "venue_halted": body.get("venue_halted"),
+            "accounts": {"USD": await account("USD")},
+        }
+
     async def account(quote_asset: str) -> dict[str, str]:
         state = await account_state(quote_asset)
         return {
@@ -599,35 +642,43 @@ async def ledger_view() -> dict[str, object]:
         }
 
     results = await asyncio.gather(
-        binance_part(), xp_part(), *(account(q) for q in _QUOTE_ASSETS), return_exceptions=True
+        binance_part(),
+        xp_part(),
+        alpaca_part(),
+        *(account(q) for q in _QUOTE_ASSETS),
+        return_exceptions=True,
     )
     for result in results:
         if isinstance(result, BaseException):
             raise result
     (balances_view, account_id, mode, binance_unavailable), xp_block = results[0], results[1]
+    alpaca_block = results[2]
     view: dict[str, object] = {
         "account_id": account_id,
         "venue": VENUE.value,
         "mode": mode,
         "balances": dict(balances_view),
-        "accounts": dict(zip(_QUOTE_ASSETS, results[2:], strict=True)),
+        "accounts": dict(zip(_QUOTE_ASSETS, results[3:], strict=True)),
         **_BOUNDARY,
     }
     if binance_unavailable:
         view["unavailable"] = True
     if xp_block is not None:
         view["xp_b3"] = xp_block
+    if alpaca_block is not None:
+        view["alpaca_us"] = alpaca_block
     return view
 
 
 @router.post("/reconcile")
 async def reconcile_now() -> dict[str, object]:
     if executor_mode():
-        if not xp_enabled():
+        if not (xp_enabled() or alpaca_enabled()):
             return await _from_executor(reconcile())
         # Each venue answers on its own: a Binance outage must not hide XP's reconciliation.
+        venues = [VENUE] + [v for v in (XP_VENUE, ALPACA_VENUE) if _routed(v)]
         results: dict[str, object] = {}
-        for venue in (VENUE, XP_VENUE):
+        for venue in venues:
             try:
                 results[venue.value] = await _from_executor(reconcile(venue))
             except HTTPException as exc:
@@ -638,7 +689,12 @@ async def reconcile_now() -> dict[str, object]:
                     "detail": exc.detail,
                     **_BOUNDARY,
                 }
-        return {**results[VENUE.value], "xp_b3": results[XP_VENUE.value]}
+        combined = dict(results[VENUE.value])  # type: ignore[arg-type]
+        if XP_VENUE.value in results:
+            combined["xp_b3"] = results[XP_VENUE.value]
+        if ALPACA_VENUE.value in results:
+            combined["alpaca_us"] = results[ALPACA_VENUE.value]
+        return combined
     return await reconcile()
 
 

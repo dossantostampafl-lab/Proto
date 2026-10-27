@@ -34,17 +34,25 @@ _INSTRUMENTS = tuple(
 
 
 def instruments() -> tuple[str, ...]:
-    """Binance pairs, plus the B3 agents' symbols while B3 agents and XP routing are on.
+    """Binance pairs, plus the B3 (US) agents' symbols while B3 (US) agents and XP (Alpaca)
+    routing are on.
 
     B3 quotes come from the MT5 terminal with its own timestamps: outside the session they go
     stale and feed nothing, and the Risk Engine refuses B3 orders outside 10:00-17:55 anyway.
     """
 
+    found = _INSTRUMENTS
     if settings.agent_b3_enabled and settings.xp_routing_enabled:
         from services.agents.roster import B3_SLOTS
 
-        return _INSTRUMENTS + tuple(slot.instrument_id for slot in B3_SLOTS)
-    return _INSTRUMENTS
+        found += tuple(slot.instrument_id for slot in B3_SLOTS)
+    if settings.agent_us_enabled and settings.alpaca_routing_enabled:
+        # Alpaca IEX quotes carry Alpaca's timestamps: stale outside the session, and the Risk
+        # Engine refuses US orders outside 09:30-16:00 New York anyway.
+        from services.agents.roster import US_SLOTS
+
+        found += tuple(slot.instrument_id for slot in US_SLOTS)
+    return found
 
 
 _BOUNDARY = {

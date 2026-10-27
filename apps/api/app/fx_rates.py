@@ -27,7 +27,13 @@ BOOK_TICKER = "https://data-api.binance.vision/api/v3/ticker/bookTicker"
 MAX_AGE = timedelta(seconds=30)
 # A rate outside this band is a bad print, not a market: refuse rather than size on it.
 SANE_BRL_PER_USDT = (Decimal("2"), Decimal("20"))
-_PAIRS = {"USDT": "USDTBRL"}
+_PAIRS = {"USDT": "USDTBRL", "USD": "USDTBRL"}
+# USD (Alpaca paper, US equities) is read from the same public USDTBRL ask: USDT stands in for the
+# dollar, there is no keyless USDBRL source here. A stablecoin can trade a little under the dollar,
+# which would make R$ 10,000 look like more dollars than it is, so the USD rate is raised by this
+# margin: the reference capital in USD only ever comes out smaller. No rate: no USD capital (0),
+# so nothing new is sized (fail closed).
+USD_PROXY_MARGIN = Decimal("1.02")
 
 
 def _utc_now() -> datetime:
@@ -57,13 +63,16 @@ class BrlRates:
         async with self._lock:
             cached = self._cache.get(pair)
             if cached and self._clock() - cached[1] <= MAX_AGE:
-                return cached[0]
-            rate = await self._fetch(pair)
-            if rate is not None:
-                self._cache[pair] = (rate, self._clock())
+                rate: Decimal | None = cached[0]
             else:
-                self._cache.pop(pair, None)
-            return rate
+                rate = await self._fetch(pair)
+                if rate is not None:
+                    self._cache[pair] = (rate, self._clock())
+                else:
+                    self._cache.pop(pair, None)
+        if rate is not None and quote_asset == "USD":
+            return rate * USD_PROXY_MARGIN
+        return rate
 
     async def _fetch(self, pair: str) -> Decimal | None:
         client = self._client or httpx.AsyncClient(timeout=httpx.Timeout(5.0))

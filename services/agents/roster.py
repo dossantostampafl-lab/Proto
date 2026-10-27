@@ -164,6 +164,14 @@ B3_SLOTS: tuple[Slot, ...] = tuple(
     Slot(SlotKind.EMA, f"XP_B3:{symbol}") for symbol in ("PETR4F", "VALE3F")
 )
 
+# Own-strategy agents on US equities (Alpaca PAPER account), added only with
+# settings.agent_us_enabled and Alpaca routing configured: the two most liquid US ETFs. They run
+# the same EMA cross as the B3 agents (the lab's hourly momentum assumes 24/7 bars and Binance
+# warm-up klines). Whole shares only: an ETF priced above the agent's sizing budget abstains.
+US_SLOTS: tuple[Slot, ...] = tuple(
+    Slot(SlotKind.EMA, f"ALPACA_US:{symbol}") for symbol in ("SPY", "QQQ")
+)
+
 
 def slot_of(signal: Signal) -> Slot | None:
     """The slot a signal belongs to, or None when no agent trades that kind of signal.

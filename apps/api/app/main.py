@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, b3_quotes, control_state
+from . import __version__, b3_quotes, control_state, us_quotes
 from .agent_surface import router as agent_router
 from .app_state import control_engine, orchestration_engine, persistence_engine
 from .conversation_surface import router as conversation_router
@@ -70,7 +70,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await restore_controls()
     await restore_watchdog()
     b3_feed = await b3_quotes.start_if_enabled()
+    us_feed = await us_quotes.start_if_enabled()
     yield
+    await us_quotes.stop(us_feed)
     await b3_quotes.stop(b3_feed)
     if persistence_engine is not None:
         await persistence_engine.dispose()
@@ -116,6 +118,7 @@ for router in (
     risk_router,
     oms_router,
     b3_quotes.router,
+    us_quotes.router,
     promotion_router,
     watchdog_router,
     safety_router,
