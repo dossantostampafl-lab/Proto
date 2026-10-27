@@ -242,7 +242,7 @@ async def test_executor_mode_reads_the_opening_balance_when_reported(
         async def ledger(self) -> dict:
             return {"balances": {"USDT": {"total": "10000"}, "BTC": btc_row}}
 
-        async def orders(self, limit: int = 50) -> dict:
+        async def orders(self, limit: int = 50, *, open_only: bool = False) -> dict:
             return {"orders": []}
 
     monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
@@ -279,7 +279,7 @@ async def test_executor_working_buys_count_toward_the_position_budget(monkeypatc
         async def ledger(self) -> dict:
             return {"balances": {"USDT": {"total": "10000"}}}
 
-        async def orders(self, limit: int = 50) -> dict:
+        async def orders(self, limit: int = 50, *, open_only: bool = False) -> dict:
             return {"orders": rows}
 
     monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
@@ -604,3 +604,25 @@ async def test_rebase_refuses_an_account_whose_exposure_is_unknown(monkeypatch) 
             oms_surface.BaselineRebaseRequest(quote_asset="USDT", reason="testnet drill bug losses")
         )
     assert refused.value.status_code == 409
+
+
+async def test_a_truncated_order_list_from_an_older_executor_blocks_new_risk(monkeypatch) -> None:
+    configure(monkeypatch)
+    filled = [_executor_order("FILLED") for _ in range(500)]
+    flag: dict[str, bool] = {}
+
+    class FakeExecutor:
+        async def ledger(self) -> dict:
+            return {"balances": {"USDT": {"total": "10000"}}}
+
+        async def orders(self, limit: int = 50, *, open_only: bool = False) -> dict:
+            assert open_only and limit == 500
+            return {"orders": filled, **flag}
+
+    monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
+    monkeypatch.setattr(oms_surface, "executor_client", lambda: FakeExecutor())
+    # An executor without the open filter returns its latest 500: an older working order may hide.
+    assert (await oms_surface.account_state("USDT")).gross_exposure == Decimal("Infinity")
+    # The filtered list is complete however long it is.
+    flag["open_only"] = True
+    assert (await oms_surface.account_state("USDT")).gross_exposure == 0

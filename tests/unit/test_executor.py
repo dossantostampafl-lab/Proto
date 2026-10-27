@@ -362,3 +362,15 @@ def test_settings_errors_never_echo_a_secret() -> None:
     with pytest.raises(ValidationError) as caught:
         WatchdogSettings(api_url="http://api", api_token=short)
     assert "api_token" in str(caught.value) and short not in str(caught.value)
+
+
+def test_open_orders_filter_lists_only_working_orders_untruncated(fake, db) -> None:
+    with TestClient(create_app(executor(fake, db))) as client:
+        trade = intent()
+        permit = SIGNER.issue(trade, now=datetime.now(UTC))
+        assert client.post("/v1/orders", json=body(trade, permit), headers=AUTH).status_code == 200
+        everything = client.get("/v1/orders?limit=500", headers=AUTH).json()
+        assert [o["status"] for o in everything["orders"]] == ["FILLED"]
+        assert "open_only" not in everything
+        working = client.get("/v1/orders?limit=500&open=true", headers=AUTH).json()
+        assert working["open_only"] is True and working["orders"] == []

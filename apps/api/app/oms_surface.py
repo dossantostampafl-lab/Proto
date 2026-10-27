@@ -361,8 +361,12 @@ async def _open_buys(venue: VenueId, quote_asset: str) -> dict[str, Decimal]:
     """
 
     if executor_mode():
-        body = await _call_client(venue).orders(500)
+        body = await _call_client(venue).orders(500, open_only=True)
         rows = list(body.get("orders", []))
+        if not body.get("open_only") and len(rows) >= 500:
+            # An executor without the open-orders filter returns only its latest 500 orders: an
+            # older order still working could be missing, so the list is not trusted.
+            raise _OpenOrdersUnreadable("truncated order list")
     else:
         oms, _, _ = await components()
         rows = [o.to_dict() for o in oms.orders]

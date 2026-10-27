@@ -80,8 +80,9 @@ class ExecutorClient:
 
         return await self._call("GET", "/health")
 
-    async def orders(self, limit: int = 50) -> dict[str, Any]:
-        return await self._call("GET", f"/v1/orders?limit={int(limit)}")
+    async def orders(self, limit: int = 50, *, open_only: bool = False) -> dict[str, Any]:
+        query = f"/v1/orders?limit={int(limit)}" + ("&open=true" if open_only else "")
+        return await self._call("GET", query)
 
     async def ledger(self) -> dict[str, Any]:
         return await self._call("GET", "/v1/ledger")

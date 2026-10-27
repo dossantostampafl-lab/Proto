@@ -109,7 +109,7 @@ class FakeClient:
         divergences = [] if self.consistent else [{"asset": "BRL"}]
         return {"consistent": self.consistent, "divergences": divergences}
 
-    async def orders(self, limit: int = 50):
+    async def orders(self, limit: int = 50, *, open_only: bool = False):
         self.calls.append(("orders",))
         return {"orders": [{"client_order_id": f"o-{self.name}", "status": "FILLED"}]}
 

@@ -59,7 +59,7 @@ class FakeExecutor:
         self.balance["BTC"] += sign * filled - fee
         return {"client_order_id": client_order_id, "status": "SUBMITTED", "side": side}
 
-    async def orders(self, limit: int = 50):
+    async def orders(self, limit: int = 50, *, open_only: bool = False):
         rows = []
         for client_order_id, order in self.book.items():
             queue = order["statuses"]

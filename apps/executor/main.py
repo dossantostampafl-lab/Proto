@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from services.execution import RiskPermit, TradeIntent
+from services.execution.contracts import TERMINAL_ORDER_STATUSES
 from services.oms import OrderRejected
 
 from .runtime import Executor, ExecutorHalted
@@ -128,7 +129,16 @@ def create_app(executor: Executor | None = None) -> FastAPI:
         }
 
     @app.get("/v1/orders")
-    async def orders(executor_: Authorized, limit: int = 50):
+    async def orders(executor_: Authorized, limit: int = 50, open: bool = False):
+        if open:
+            # Every order still working, however old: the API's position-risk check must see all
+            # of them, so this list is never truncated (it is bounded by the venue's open orders).
+            rows = [o for o in executor_._oms().orders if o.status not in TERMINAL_ORDER_STATUSES]
+            return {
+                "orders": [o.to_dict() for o in reversed(rows)],
+                "open_only": True,
+                **_boundary(executor_),
+            }
         rows = executor_._oms().orders[-max(1, min(limit, 500)) :]
         return {"orders": [o.to_dict() for o in reversed(rows)], **_boundary(executor_)}
 
