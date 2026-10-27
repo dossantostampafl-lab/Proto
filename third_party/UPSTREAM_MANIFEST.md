@@ -57,29 +57,24 @@ and installed using the upstream package's `finrobot_desktop/pyproject.toml`.
    `services/orchestration` and the live monitor as the sole canonical systems.
 8. Use feature branches and PRs; no merge with red required CI/security.
 
-## Claude Trading Skills (advisory skills, Claude Code only)
+## Claude Trading Skills (complete set, Claude Code only)
 
 | Repository | Immutable revision | License | Imported files | Runtime |
 |---|---|---|---|---|
-| [claude-trading-skills](https://github.com/tradermonty/claude-trading-skills) | `c9b84196a44a56a553293114fdae1f30bdd08c58` | MIT ([copy](claude-trading-skills.LICENSE)) | 13 skill folders in `.claude/skills/` | **NOT CONNECTED** (assistant guidance only) |
+| [claude-trading-skills](https://github.com/tradermonty/claude-trading-skills) | `c9b84196a44a56a553293114fdae1f30bdd08c58` | MIT ([copy](claude-trading-skills.LICENSE)) | all 74 `skills/*` in `.claude/skills/`, `agents/*.md` in `.claude/agents/`, `commands/*.md` in `.claude/commands/` | **NOT CONNECTED** (assistant tools only) |
 
-Vendored skills: `backtest-expert`, `crypto-regime-analyzer`, `data-quality-checker`,
-`drawdown-circuit-breaker`, `edge-strategy-designer`, `edge-strategy-reviewer`,
-`market-environment-analysis`, `position-sizer`, `pre-trade-discipline-gate`,
-`residual-edge-analyzer`, `scenario-analyzer`, `trade-hypothesis-ideator`,
-`trade-performance-coach`.
-
-- **Selection rule:** only skills that need no API key and no broker connection. The
-  only network access is `crypto-regime-analyzer`'s public, keyless GETs (CoinGecko,
-  Binance futures market data).
-- **Excluded:** every skill that talks to a broker or needs credentials. That covers
-  Alpaca (`portfolio-manager`, `parabolic-short-trade-planner`), FMP, FINVIZ,
-  `mt5-robot-tester` and the launchd automation.
-- **Only local change:** script paths in the Markdown were rewritten from
-  `skills/<name>/` to `.claude/skills/<name>/`. Code is byte-identical to upstream.
-- **Boundary:** these skills help the operator and Claude Code reason about research and
-  risk. Nothing in `apps/` or `services/` imports them, they emit no intents and place no
-  orders, and their outputs (`reports/`, `state/`) are gitignored. The `AGENTS.md`
-  limits, the Risk Permit and the executor boundary are unchanged.
+- **Local change:** repository-relative paths `skills/<name>/` were rewritten to
+  `.claude/skills/<name>/` (80 Markdown and 24 Python files), so that the scripts and docs
+  resolve inside PROTO. Nothing else differs from upstream.
+- **Order flow:** none. A search found no order-placing call (no POST, `submit_order` or
+  `/v2/orders`). `breakout-trade-planner` only *writes* Alpaca-format order templates as
+  files. `portfolio-manager` and `parabolic-short-trade-planner` *read* Alpaca account
+  data.
+- **Keys:** several skills read FMP, FINVIZ or Alpaca keys from the operator's own
+  environment. PROTO stores none of them and must never do so. Those keys belong to the
+  operator's Claude Code session, not to `apps/`, `services/`, the executor or the Vault.
+- **Boundary:** nothing in `apps/` or `services/` imports these skills. They emit no
+  intents. The `AGENTS.md` limits, the Risk Permit and the executor boundary are
+  unchanged. Their outputs (`reports/`, `state/`) are gitignored.
 - **Not run in PROTO:** the vendored scripts and their upstream tests were not executed
   during intake.

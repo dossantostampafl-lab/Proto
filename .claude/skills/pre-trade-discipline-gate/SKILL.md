@@ -117,7 +117,7 @@ If a candidate includes `thesis_id` and `--state-dir` is provided, the JSON repo
 
 - `scripts/check_pre_trade_discipline.py` - Main CLI and rule engine
 - `references/discipline_gate_framework.md` - Rule definitions and integration notes
-- `skills/trader-memory-core/schemas/thesis.schema.json` - Thesis state schema
+- `.claude/skills/trader-memory-core/schemas/thesis.schema.json` - Thesis state schema
 
 ## Key Principles
 

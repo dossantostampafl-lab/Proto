@@ -36,7 +36,7 @@ This skill sits after concept synthesis and before pipeline export validation.
 4. Apply `HYPOTHESIS_EXIT_OVERRIDES` to adjust stop-loss, reward-to-risk, time-stop, and trailing-stop per hypothesis type (breakout, earnings_drift, panic_reversal, etc.).
 5. Clamp reward-to-risk at `RR_FLOOR=1.5` to prevent C5 review failures.
 6. Export v1-ready ticket YAML when applicable.
-7. Hand off exportable tickets to `skills/edge-candidate-agent/scripts/export_candidate.py`.
+7. Hand off exportable tickets to `.claude/skills/edge-candidate-agent/scripts/export_candidate.py`.
 
 ## Quick Commands
 
@@ -63,4 +63,4 @@ python3 .claude/skills/edge-strategy-designer/scripts/design_strategy_drafts.py 
 
 - `.claude/skills/edge-strategy-designer/scripts/design_strategy_drafts.py`
 - `references/strategy_draft_schema.md`
-- `skills/edge-candidate-agent/scripts/export_candidate.py`
+- `.claude/skills/edge-candidate-agent/scripts/export_candidate.py`

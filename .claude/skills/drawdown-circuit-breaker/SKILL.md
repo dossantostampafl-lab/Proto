@@ -165,7 +165,7 @@ at that session's opening bell. Use `--as-of` for deterministic evaluation.
 
 - `scripts/check_circuit_breaker.py` - Main CLI and rule engine
 - `references/circuit_breaker_framework.md` - Rule definitions, defaults, and data-source notes
-- `skills/trader-memory-core/schemas/thesis.schema.json` - Source schema for thesis state
+- `.claude/skills/trader-memory-core/schemas/thesis.schema.json` - Source schema for thesis state
 
 ## Key Principles
 

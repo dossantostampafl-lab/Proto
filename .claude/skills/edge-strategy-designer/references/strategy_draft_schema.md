@@ -39,4 +39,4 @@ validation_plan:
 
 ## Export Ticket Output (Optional)
 
-When `--exportable-tickets-dir` is provided, export-ready drafts produce minimal ticket YAML files compatible with `skills/edge-candidate-agent/scripts/export_candidate.py`.
+When `--exportable-tickets-dir` is provided, export-ready drafts produce minimal ticket YAML files compatible with `.claude/skills/edge-candidate-agent/scripts/export_candidate.py`.
