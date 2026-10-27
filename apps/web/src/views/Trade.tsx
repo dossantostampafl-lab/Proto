@@ -85,7 +85,7 @@ export function Trade({ market, markets, selected, select }: Shared) {
         </div>
         <div className="row">
           <Button label="START PAPER" path="/paper/start" kind="primary" disabled={!paper || engineOn}>Start engine</Button>
-          <Button label="STOP PAPER" path="/paper/stop" disabled={!engineOn}>Stop engine</Button>
+          <Button label="STOP PAPER" path="/paper/stop" disabled={paper != null && !engineOn}>Stop engine</Button>
           <Button label="RESET SIMULATION" path="/simulation/reset">Reset session</Button>
         </div>
         {paperPoll.status !== null && !paper && <p className="hint warn">PAPER ENGINE STATUS UNAVAILABLE · {paperPoll.status || "network error"}</p>}
