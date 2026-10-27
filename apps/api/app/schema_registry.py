@@ -43,7 +43,10 @@ def _canonical_table(name: str) -> Table:
         name,
         canonical_metadata,
         Column("id", String(64), primary_key=True),
-        Column("created_at", DateTime(timezone=True), nullable=False, default=_timestamp),
+        # Indexed as migrations 0002 and 0005 index it (ix_<table>_created_at).
+        Column(
+            "created_at", DateTime(timezone=True), nullable=False, default=_timestamp, index=True
+        ),
         Column("correlation_id", String(64), nullable=True, index=True),
         Column("payload", JSON, nullable=False, default=dict),
     )
