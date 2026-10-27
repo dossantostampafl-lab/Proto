@@ -100,7 +100,17 @@ agents. The lab's hourly momentum assumes 24/7 bars and Binance warm-up klines, 
    roles (`executor-alpaca`, `api-alpaca`, `watchdog-alpaca` in `fetch-secrets.sh`). A missing one
    keeps Alpaca off with a log line. The Binance executor, the API and the watchdog do not wait
    for it.
-3. **Turn it on.** On each instance (executor, API, watchdog), as root, create the non-secret file
+3. **Turn it on, one command.** In Cloud Shell, once the paper key pair is in the Vault:
+
+   ```bash
+   PROTO_ALPACA=1 bash <(curl -fsSL https://raw.githubusercontent.com/dossantostampafl-lab/Proto/main/infra/oci/deploy/setup.sh)
+   ```
+
+   It applies the stack with `enable_alpaca=true`, creates the two tokens and writes the file
+   below on the three instances, with the US agents still off. Then it redeploys the API and the
+   watchdog, and the executor starts the Alpaca container. `PROTO_ALPACA_SYMBOLS` overrides
+   `SPY,QQQ`. By hand instead: on each instance (executor, API, watchdog), as root, create the
+   non-secret file
    `/etc/proto/alpaca.conf`:
 
    ```text

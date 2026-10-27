@@ -12,6 +12,11 @@
 #    iam.tf (secret_policy_mode) with a temporary policy, keeps the first that reads and applies
 #    it through the stack. Every form keeps the per-secret restriction.
 # 5. Runs the deploy on each instance and reports what is running.
+#
+# Optional Alpaca US equities, PAPER account only (docs/venues/alpaca-paper.md): run it with
+#   PROTO_ALPACA=1 bash <(curl ...setup.sh)          (PROTO_ALPACA_SYMBOLS=SPY,QQQ by default)
+# to open the Alpaca port in the stack and write /etc/proto/alpaca.conf on each instance, once the
+# Alpaca paper key pair is in the Vault. US agents stay off (AGENT_US_ENABLED=false).
 # Prints no secret value. Reads ~/proto-vars.json and ~/.ssh/proto; logs to ~/proto-setup.log.
 set -uo pipefail
 
@@ -74,6 +79,9 @@ REGION="$(var region)"; REGION="${REGION:-sa-valparaiso-1}"
 STACK="$(oci resource-manager stack list --compartment-id "$COMP" --display-name proto \
   --query 'data[0].id' --raw-output 2>/dev/null)"
 [ -n "$STACK" ] || die "stack 'proto' not found in the compartment"
+ALPACA="${PROTO_ALPACA:-0}"
+ALPACA_SYMBOLS="$(printf '%s' "${PROTO_ALPACA_SYMBOLS:-SPY,QQQ}" | tr 'a-z' 'A-Z' | tr -cd 'A-Z0-9,.')"
+[ "$ALPACA" = 1 ] && [ "$(var enable_alpaca)" != true ] && setvar enable_alpaca true
 
 # --- 1. Stack ----------------------------------------------------------------------------------
 job_state() { oci_retry resource-manager job get --job-id "$1" --query 'data."lifecycle-state"' --raw-output; }
@@ -132,10 +140,11 @@ done
 $BINANCE_MISSING && note "Binance testnet key/secret not in the Vault yet: the executor waits for them (docs/runbooks/oracle-setup.md, 'Binance testnet key')"
 # Optional: the Alpaca PAPER key pair. Missing only keeps the Alpaca executor off (it is fetched as
 # its own role, executor-alpaca); the Binance executor, the API and the watchdog do not wait for it.
+ALPACA_MISSING=false
 for name in proto-alpaca-paper-key proto-alpaca-paper-secret; do
   id="$(oci_retry vault secret list --compartment-id "$COMP" --vault-id "$VAULT" --name "$name" \
     --lifecycle-state ACTIVE --query 'data[0].id' --raw-output 2>/dev/null)"
-  [[ "$id" == ocid1.* ]] || { note "$name not in the Vault: Alpaca (optional) stays off (docs/venues/alpaca-paper.md)"; break; }
+  [[ "$id" == ocid1.* ]] || { ALPACA_MISSING=true; note "$name not in the Vault: Alpaca (optional) stays off (docs/venues/alpaca-paper.md)"; break; }
 done
 
 # --- Bastion -----------------------------------------------------------------------------------
@@ -255,11 +264,37 @@ if ! check_secrets && { note "waiting 2 min for IAM to propagate, then checking 
   fi
 fi
 
+# --- Alpaca (opt-in) ---------------------------------------------------------------------------
+# Writes the non-secret /etc/proto/alpaca.conf on each instance. The executor starts the Alpaca
+# container on its next deploy; the API and the watchdog need a forced redeploy to pick up its URL.
+declare -A DEPLOY_CMD
+if [ "$ALPACA" = 1 ]; then
+  step "Alpaca paper (opt-in, US agents stay off)"
+  if $ALPACA_MISSING; then
+    note "Alpaca paper key/secret not in the Vault: nothing written"
+  elif [ -z "$ALPACA_SYMBOLS" ]; then
+    note "PROTO_ALPACA_SYMBOLS is empty: nothing written"
+  else
+    # The stack apply above may have just granted the Alpaca secrets: give IAM time to propagate.
+    note "waiting 2 min for IAM to propagate"; sleep 120
+    for role in "${ROLES[@]}"; do
+      [ "${RESULT[$role.secrets]:-}" = ok ] || continue
+      if run "$role" "printf 'ALPACA_SYMBOLS=%s\nALPACA_EXECUTOR_PORT=8101\nAGENT_US_ENABLED=false\n' '$ALPACA_SYMBOLS' \
+          | sudo install -D -m 0644 -o root -g root /dev/stdin /etc/proto/alpaca.conf" </dev/null; then
+        note "$role: alpaca.conf written (symbols $ALPACA_SYMBOLS)"
+        [ "$role" = executor ] || DEPLOY_CMD[$role]="sudo /usr/local/sbin/proto-deploy --force"
+      else
+        note "$role: alpaca.conf could not be written"
+      fi
+    done
+  fi
+fi
+
 # --- 5. Deploy ---------------------------------------------------------------------------------
 step "5/5 Deploy (pull the image, start, health check)"
 for role in "${ROLES[@]}"; do
   if [ "${RESULT[$role.secrets]:-}" != ok ]; then RESULT[$role.deploy]="skipped"; continue; fi
-  report="$(run "$role" 'sudo systemctl start proto-deploy.service; echo "rc=$?";
+  report="$(run "$role" "${DEPLOY_CMD[$role]:-sudo systemctl start proto-deploy.service}"'; echo "rc=$?";
     sudo podman ps --format "{{.Names}} {{.Status}}"; sudo journalctl -u proto-deploy -t proto-deploy -t systemd -n 40 --no-pager -o cat' </dev/null)"
   sed 's/^/    /' <<<"$report"
   if grep -q 'rc=0' <<<"$report"; then RESULT[$role.deploy]=running
