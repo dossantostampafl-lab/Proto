@@ -12,7 +12,9 @@ _MIN_SECRET = 32
 
 
 class WatchdogSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="WATCHDOG_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="WATCHDOG_", extra="ignore", hide_input_in_errors=True
+    )
 
     id: str = Field(default="watchdog-1", pattern=r"^[A-Za-z0-9_.-]{1,40}$")
     api_url: str

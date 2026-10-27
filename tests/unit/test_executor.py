@@ -348,3 +348,17 @@ def test_executor_with_a_public_key_accepts_only_risk_engine_signatures(fake, db
             "/v1/orders", json=body(other, signer.issue(other, now=datetime.now(UTC))), headers=AUTH
         )
         assert accepted.json()["order"]["status"] == "FILLED"
+
+
+def test_settings_errors_never_echo_a_secret() -> None:
+    """A too-short token must not appear in the ValidationError text (it is logged at start)."""
+
+    from apps.watchdog.settings import WatchdogSettings
+
+    short = "short-but-secret-value-XYZ"
+    with pytest.raises(ValidationError) as caught:
+        ExecutorSettings(api_token=short, permit_signing_key=KEY, symbols="BTCUSDT")
+    assert "api_token" in str(caught.value) and short not in str(caught.value)
+    with pytest.raises(ValidationError) as caught:
+        WatchdogSettings(api_url="http://api", api_token=short)
+    assert "api_token" in str(caught.value) and short not in str(caught.value)
