@@ -352,8 +352,17 @@ def test_alpaca_container_follows_a_fixed_key_and_never_hammers_alpaca() -> None
     deploy = (OCI / "deploy/proto-deploy.sh").read_text()
     body = deploy.split("ensure_alpaca_executor() {", 1)[1].split("\n}\n", 1)[0]
     # The secrets are fetched before the "already running" shortcut, and a changed env recreates it.
-    assert body.index("alpaca_ready ||") < body.index("podman container inspect")
+    assert body.index("if ! alpaca_ready") < body.index('index .Config.Labels "proto.envsum"')
     assert 'index .Config.Labels "proto.envsum"' in body
     assert '--label "proto.envsum=$envsum"' in body
     # A refused key stops after a few tries instead of a tight restart loop.
     assert "--restart=on-failure:5" in body and "--restart=always" not in body
+
+
+def test_a_failed_alpaca_secret_fetch_keeps_a_healthy_container() -> None:
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    body = deploy.split("ensure_alpaca_executor() {", 1)[1].split("\n}\n", 1)[0]
+    failed = body.split("if ! alpaca_ready; then", 1)[1].split("\n  fi\n", 1)[0]
+    # A Vault hiccup must not remove a running container on the current image.
+    assert failed.index("{{.State.Running}}") < failed.index("podman rm -f")
+    assert "return 0" in failed.split("podman rm -f", 1)[0]

@@ -143,7 +143,16 @@ ensure_alpaca_executor() {  # ensure_alpaca_executor <image id>
   fi
   # Fetch first: a key fixed in the Vault (new secret version) must reach the container. The
   # container keeps the env it was created with, so it is recreated when that env changes.
-  alpaca_ready || { podman rm -f "$name" >/dev/null 2>&1 || true; return 0; }
+  if ! alpaca_ready; then
+    # A failed fetch (Vault hiccup) keeps a healthy container on this image; only a container
+    # that is not running, or runs an older image, is removed.
+    if [ "$(podman container inspect --format '{{.Image}}' "$name" 2>/dev/null)" = "$image" ] \
+      && [ "$(podman container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ]; then
+      return 0
+    fi
+    podman rm -f "$name" >/dev/null 2>&1 || true
+    return 0
+  fi
   local envsum
   envsum="$(cat /run/proto/executor-alpaca.env "$alpaca_conf" | sha256sum | cut -c1-16)"
   if [ "$(podman container inspect --format '{{.Image}}' "$name" 2>/dev/null)" = "$image" ] \
