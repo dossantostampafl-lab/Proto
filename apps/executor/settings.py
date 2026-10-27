@@ -32,7 +32,7 @@ class ExecutorSettings(BaseSettings):
     # XP_B3 only: the MT5 bridge on the Windows host (private network) and its bearer token.
     bridge_url: str | None = None
     bridge_token: SecretStr | None = None
-    # Binance defaults to the three majors; XP_B3 has no default: symbols come from the terminal.
+    # Binance defaults to the three majors; XP_B3 and ALPACA_US have no default (e.g. SPY,QQQ).
     symbols: str | None = None
     poll_seconds: float = Field(default=5.0, ge=1.0, le=300.0, allow_inf_nan=False)
     reconcile_seconds: float = Field(default=60.0, ge=5.0, le=3_600.0, allow_inf_nan=False)
@@ -47,8 +47,8 @@ class ExecutorSettings(BaseSettings):
     @field_validator("venue")
     @classmethod
     def executable_venue(cls, value: VenueId) -> VenueId:
-        if value not in (VenueId.BINANCE_SPOT, VenueId.XP_B3):
-            raise ValueError("the executor serves BINANCE_SPOT or XP_B3 only")
+        if value not in (VenueId.BINANCE_SPOT, VenueId.XP_B3, VenueId.ALPACA_US):
+            raise ValueError("the executor serves BINANCE_SPOT, XP_B3 or ALPACA_US only")
         return value
 
     @field_validator("api_token", "permit_signing_key", "watchdog_token", "bridge_token")
@@ -75,6 +75,12 @@ class ExecutorSettings(BaseSettings):
                 raise ValueError("EXECUTOR_SYMBOLS required for XP_B3 (e.g. PETR4F,VALE3F)")
             if self.bridge_token.get_secret_value() == self.api_token.get_secret_value():
                 raise ValueError("EXECUTOR_BRIDGE_TOKEN must differ from EXECUTOR_API_TOKEN")
+        if self.venue is VenueId.ALPACA_US:
+            # Alpaca paper (environment TESTNET): keys come from the credentials loader only.
+            if not self.symbol_list:
+                raise ValueError("EXECUTOR_SYMBOLS required for ALPACA_US (e.g. SPY,QQQ,AAPL)")
+            if self.bridge_url or self.bridge_token is not None:
+                raise ValueError("EXECUTOR_BRIDGE_* belong to XP_B3, not ALPACA_US")
         return self
 
     @model_validator(mode="after")
