@@ -1,8 +1,9 @@
 """The isolated executor: the only process that holds venue credentials.
 
-It runs the canonical OMS, ledger and reconciliation against Binance Spot
-(testnet only) and accepts work only as intent + Risk Permit pairs from the
-public API over the private network. It fails closed:
+It runs the canonical OMS, ledger and reconciliation against one venue: Binance Spot
+(testnet only), XP_B3 (MT5 demo account) or ALPACA_US (Alpaca paper account only). It
+accepts work only as intent + Risk Permit pairs from the public API over the private network.
+It fails closed:
 
 - every permit is verified (signature, fingerprint, expiry) and spent durably;
 - a reconciliation divergence halts new orders until an operator releases it,
@@ -38,6 +39,7 @@ from services.oms import (
 )
 from services.risk import Ed25519PermitVerifier, PermitLedger, PermitSigner, PermitVerifier
 from services.risk.permit_keys import decode_key
+from services.venues.alpaca import AlpacaPaperAdapter
 from services.venues.binance import BinanceSpotAdapter, load_instruments
 from services.venues.credentials import load_credentials
 from services.venues.xp_mt5 import XpMt5Adapter, bridge_client
@@ -46,7 +48,9 @@ from .settings import ExecutorSettings
 
 logger = logging.getLogger("proto.executor")
 
-AdapterFactory = Callable[[ExecutorSettings], Awaitable[BinanceSpotAdapter | XpMt5Adapter]]
+AdapterFactory = Callable[
+    [ExecutorSettings], Awaitable[BinanceSpotAdapter | XpMt5Adapter | AlpacaPaperAdapter]
+]
 
 
 class ExecutorHalted(RuntimeError):
@@ -77,8 +81,30 @@ async def xp_adapter(settings: ExecutorSettings) -> XpMt5Adapter:
         raise
 
 
+async def alpaca_adapter(settings: ExecutorSettings) -> AlpacaPaperAdapter:
+    """Alpaca's PAPER account: the trading host is pinned to paper-api.alpaca.markets."""
+
+    credentials = load_credentials(VenueId.ALPACA_US, settings.environment, settings.account)
+    client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+    try:
+        adapter = await AlpacaPaperAdapter.connect(
+            credentials, symbols=settings.symbol_list, client=client
+        )
+    except BaseException:
+        await client.aclose()
+        raise
+    if not adapter.instruments:
+        await client.aclose()
+        raise RuntimeError("no tradable instruments loaded from Alpaca assets")
+    return adapter
+
+
 def default_adapter_factory(settings: ExecutorSettings) -> AdapterFactory:
-    return xp_adapter if settings.venue is VenueId.XP_B3 else binance_adapter
+    if settings.venue is VenueId.XP_B3:
+        return xp_adapter
+    if settings.venue is VenueId.ALPACA_US:
+        return alpaca_adapter
+    return binance_adapter
 
 
 def _utc_now() -> datetime:

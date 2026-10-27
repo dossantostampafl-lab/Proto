@@ -90,14 +90,85 @@ xp_env_args() {
   printf '%s\n' --env-file "$xp_env_file"
 }
 
+# Optional Alpaca (US equities, PAPER account only) executor. Opt-in by a root-owned, NON-secret
+# file /etc/proto/alpaca.conf (docs/venues/alpaca-paper.md), on each instance:
+#   ALPACA_SYMBOLS=SPY,QQQ,AAPL      ALPACA_EXECUTOR_PORT=8101      AGENT_US_ENABLED=false
+# Its secrets are fetched as role <role>-alpaca, apart from this role's own: a missing one (the
+# operator has not created proto-alpaca-paper-key yet) leaves Alpaca off with a log line and
+# changes nothing else. Absent file = Alpaca off, exactly as before.
+alpaca_conf="${PROTO_ALPACA_CONF:-/etc/proto/alpaca.conf}"
+alpaca_value() {  # alpaca_value <key> <default>: only [A-Za-z0-9,._-] survives
+  local value
+  value="$(sed -n "s/^$1=//p" "$alpaca_conf" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9,._-')"
+  printf '%s' "${value:-$2}"
+}
+alpaca_port() {
+  local port
+  port="$(alpaca_value ALPACA_EXECUTOR_PORT 8101)"
+  [[ "$port" =~ ^[0-9]{4,5}$ ]] && [ "$port" != 8100 ] && printf '%s' "$port" || printf 8101
+}
+alpaca_ready() {  # true once alpaca.conf exists and this role's Alpaca secrets are in tmpfs
+  [ -s "$alpaca_conf" ] || return 1
+  local vault
+  vault="$(sed -n 's/^ExecStart=.*proto-fetch-secrets [a-z]* //p' \
+    /etc/systemd/system/proto-secrets.service 2>/dev/null | head -n1)"
+  if [ -z "$vault" ] || ! /usr/local/sbin/proto-fetch-secrets "${role}-alpaca" "$vault" >/dev/null 2>&1; then
+    log "alpaca: secrets for ${role}-alpaca are not readable yet; Alpaca stays off" >&2
+    return 1
+  fi
+}
+alpaca_args() {  # extra podman args for the API and the watchdog, one per line
+  alpaca_ready || return 0
+  local url="http://${EXECUTOR_IP}:$(alpaca_port)"
+  printf '%s\n' --env-file "/run/proto/${role}-alpaca.env"
+  case "$role" in
+    api)
+      printf '%s\n' -e "ALPACA_EXECUTOR_URL=${url}"
+      [ "$(alpaca_value AGENT_US_ENABLED false)" = true ] && printf '%s\n' -e AGENT_US_ENABLED=true
+      ;;
+    watchdog) printf '%s\n' -e "WATCHDOG_ALPACA_EXECUTOR_URL=${url}" ;;
+  esac
+  return 0
+}
+
+# The Alpaca executor: a second container on the executor instance, same approved :executor
+# image, its own sqlite ledger in a volume, its own port. Outside the main health/rollback: a
+# failing Alpaca executor never takes the Binance executor down.
+ensure_alpaca_executor() {  # ensure_alpaca_executor <image id>
+  [ "$role" = executor ] || return 0
+  local image="$1" name=proto-executor-alpaca port
+  if [ ! -s "$alpaca_conf" ]; then
+    podman rm -f "$name" >/dev/null 2>&1 || true
+    return 0
+  fi
+  if [ "$(podman container inspect --format '{{.Image}}' "$name" 2>/dev/null)" = "$image" ] \
+    && [ "$(podman container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ] \
+    && ! $force; then
+    return 0
+  fi
+  alpaca_ready || { podman rm -f "$name" >/dev/null 2>&1 || true; return 0; }
+  port="$(alpaca_port)"
+  firewall-cmd -q --add-port="${port}/tcp" >/dev/null 2>&1 || true
+  podman rm -f "$name" >/dev/null 2>&1 || true
+  podman run -d --name "$name" --restart=always --network host \
+    --env-file /run/proto/executor-alpaca.env -v "${name}:/data:U" \
+    -e EXECUTOR_VENUE=ALPACA_US -e EXECUTOR_ENVIRONMENT=TESTNET -e EXECUTOR_ACCOUNT=main \
+    -e "EXECUTOR_SYMBOLS=$(alpaca_value ALPACA_SYMBOLS SPY,QQQ)" \
+    -e EXECUTOR_DATABASE_URL=sqlite+aiosqlite:////data/executor-alpaca.db \
+    "$image" uvicorn apps.executor.main:app --host "$EXECUTOR_IP" --port "$port" >/dev/null \
+    && log "alpaca executor started on port $port (paper account)" \
+    || log "alpaca executor did not start"
+}
+
 start() {  # start <image id>
   local image="$1"
   podman rm -f "proto-${role}" >/dev/null 2>&1 || true
   case "$role" in
     api)
       mapfile -t xp_args < <(xp_env_args)
+      mapfile -t alpaca_extra < <(alpaca_args)
       podman run -d --name proto-api --restart=always --network host --env-file "$secrets" \
-        ${xp_args[@]+"${xp_args[@]}"} \
+        ${xp_args[@]+"${xp_args[@]}"} ${alpaca_extra[@]+"${alpaca_extra[@]}"} \
         -e APP_ENV=production -e OMS_EXECUTION_BACKEND=executor \
         -e "EXECUTOR_URL=http://${EXECUTOR_IP}:8100" \
         ${DOMAIN:+-e "PUBLIC_ORIGIN=https://${DOMAIN}"} \
@@ -108,8 +179,9 @@ start() {  # start <image id>
         "$image" uvicorn apps.executor.main:app --host "$EXECUTOR_IP" --port 8100 >/dev/null ;;
     watchdog)
       mapfile -t xp_args < <(xp_env_args)
+      mapfile -t alpaca_extra < <(alpaca_args)
       podman run -d --name proto-watchdog --restart=always --network host --env-file "$secrets" \
-        ${xp_args[@]+"${xp_args[@]}"} \
+        ${xp_args[@]+"${xp_args[@]}"} ${alpaca_extra[@]+"${alpaca_extra[@]}"} \
         -e WATCHDOG_ID=oci-watchdog-1 -e "WATCHDOG_API_URL=http://${API_IP}:8000" \
         -e "WATCHDOG_EXECUTOR_URL=http://${EXECUTOR_IP}:8100" \
         "$image" python -m apps.watchdog >/dev/null ;;
@@ -170,6 +242,7 @@ esac
 
 if [ "$new" = "$current" ] && [ "$running" = true ] && ! $force; then
   ensure_caddy
+  ensure_alpaca_executor "$new"
   exit 0
 fi
 
@@ -179,6 +252,7 @@ if healthy; then
   echo "$new" >"$state/good-image"
   log "healthy on revision $(revision "$new")"
   ensure_caddy
+  ensure_alpaca_executor "$new"
   exit 0
 fi
 

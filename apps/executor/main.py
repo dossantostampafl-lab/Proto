@@ -159,7 +159,8 @@ def create_app(executor: Executor | None = None) -> FastAPI:
 
     @app.get("/v1/quotes")
     async def quotes(executor_: Authorized, names: str = ""):
-        """Venue quotes for the public API's sizing and Risk Engine (XP_B3: from the terminal)."""
+        """Venue quotes for the public API's sizing and Risk Engine (XP_B3: from the terminal;
+        ALPACA_US: Alpaca's free IEX feed, read with the executor's own keys)."""
 
         feed = getattr(executor_.adapter, "quotes", None)
         if feed is None:

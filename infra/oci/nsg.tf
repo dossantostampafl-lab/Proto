@@ -89,6 +89,25 @@ resource "oci_core_network_security_group_security_rule" "executor_from" {
   }
 }
 
+# The Alpaca (US equities, PAPER) executor on the same instance, its own port. Only with
+# enable_alpaca (default false): without it the NSG is exactly as before.
+resource "oci_core_network_security_group_security_rule" "executor_alpaca_from" {
+  for_each                  = var.enable_alpaca ? { api = oci_core_network_security_group.api.id, watchdog = oci_core_network_security_group.watchdog.id } : {}
+  network_security_group_id = oci_core_network_security_group.executor.id
+  direction                 = "INGRESS"
+  protocol                  = "6"
+  source                    = each.value
+  source_type               = "NETWORK_SECURITY_GROUP"
+  description               = "Alpaca executor API from ${each.key}"
+
+  tcp_options {
+    destination_port_range {
+      min = var.alpaca_executor_port
+      max = var.alpaca_executor_port
+    }
+  }
+}
+
 # The public API is reached by the watchdog too, over the VCN (its private address).
 resource "oci_core_network_security_group_security_rule" "api_from_watchdog" {
   network_security_group_id = oci_core_network_security_group.api.id

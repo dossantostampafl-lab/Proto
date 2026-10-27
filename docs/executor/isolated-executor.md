@@ -53,13 +53,14 @@ TradingView ─> public API ─> agents ─> Risk Engine ─(intent + permit)─
 | `POST /v1/orders/{id}/resolve` · `/cancel` | Resolve an `UNKNOWN` order by query; cancel a resting order |
 | `GET /v1/ledger` | Balances per asset |
 | `POST /v1/reconcile` · `POST /v1/halt/release` | Reconcile now; release a halt once consistent. Operators can relay the release through the API: `POST /v1/oms/executor/halt/release` |
-| `GET /v1/quotes?names=` | Venue quotes (XP_B3: from the MT5 terminal); 404 on a venue without a quote feed |
+| `GET /v1/quotes?names=` | Venue quotes (XP_B3: from the MT5 terminal; ALPACA_US: Alpaca's IEX feed, labelled `feed: IEX`); 404 on a venue without a quote feed |
 | `GET /v1/events` | Recent order, reconciliation and halt events |
 | `GET /v1/watchdog/status` · `POST /v1/watchdog/halt` | Watchdog token only (`EXECUTOR_WATCHDOG_TOKEN`): readiness, halt, last reconciliation; halt. It cannot trade or release (`docs/watchdog/watchdog.md`) |
 
 ## One executor per venue
 
-`EXECUTOR_VENUE` picks the venue this process serves: `BINANCE_SPOT` (default) or `XP_B3`. Each
+`EXECUTOR_VENUE` picks the venue this process serves: `BINANCE_SPOT` (default), `XP_B3` or
+`ALPACA_US` (Alpaca **paper** account only, `docs/venues/alpaca-paper.md`). Each
 executor holds only its own venue's credentials and has its own ledger, halt and reconciliation,
 so the isolation of the credentials is unchanged. Run a second instance for XP_B3:
 
@@ -75,6 +76,9 @@ export EXECUTOR_SYMBOLS=PETR4F,VALE3F,BOVA11F            # required: no default 
 - The bridge reports the logged-in account. A demo account maps to `TESTNET`; anything else makes
   the adapter real-money and the executor refuses to start.
 - An executor refuses intents for another venue (422).
+- `ALPACA_US` needs `EXECUTOR_SYMBOLS` (e.g. `SPY,QQQ,AAPL`) and the paper keys as
+  `PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_KEY` / `_API_SECRET`. Its ledger id is
+  `alpaca-us-testnet-main`; the trading host is pinned to `paper-api.alpaca.markets`.
 - The independent watchdog and the public API still talk to the Binance executor only. Routing
   XP_B3 intents and B3 quotes through the API is a separate change; until then the XP executor is
   reachable only by hand and stays outside the watchdog's coverage, which is acceptable for a demo

@@ -77,3 +77,35 @@ B3_INSTRUMENTS: dict[str, TradableInstrument] = {
         _b3_fractional("BOVA11F", asset_class=AssetClass.ETF),
     )
 }
+
+
+# US ETFs Alpaca lists as plain us_equity; used only to label the asset class truthfully.
+US_ETFS = frozenset({"SPY", "QQQ", "IWM", "DIA", "VTI", "VOO"})
+
+
+def _alpaca_us(symbol: str) -> TradableInstrument:
+    """US equity or ETF on Alpaca's PAPER account: whole shares, tick US$0.01, quoted in USD.
+
+    The executor loads tradability from Alpaca's asset list and a mismatch rejects the order; these
+    values only size proposals. Regular session 09:30-16:00 New York (the Risk Engine's hours).
+    """
+
+    return TradableInstrument(
+        instrument_id=f"ALPACA_US:{symbol}",
+        venue=VenueId.ALPACA_US,
+        asset_class=AssetClass.ETF if symbol in US_ETFS else AssetClass.EQUITY,
+        base_asset=symbol,
+        quote_asset="USD",
+        tick_size=Decimal("0.01"),
+        lot_size=Decimal("1"),
+        min_quantity=Decimal("1"),
+        min_notional=Decimal("1"),
+        session_type=SessionType.EXCHANGE_SESSION,
+        timezone="America/New_York",
+    )
+
+
+# Not part of PAPER_INSTRUMENTS either: the API adds these only when Alpaca routing is on.
+US_INSTRUMENTS: dict[str, TradableInstrument] = {
+    item.instrument_id: item for item in (_alpaca_us("SPY"), _alpaca_us("QQQ"), _alpaca_us("AAPL"))
+}

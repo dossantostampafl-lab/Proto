@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 from services.execution.venue import Quote
 
-from . import b3_quotes
+from . import b3_quotes, us_quotes
 from .live_monitor import live_monitor
 
 
@@ -18,6 +18,9 @@ def live_quote(instrument_id: str, *, market_source: str) -> Quote | None:
     if venue == "XP_B3":
         # Read through the XP executor with the terminal's timestamp, so age checks stay honest.
         return b3_quotes.quote_for(symbol)
+    if venue == "ALPACA_US":
+        # Alpaca's IEX feed through the Alpaca executor, with Alpaca's own timestamp.
+        return us_quotes.quote_for(symbol)
     if venue != "BINANCE_SPOT" or not symbol.endswith("USDT") or market_source != "BINANCE":
         return None
     snapshot = live_monitor.snapshot(symbol.removesuffix("USDT"))

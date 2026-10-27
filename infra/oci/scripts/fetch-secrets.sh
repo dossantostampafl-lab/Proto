@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pull this instance's secrets from OCI Vault into /run/proto/<role>.env (tmpfs, 0600).
 #
-#   fetch-secrets.sh <api|executor|watchdog> <vault-ocid>
+#   fetch-secrets.sh <api|executor|watchdog>[-alpaca] <vault-ocid>
 #
 # Authenticates as the instance itself (instance principal): no API key on the box. Each role
 # reads only the secret names its IAM policy allows (infra/oci/iam.tf); a missing secret fails
@@ -31,6 +31,19 @@ PROTO_CRED_BINANCE_SPOT_TESTNET_MAIN_API_SECRET=proto-binance-testnet-secret" ;;
   watchdog)
     pairs="WATCHDOG_API_TOKEN=proto-watchdog-api-token
 WATCHDOG_EXECUTOR_TOKEN=proto-watchdog-executor-token" ;;
+  # Optional Alpaca (US equities, PAPER account) roles, fetched by proto-deploy only when
+  # /etc/proto/alpaca.conf exists. Kept apart from the roles above on purpose: a missing Alpaca
+  # secret fails only this fetch, so the Alpaca executor waits and nothing else stops.
+  executor-alpaca)
+    pairs="EXECUTOR_API_TOKEN=proto-alpaca-executor-token
+EXECUTOR_WATCHDOG_TOKEN=proto-watchdog-alpaca-token
+EXECUTOR_PERMIT_PUBLIC_KEY=proto-permit-public-key
+PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_KEY=proto-alpaca-paper-key
+PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_SECRET=proto-alpaca-paper-secret" ;;
+  api-alpaca)
+    pairs="ALPACA_EXECUTOR_API_TOKEN=proto-alpaca-executor-token" ;;
+  watchdog-alpaca)
+    pairs="WATCHDOG_ALPACA_EXECUTOR_TOKEN=proto-watchdog-alpaca-token" ;;
   *) echo "unknown role: $role" >&2; exit 2 ;;
 esac
 

@@ -50,6 +50,8 @@ class VenueId(StrEnum):
     PAPER = "PAPER"
     BINANCE_SPOT = "BINANCE_SPOT"
     XP_B3 = "XP_B3"
+    # Alpaca US equities, PAPER account only (paper-api.alpaca.markets). No live scope exists.
+    ALPACA_US = "ALPACA_US"
 
 
 class ReleaseStage(StrEnum):

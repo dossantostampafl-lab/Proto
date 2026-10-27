@@ -33,6 +33,11 @@ async def main() -> None:
             if settings.xp_executor_url
             else None
         )
+        alpaca = (
+            httpx.AsyncClient(base_url=settings.alpaca_executor_url)
+            if settings.alpaca_executor_url
+            else None
+        )
         try:
             watchdog = Watchdog(
                 watchdog_id=settings.id,
@@ -46,6 +51,10 @@ async def main() -> None:
                 xp_executor_token=settings.xp_executor_token.get_secret_value()
                 if settings.xp_executor_token
                 else None,
+                alpaca_executor=alpaca,
+                alpaca_executor_token=settings.alpaca_executor_token.get_secret_value()
+                if settings.alpaca_executor_token
+                else None,
                 limits=Limits(
                     daily_loss_fraction=settings.daily_loss_fraction,
                     drawdown_fraction=settings.drawdown_fraction,
@@ -54,7 +63,7 @@ async def main() -> None:
             )
             await watchdog.run(settings.interval_seconds, stop)
         finally:
-            for client in (executor, xp):
+            for client in (executor, xp, alpaca):
                 if client is not None:
                     await client.aclose()
 

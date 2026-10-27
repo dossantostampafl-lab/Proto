@@ -144,6 +144,9 @@ bash ~/Proto/infra/oci/scripts/create-secrets.sh
 | `proto-executor-database-url` | `postgresql+asyncpg://executor:<password>@127.0.0.1:5432/executor` |
 | `proto-binance-testnet-key` / `-secret` | From testnet.binance.vision (step 4) |
 | `proto-mt5-bridge-token` | 32+ random characters, for the MT5 bridge (not built yet) |
+| `proto-alpaca-executor-token` | Generated. The API and the Alpaca executor share it (optional Alpaca venue) |
+| `proto-watchdog-alpaca-token` | Generated. The watchdog's halt-only token for the Alpaca executor |
+| `proto-alpaca-paper-key` / `-secret` | Optional. From the Alpaca **paper** account (section "Alpaca paper key") |
 
 Each instance reads only its own names (`infra/oci/iam.tf`). For example, the API cannot read the
 Binance key.
@@ -167,6 +170,25 @@ Binance key.
    and allow spot trading only, with no withdrawals, transfers, margin or futures. The live
    canary checks this at start (`verify_trade_only`).
 
+
+### Alpaca paper key (optional)
+
+Only for the optional Alpaca US equities venue, PAPER account only (`docs/venues/alpaca-paper.md`).
+Create the key in the Alpaca dashboard with the **Paper** account selected (never the live one),
+then add both halves in the Vault console exactly like the Binance pair:
+
+| Field | First secret | Second secret |
+|---|---|---|
+| Name | `proto-alpaca-paper-key` | `proto-alpaca-paper-secret` |
+| Encryption key | `proto-secrets` | `proto-secrets` |
+| Secret type template | Plain-Text | Plain-Text |
+| Secret contents | the **API Key ID** | the **Secret Key** |
+
+The executor instance reads them as `PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_KEY` and
+`PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_SECRET` (fetch role `executor-alpaca`). The API and the
+watchdog cannot read them. They are fetched apart from the executor's own secrets: while they are
+missing only the Alpaca executor waits, and the Binance executor, the API and the watchdog run as
+before. Nothing uses them until `/etc/proto/alpaca.conf` exists (see the venue doc).
 
 If the executor stops with `binance -2014: API-key format invalid`, the value in the Vault is not
 an API key: pasted with extra text, key and secret swapped, or created with the Base64 template

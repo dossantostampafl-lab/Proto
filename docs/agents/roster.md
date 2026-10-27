@@ -45,6 +45,11 @@ The capital is a sizing budget inside the paper or testnet account. It is not mo
     (Brasilia). Fractional lots are whole shares, so their trades are a few shares (R$200 at
     R$38 is 5 shares at most). Without the XP node, or with the flag off, the roster keeps its
     six Binance slots. The image turns the flag on; it only takes effect where XP is set.
+  - With `AGENT_US_ENABLED=true` (default false, not set in the image) and Alpaca routing
+    configured (`docs/venues/alpaca-paper.md`), two more own-strategy agents join:
+    `ALPACA_US:SPY` and `ALPACA_US:QQQ`, R$200 each, on the Alpaca **paper** account, with the
+    same EMA cross on IEX quotes. Whole shares only: at R$200 (about US$36) one share of SPY or
+    QQQ is out of budget, so they abstain until cheaper symbols are configured.
 
 ## Routing and attribution
 

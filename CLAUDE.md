@@ -9,7 +9,7 @@ Proto automates trading behind one control plane. TradingView alerts and PROTO s
 agents (deterministic decisions, AI reviewer that may only shrink). A deterministic Risk Engine
 issues permits, and a canonical OMS, ledger and reconciliation execute.
 
-- **Today:** paper and Binance Spot **testnet** only.
+- **Today:** paper, Binance Spot **testnet**, XP/B3 **demo** and (opt-in) Alpaca US **paper** only.
 - **Real money:** none until a path passes the release gates.
 - **Plan:** `docs/plans/2026-10-13-tradingview-agent-trading.md` (phases 0–7).
 
@@ -47,7 +47,7 @@ OMS ─> paper venue | isolated executor (Binance testnet) ─> ledger ─> reco
 | `services/agents/` | Fusion, sizing, shrink-only reviewer |
 | `services/risk/` | Risk Engine, governor (kill switches, lockdowns), permits |
 | `services/oms/` | Order manager, transactional ledger, reconciliation, durable store |
-| `services/venues/` | Binance Spot adapter and credential loading (executor only) |
+| `services/venues/` | Binance Spot, XP/MT5 and Alpaca **paper** (`alpaca.py`, host pinned to `paper-api.alpaca.markets`) adapters and credential loading (executor only). Alpaca: `docs/venues/alpaca-paper.md` |
 | `services/promotion/` | Promotion gates per scope, canary policy, automatic demotion |
 | `services/watchdog/`, `apps/watchdog/` | Independent watchdog: probes API and executor, halt-only tokens, never releases |
 | `services/drills/` | Adversarial, recovery and rollback drills with reproducible digests (`python -m services.drills`) |

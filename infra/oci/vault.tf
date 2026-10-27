@@ -41,6 +41,7 @@ locals {
       "proto-watchdog-api-token", # WATCHDOG_API_TOKEN (watchdog -> API)
       "proto-permit-private-key", # RISK_PERMIT_PRIVATE_KEY (Ed25519 seed)
       "proto-tradingview-secret", # TRADINGVIEW_WEBHOOK_SECRET
+      "proto-alpaca-executor-token", # ALPACA_EXECUTOR_API_TOKEN (API -> Alpaca executor)
     ]
     executor = [
       "proto-executor-token",          # EXECUTOR_API_TOKEN
@@ -50,10 +51,17 @@ locals {
       "proto-binance-testnet-key",     # PROTO_CRED_BINANCE_SPOT_TESTNET_MAIN_API_KEY
       "proto-binance-testnet-secret",  # PROTO_CRED_BINANCE_SPOT_TESTNET_MAIN_API_SECRET
       "proto-mt5-bridge-token",        # executor -> MT5 bridge
+      # Alpaca US equities, PAPER account (docs/venues/alpaca-paper.md). Read only by this role;
+      # fetched as role executor-alpaca, so a missing one stops only the Alpaca executor.
+      "proto-alpaca-paper-key",      # PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_KEY
+      "proto-alpaca-paper-secret",   # PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_SECRET
+      "proto-alpaca-executor-token", # EXECUTOR_API_TOKEN of the Alpaca executor
+      "proto-watchdog-alpaca-token", # EXECUTOR_WATCHDOG_TOKEN of the Alpaca executor
     ]
     watchdog = [
       "proto-watchdog-api-token",      # WATCHDOG_API_TOKEN
       "proto-watchdog-executor-token", # WATCHDOG_EXECUTOR_TOKEN
+      "proto-watchdog-alpaca-token",   # WATCHDOG_ALPACA_EXECUTOR_TOKEN
     ]
     mt5 = [
       "proto-mt5-bridge-token",

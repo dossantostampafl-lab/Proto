@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # one-share fractional lots on the XP demo account. Effective only while XP routing is
     # configured; off, or without the XP node, the roster is exactly as before.
     agent_b3_enabled: bool = False
+    # Two own-strategy agents on US equities (ALPACA_US:SPY, ALPACA_US:QQQ), virtual R$200 each,
+    # trading whole shares on the Alpaca PAPER account. Effective only while Alpaca routing is
+    # configured; off, or without the Alpaca executor, the roster is exactly as before.
+    agent_us_enabled: bool = False
     # Seed a lab strategy's bars from Binance public klines (read-only market data) instead of
     # waiting for live mids to fill its history. Required by agent_lab_strategies_enabled.
     agent_lab_warmup_klines: bool = False
@@ -97,6 +101,10 @@ class Settings(BaseSettings):
     # API byte-for-byte as it was.
     xp_executor_url: str | None = None
     xp_executor_api_token: str | None = None
+    # Alpaca US equities, PAPER account only: a third executor that holds the Alpaca keys. Unset
+    # leaves Alpaca routing off and the API exactly as it was (docs/venues/alpaca-paper.md).
+    alpaca_executor_url: str | None = None
+    alpaca_executor_api_token: str | None = None
     operator_api_token: str | None = None
     chatgpt_local_enabled: bool = False
     chatgpt_profile: str = "default"
@@ -226,6 +234,35 @@ class Settings(BaseSettings):
             raise ValueError("XP_EXECUTOR_API_TOKEN must differ from the other API tokens")
         return self
 
+    @model_validator(mode="after")
+    def enforce_alpaca_executor(self) -> Settings:
+        if not (self.alpaca_executor_url or self.alpaca_executor_api_token):
+            return self
+        if self.oms_execution_backend != "executor":
+            raise ValueError("ALPACA_EXECUTOR_URL needs OMS_EXECUTION_BACKEND=executor")
+        if not self.alpaca_executor_url:
+            raise ValueError("ALPACA_EXECUTOR_URL is required with ALPACA_EXECUTOR_API_TOKEN")
+        token = self.alpaca_executor_api_token or ""
+        if len(token) < _MIN_PRODUCTION_SECRET_LENGTH:
+            raise ValueError("ALPACA_EXECUTOR_API_TOKEN must be at least 32 characters")
+        others = {
+            self.executor_api_token,
+            self.xp_executor_api_token,
+            self.operator_api_token,
+            self.watchdog_api_token,
+        }
+        if token in others:
+            raise ValueError("ALPACA_EXECUTOR_API_TOKEN must differ from the other API tokens")
+        return self
+
+    @property
+    def alpaca_routing_enabled(self) -> bool:
+        return bool(
+            self.oms_execution_backend == "executor"
+            and self.alpaca_executor_url
+            and self.alpaca_executor_api_token
+        )
+
     @property
     def xp_routing_enabled(self) -> bool:
         return bool(
@@ -260,6 +297,7 @@ class Settings(BaseSettings):
         "risk_permit_signing_key",
         "executor_api_token",
         "xp_executor_api_token",
+        "alpaca_executor_api_token",
         "risk_permit_private_key",
         "watchdog_api_token",
     )

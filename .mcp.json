@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "alpaca": {
+      "command": "uvx",
+      "args": ["alpaca-mcp-server==2.4.1"],
+      "env": {
+        "ALPACA_API_KEY": "${ALPACA_MCP_API_KEY}",
+        "ALPACA_SECRET_KEY": "${ALPACA_MCP_SECRET_KEY}",
+        "ALPACA_PAPER_TRADE": "true",
+        "ALPACA_TOOLSETS": "assets,stock-data,crypto-data,options-data,corporate-actions,news,fixed-income-data"
+      }
+    }
+  }
+}

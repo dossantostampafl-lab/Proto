@@ -130,6 +130,13 @@ for name in proto-binance-testnet-key proto-binance-testnet-secret; do
   [[ "$id" == ocid1.* ]] || BINANCE_MISSING=true
 done
 $BINANCE_MISSING && note "Binance testnet key/secret not in the Vault yet: the executor waits for them (docs/runbooks/oracle-setup.md, 'Binance testnet key')"
+# Optional: the Alpaca PAPER key pair. Missing only keeps the Alpaca executor off (it is fetched as
+# its own role, executor-alpaca); the Binance executor, the API and the watchdog do not wait for it.
+for name in proto-alpaca-paper-key proto-alpaca-paper-secret; do
+  id="$(oci_retry vault secret list --compartment-id "$COMP" --vault-id "$VAULT" --name "$name" \
+    --lifecycle-state ACTIVE --query 'data[0].id' --raw-output 2>/dev/null)"
+  [[ "$id" == ocid1.* ]] || { note "$name not in the Vault: Alpaca (optional) stays off (docs/venues/alpaca-paper.md)"; break; }
+done
 
 # --- Bastion -----------------------------------------------------------------------------------
 SSH_OPTS=(-i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20

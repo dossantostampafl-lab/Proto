@@ -142,6 +142,18 @@ variable "executor_port" {
   default = 8100
 }
 
+# Alpaca US equities, PAPER account only (docs/venues/alpaca-paper.md): opens the Alpaca
+# executor's port to the API and the watchdog. Off by default: nothing changes.
+variable "enable_alpaca" {
+  type    = bool
+  default = false
+}
+
+variable "alpaca_executor_port" {
+  type    = number
+  default = 8101
+}
+
 variable "mt5_bridge_port" {
   description = "Port of the narrow MT5 RPC bridge on the Windows VM (submit, cancel, query, positions, balances)."
   type        = number

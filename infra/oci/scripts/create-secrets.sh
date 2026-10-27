@@ -6,7 +6,8 @@
 #
 # Generated: the bearer tokens, the TradingView webhook secret, the MT5 bridge token, the
 # Ed25519 permit key pair (the API gets the private seed, the executor only the public key) and
-# both database URLs with a random password. Typed: the Binance Spot testnet key and secret.
+# both database URLs with a random password. Typed: the Binance Spot testnet key and secret, and
+# (optional) the Alpaca paper key and secret.
 # A secret that already exists is left untouched, so the script is safe to run again.
 set -euo pipefail
 
@@ -63,7 +64,8 @@ ensure() {  # ensure <name> <generator...>
 }
 
 for name in proto-operator-token proto-executor-token proto-watchdog-api-token \
-            proto-watchdog-executor-token proto-tradingview-secret proto-mt5-bridge-token; do
+            proto-watchdog-executor-token proto-tradingview-secret proto-mt5-bridge-token \
+            proto-alpaca-executor-token proto-watchdog-alpaca-token; do
   ensure "$name" rand
 done
 
@@ -87,13 +89,20 @@ print(f"postgresql+asyncpg://{u}:{secrets.token_hex(24)}@127.0.0.1:5432/{u}", en
 ensure proto-api-database-url db_url proto
 ensure proto-executor-database-url db_url executor
 
-for name in proto-binance-testnet-key proto-binance-testnet-secret; do
+# Typed by the operator: the Binance testnet key pair and the Alpaca PAPER key pair (optional:
+# without it only the Alpaca executor waits, docs/venues/alpaca-paper.md).
+for name in proto-binance-testnet-key proto-binance-testnet-secret \
+            proto-alpaca-paper-key proto-alpaca-paper-secret; do
   if exists "$name"; then echo "exists  $name"; continue; fi
+  case "$name" in
+    proto-alpaca-*) where="app.alpaca.markets, Paper account" section="Alpaca paper key" ;;
+    *) where="testnet.binance.vision" section="Binance testnet key" ;;
+  esac
   # The prompt reads the terminal, so it works even when this script is run from setup.sh.
   if [ -n "${PROTO_NO_PROMPT:-}" ] || ! { exec 3</dev/tty; } 2>/dev/null; then
-    echo "missing $name: add it in the Vault console (runbook, 'Binance testnet key')"; continue
+    echo "missing $name: add it in the Vault console (runbook, '$section')"; continue
   fi
-  read -rsp "$name (testnet.binance.vision; Enter to skip for now): " value <&3; echo
+  read -rsp "$name ($where; Enter to skip for now): " value <&3; echo
   exec 3<&-
   if [ -z "$value" ]; then echo "skipped $name: run this script again once you have it"; continue; fi
   printf '%s' "$value" | put "$name"

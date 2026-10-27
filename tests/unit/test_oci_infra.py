@@ -228,8 +228,10 @@ def test_create_secrets_creates_what_an_empty_list_reports_as_missing(tmp_path: 
     )
     assert run.returncode == 0, run.stderr
     created = {p.name for p in store.iterdir()}
-    assert len(created) == 10 and "proto-permit-private-key" in created
+    assert len(created) == 12 and "proto-permit-private-key" in created
+    assert {"proto-alpaca-executor-token", "proto-watchdog-alpaca-token"} <= created
     assert not any(name.startswith("proto-binance") for name in created)  # typed by the operator
+    assert not any(name.startswith("proto-alpaca-paper") for name in created)  # typed too
     private = base64.b64decode((store / "proto-permit-private-key").read_text())
     assert len(private) == 32
     again = subprocess.run(
@@ -241,6 +243,7 @@ def test_create_secrets_creates_what_an_empty_list_reports_as_missing(tmp_path: 
         ["bash", script], env={**env, "PROTO_NO_PROMPT": "1"}, capture_output=True
     )
     assert quiet.returncode == 0 and b"missing proto-binance-testnet-key" in quiet.stdout
+    assert b"missing proto-alpaca-paper-key" in quiet.stdout
 
 
 def test_the_deploy_unit_leaves_the_containers_running_and_failures_show_their_cause() -> None:
@@ -291,3 +294,34 @@ def test_a_pending_executor_approval_never_blocks_the_next_stable_image() -> Non
     executor = spec["jobs"]["executor"]
     assert executor["concurrency"] == {"group": "deploy-executor", "cancel-in-progress": True}
     assert executor["environment"] == "executor"
+
+
+def test_alpaca_secrets_are_their_own_fetch_roles_and_opt_in() -> None:
+    fetch = (OCI / "scripts/fetch-secrets.sh").read_text()
+    roles = dict(re.findall(r"\n  ([a-z-]+)\)\n    pairs=\"(.*?)\" ;;", fetch, re.S))
+    # The Binance executor, the API and the watchdog never wait for an Alpaca secret.
+    for role in ("api", "executor", "watchdog"):
+        assert "alpaca" not in roles[role], role
+    assert (
+        "PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_KEY=proto-alpaca-paper-key"
+        in roles["executor-alpaca"]
+    )
+    assert (
+        "PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_SECRET=proto-alpaca-paper-secret"
+        in roles["executor-alpaca"]
+    )
+    assert "paper" not in roles["api-alpaca"] and "paper" not in roles["watchdog-alpaca"]
+    vault = tf("vault.tf")
+    for role in ("api", "watchdog"):
+        listed = vault.split(f"    {role} = [", 1)[1].split("]", 1)[0]
+        assert "proto-alpaca-paper" not in listed, role  # the paper key: executor only
+    executor = vault.split("    executor = [", 1)[1].split("]", 1)[0]
+    assert '"proto-alpaca-paper-key"' in executor and '"proto-alpaca-paper-secret"' in executor
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    assert 'alpaca_conf="${PROTO_ALPACA_CONF:-/etc/proto/alpaca.conf}"' in deploy
+    assert "EXECUTOR_VENUE=ALPACA_US -e EXECUTOR_ENVIRONMENT=TESTNET" in deploy
+    assert "api.alpaca.markets" not in deploy
+    nsg = block(
+        tf("nsg.tf"), "oci_core_network_security_group_security_rule", "executor_alpaca_from"
+    )
+    assert "var.enable_alpaca ?" in nsg
