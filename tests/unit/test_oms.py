@@ -210,6 +210,22 @@ def venue_of(cls):
     )
 
 
+class LeakyVenue(PaperVenueAdapter):
+    """A venue error whose text echoes the signed request it refused."""
+
+    async def submit(self, order):
+        raise RuntimeError("400 for /api/v3/order?signature=deadbeef&apiKey=K")
+
+
+async def test_an_unknown_submit_logs_the_error_type_not_its_text(caplog) -> None:
+    oms, _ = await setup(venue_of(LeakyVenue))
+    with caplog.at_level("WARNING", logger="proto.oms"):
+        order = await oms.submit(trade := intent(), SIGNER.issue(trade, now=NOW))
+    assert order.status is OrderStatus.UNKNOWN
+    assert "RuntimeError" in caplog.text and "BINANCE_SPOT" in caplog.text
+    assert "signature" not in caplog.text and "apiKey" not in caplog.text
+
+
 async def test_unknown_is_resolved_by_query_to_the_venue_fill() -> None:
     adapter = venue_of(FlakyVenue)
     oms, ledger = await setup(adapter)

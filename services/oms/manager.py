@@ -189,7 +189,13 @@ class OrderManager:
                     )
                 )
             except Exception as exc:  # timeout, network, venue outage
-                logger.warning("submit outcome unknown for %s: %s", order.client_order_id, exc)
+                # Type and venue only: a venue error's text can echo the request it refused.
+                logger.warning(
+                    "submit outcome unknown for %s on %s: %s",
+                    order.client_order_id,
+                    self._ledger.venue.value,
+                    type(exc).__name__,
+                )
                 self._set_status(order, OrderStatus.UNKNOWN, reason=type(exc).__name__)
                 await self._commit(order)
                 return order
