@@ -142,7 +142,10 @@ def test_execution_disabled_leaves_permits_unused(monkeypatch) -> None:
             if client.get("/v1/risk/decisions/recent").json()["decisions"]:
                 break
             time.sleep(0.01)
-        assert client.get("/v1/oms/orders").json()["orders"] == []
+        body = client.get("/v1/oms/orders").json()
+        assert body["orders"] == []
+        assert (body["venue"], body["execution_backend"]) == ("BINANCE_SPOT", "paper")
+        assert body["real_money_execution"] is False
 
 
 async def test_divergence_halts_the_venue(monkeypatch) -> None:

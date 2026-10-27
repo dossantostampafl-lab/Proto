@@ -572,7 +572,13 @@ async def list_orders(limit: int = 50, venue: str = "BINANCE_SPOT") -> dict[str,
         }
     oms, _, _ = await components()
     orders = oms.orders[-max(1, min(limit, 500)) :]
-    return {"orders": [o.to_dict() for o in reversed(orders)], **_BOUNDARY}
+    return {
+        "orders": [o.to_dict() for o in reversed(orders)],
+        "venue": chosen.value,
+        # Same labels as the executor branch: these are the in-process paper venue's orders.
+        "execution_backend": "paper",
+        **_BOUNDARY,
+    }
 
 
 @router.get("/ledger")
