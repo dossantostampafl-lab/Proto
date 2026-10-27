@@ -80,7 +80,9 @@ class WatchdogHalt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     watchdog_id: str = Field(min_length=1, max_length=40)
-    reasons: list[str] = Field(min_length=1, max_length=50)
+    reasons: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        min_length=1, max_length=50
+    )
 
 
 def create_app(executor: Executor | None = None) -> FastAPI:
@@ -194,7 +196,7 @@ def create_app(executor: Executor | None = None) -> FastAPI:
 
     @app.post("/v1/watchdog/halt")
     async def watchdog_halt(body: WatchdogHalt, executor_: Watchdog):
-        changed = executor_.watchdog_halt(body.watchdog_id, body.reasons)
+        changed = await executor_.watchdog_halt(body.watchdog_id, body.reasons)
         return {"halted": executor_.halted, "already_halted": not changed, **_boundary(executor_)}
 
     @app.get("/v1/events")
