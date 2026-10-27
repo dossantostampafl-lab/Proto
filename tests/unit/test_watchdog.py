@@ -262,6 +262,11 @@ async def test_a_garbled_answer_is_an_outage_never_a_crashed_cycle() -> None:
     assert api.halts and ex.halts  # both sides were asked to halt
 
 
+def test_the_watchdog_never_prints_its_tokens() -> None:
+    wd = watchdog(FakeSide(), FakeSide(executor=True))
+    assert WATCH not in repr(wd) and EXEC_WATCH not in repr(wd)
+
+
 def test_a_naive_reconcile_timestamp_is_stale_not_a_crash() -> None:
     naive = datetime.now(UTC).replace(tzinfo=None).isoformat()
     status = {"ready": True, "halted": None, "consistent": True, "last_reconcile_at": naive}

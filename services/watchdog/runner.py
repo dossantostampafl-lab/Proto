@@ -52,13 +52,13 @@ class CycleResult:
 class Watchdog:
     watchdog_id: str
     api: httpx.AsyncClient  # base_url = public API
-    api_token: str
+    api_token: str = field(repr=False)
     executor: httpx.AsyncClient | None = None  # base_url = executor, private network
-    executor_token: str | None = None
+    executor_token: str | None = field(default=None, repr=False)
     xp_executor: httpx.AsyncClient | None = None  # base_url = XP node, over Tailscale
-    xp_executor_token: str | None = None
+    xp_executor_token: str | None = field(default=None, repr=False)
     alpaca_executor: httpx.AsyncClient | None = None  # base_url = Alpaca executor, private net
-    alpaca_executor_token: str | None = None
+    alpaca_executor_token: str | None = field(default=None, repr=False)
     limits: Limits = field(default_factory=Limits)
     clock: Callable[[], datetime] = _utc_now
     _checks: Checks = field(init=False)
