@@ -20,3 +20,7 @@ graphify-out/
 data/research/
 tools/render_control_room/build/
 tools/render_control_room/assets/
+
+# Local outputs of the vendored trading skills (.claude/skills, see third_party/UPSTREAM_MANIFEST.md)
+/reports/
+/state/

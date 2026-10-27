@@ -108,6 +108,11 @@ opens this repository in Claude Code, including cloud sessions. They install whe
   writing-plans, subagent-driven-development, test-driven-development and
   verification-before-completion. The phase plans follow these workflows (see `docs/superpowers/`).
 
+- **Trading skills** (13 folders from `tradermonty/claude-trading-skills`, MIT, pinned in
+  `third_party/UPSTREAM_MANIFEST.md`): backtesting, position sizing, drawdown and pre-trade gates,
+  regime analysis and edge review in `.claude/skills/`. They are advisory only. Skills that need a
+  broker or API keys were left out on purpose.
+
 The `AGENTS.md` boundary applies to every skill. No plugin may weaken the financial boundary, add
 credentials or skip CI gates.
 

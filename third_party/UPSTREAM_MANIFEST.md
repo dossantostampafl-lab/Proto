@@ -56,3 +56,30 @@ and installed using the upstream package's `finrobot_desktop/pyproject.toml`.
 7. Keep existing `services/risk`, `services/oms`, `services/agents`,
    `services/orchestration` and the live monitor as the sole canonical systems.
 8. Use feature branches and PRs; no merge with red required CI/security.
+
+## Claude Trading Skills (advisory skills, Claude Code only)
+
+| Repository | Immutable revision | License | Imported files | Runtime |
+|---|---|---|---|---|
+| [claude-trading-skills](https://github.com/tradermonty/claude-trading-skills) | `c9b84196a44a56a553293114fdae1f30bdd08c58` | MIT ([copy](claude-trading-skills.LICENSE)) | 13 skill folders in `.claude/skills/` | **NOT CONNECTED** (assistant guidance only) |
+
+Vendored skills: `backtest-expert`, `crypto-regime-analyzer`, `data-quality-checker`,
+`drawdown-circuit-breaker`, `edge-strategy-designer`, `edge-strategy-reviewer`,
+`market-environment-analysis`, `position-sizer`, `pre-trade-discipline-gate`,
+`residual-edge-analyzer`, `scenario-analyzer`, `trade-hypothesis-ideator`,
+`trade-performance-coach`.
+
+- **Selection rule:** only skills that need no API key and no broker connection. The
+  only network access is `crypto-regime-analyzer`'s public, keyless GETs (CoinGecko,
+  Binance futures market data).
+- **Excluded:** every skill that talks to a broker or needs credentials. That covers
+  Alpaca (`portfolio-manager`, `parabolic-short-trade-planner`), FMP, FINVIZ,
+  `mt5-robot-tester` and the launchd automation.
+- **Only local change:** script paths in the Markdown were rewritten from
+  `skills/<name>/` to `.claude/skills/<name>/`. Code is byte-identical to upstream.
+- **Boundary:** these skills help the operator and Claude Code reason about research and
+  risk. Nothing in `apps/` or `services/` imports them, they emit no intents and place no
+  orders, and their outputs (`reports/`, `state/`) are gitignored. The `AGENTS.md`
+  limits, the Risk Permit and the executor boundary are unchanged.
+- **Not run in PROTO:** the vendored scripts and their upstream tests were not executed
+  during intake.
