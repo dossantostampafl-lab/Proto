@@ -127,6 +127,17 @@ async def test_buy_then_sell_keeps_ledger_and_venue_reconciled() -> None:
     ]
 
 
+async def test_an_unsupported_intent_spends_its_permit_and_is_journaled() -> None:
+    events: list = []
+    oms, _ = await setup(events=events)
+    market = intent(order_type=OrderType.MARKET, limit_price=None)
+    with pytest.raises(OrderRejected, match="unsupported_intent"):
+        await oms.submit(market, SIGNER.issue(market, now=NOW))
+    assert events == [
+        ("ORDER_REFUSED", {"intent_id": str(market.intent_id), "reason": "unsupported_intent"})
+    ]
+
+
 async def test_insufficient_funds_rejects_before_reaching_the_venue() -> None:
     class Untouchable(PaperVenueAdapter):
         async def submit(self, order):

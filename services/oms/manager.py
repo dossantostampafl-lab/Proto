@@ -156,6 +156,11 @@ class OrderManager:
                 raise OrderRejected(f"permit_{exc.code}") from exc
             instrument = self._instruments.get(intent.instrument_id)
             if instrument is None or intent.limit_price is None:
+                # The permit is spent: journal the refusal like a permit rejection.
+                await self._record(
+                    "ORDER_REFUSED",
+                    {"intent_id": str(intent.intent_id), "reason": "unsupported_intent"},
+                )
                 raise OrderRejected("unsupported_intent")
 
             order = self._new_order(intent, instrument)
