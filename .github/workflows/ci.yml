@@ -44,9 +44,12 @@ jobs:
         env:
           PROTO_DB_PASSWORD: ci-placeholder-only
           GRAFANA_ADMIN_PASSWORD: ci-placeholder-only
+          # Path only: the research sidecar reads its key from a local file, never from the repo.
+          PROTO_RESEARCH_LLM_KEY_FILE: /dev/null
         run: |
           docker compose -f docker-compose.yml config > /dev/null
           docker compose -f docker-compose.live.yml config > /dev/null
+          docker compose -f docker-compose.research.yml config > /dev/null
 
   web:
     runs-on: ubuntu-latest
