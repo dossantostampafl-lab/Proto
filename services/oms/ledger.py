@@ -121,6 +121,15 @@ class InMemoryLedger:
     async def entries(self) -> list[LedgerEntry]:
         return sorted(self._entries.values(), key=lambda e: (e.recorded_at, str(e.entry_id)))
 
+    async def fee_assets(self) -> dict[str, str]:
+        """The asset each order's fee was charged in, by order reference."""
+
+        return {
+            e.reference_id: e.asset
+            for e in await self.entries()
+            if e.kind is LedgerEntryKind.FEE
+        }
+
 
 class ExactDecimal(TypeDecorator):
     """NUMERIC(38, 18) on PostgreSQL; exact text on SQLite, whose NUMERIC goes through float.
@@ -238,6 +247,20 @@ class SqlLedger:
                 )
             ).all()
         return summarize(_row_entry(a, k, amt, self) for a, k, amt in rows)
+
+    async def fee_assets(self) -> dict[str, str]:
+        """The asset each order's fee was charged in, by order reference."""
+
+        async with self.engine.connect() as connection:
+            rows = (
+                await connection.execute(
+                    select(ledger_table.c.reference_id, ledger_table.c.asset)
+                    .where(self._scope())
+                    .where(ledger_table.c.kind == LedgerEntryKind.FEE.value)
+                    .order_by(ledger_table.c.recorded_at)
+                )
+            ).all()
+        return {reference: asset for reference, asset in rows}
 
     async def has_entry(self, entry: UUID) -> bool:
         async with self.engine.connect() as connection:

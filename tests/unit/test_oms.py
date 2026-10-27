@@ -437,6 +437,42 @@ async def test_filled_orders_and_spent_permits_survive_a_restart(engine) -> None
     assert (await ledger.balances())["BTC"].total == Decimal("0.01")
 
 
+class BaseFeeVenue(PaperVenueAdapter):
+    """Binance-style: a buy's fee is charged in the base asset (BTC), not the quote."""
+
+    async def submit(self, order):
+        report = await super().submit(order)
+        return report.model_copy(update={"fee": Decimal("0.00001"), "fee_asset": "BTC"})
+
+
+async def test_the_fee_asset_is_serialized_and_survives_a_restart(engine) -> None:
+    oms, ledger = await boot(engine)
+    quote_fee = await oms.submit(trade := intent(), SIGNER.issue(trade, now=NOW))
+    assert quote_fee.to_dict()["fee_asset"] == "USDT"
+
+    totals = {a: b.total for a, b in (await ledger.balances()).items()}
+    venue = BaseFeeVenue(
+        instruments=(BTC,),
+        quotes=lambda _id: QUOTE,
+        balances=totals,
+        fee_bps=Decimal("10"),
+        slippage_bps=Decimal("0"),
+        clock=lambda: NOW,
+        simulated_venue=VenueId.BINANCE_SPOT,
+    )
+    oms, ledger = await boot(engine, venue)
+    base_fee = await oms.submit(trade := intent(), SIGNER.issue(trade, now=NOW))
+    assert (base_fee.to_dict()["fee"], base_fee.to_dict()["fee_asset"]) == ("0.00001", "BTC")
+    # The fee came out of the BTC bought, not out of USDT.
+    assert (await ledger.balances())["BTC"].total == Decimal("0.01") + Decimal("0.00999")
+
+    restarted, _ = await boot(engine)
+    assert {o.client_order_id: o.to_dict()["fee_asset"] for o in restarted.orders} == {
+        quote_fee.client_order_id: "USDT",
+        base_fee.client_order_id: "BTC",
+    }
+
+
 async def test_open_orders_come_back_unknown_and_resolve_by_query(engine) -> None:
     oms, _ = await boot(engine)
     resting = intent(limit_price=Decimal("60000.00"))
