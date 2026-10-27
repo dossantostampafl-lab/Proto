@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import log, sqrt
+from math import isfinite, log, sqrt
 from statistics import fmean
 
 from services.market_data.core import MarketTick, compute_orderbook_metrics
@@ -38,9 +38,11 @@ def calculate_live_market_analytics(ticks: list[MarketTick]) -> LiveMarketAnalyt
 
     ordered = sorted(ticks, key=lambda tick: (tick.timestamp, tick.sequence))
     mids = [tick.mid for tick in ordered]
+    if not all(isfinite(mid) and mid > 0 for mid in mids):
+        # Returns and spreads in bps are undefined for these; never report invented numbers.
+        raise ValueError("market tick mids must be finite and positive")
     log_returns = [
-        log(current / previous)
-        for previous, current in zip(mids, mids[1:], strict=False)
+        log(current / previous) for previous, current in zip(mids, mids[1:], strict=False)
     ]
     realized_volatility = sqrt(sum(value * value for value in log_returns))
     first_mid = mids[0]

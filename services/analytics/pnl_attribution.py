@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class PnLAttributionInput(BaseModel):
+    # A NaN or infinite component would make the residual (and the reconciliation) meaningless.
+    model_config = ConfigDict(allow_inf_nan=False)
+
     model_edge: float = 0.0
     market_movement: float = 0.0
     execution: float = 0.0

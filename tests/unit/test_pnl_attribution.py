@@ -30,3 +30,14 @@ def test_cost_components_can_be_negative_without_breaking_reconciliation() -> No
     )
     assert result.residual == -5
     assert result.attributed_total == result.observed_total_pnl
+
+
+def test_non_finite_components_are_refused() -> None:
+    import math
+
+    import pytest
+    from pydantic import ValidationError
+
+    for bad in (math.nan, math.inf):
+        with pytest.raises(ValidationError):
+            PnLAttributionInput(fees=bad, observed_total_pnl=1.0)
