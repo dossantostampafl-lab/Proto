@@ -325,3 +325,24 @@ def test_alpaca_secrets_are_their_own_fetch_roles_and_opt_in() -> None:
         tf("nsg.tf"), "oci_core_network_security_group_security_rule", "executor_alpaca_from"
     )
     assert "var.enable_alpaca ?" in nsg
+
+
+def test_setup_turns_alpaca_on_only_when_asked_and_never_the_us_agents() -> None:
+    setup = (OCI / "deploy/setup.sh").read_text()
+    # Opt-in: without PROTO_ALPACA=1 nothing about Alpaca changes.
+    assert 'ALPACA="${PROTO_ALPACA:-0}"' in setup
+    assert (
+        '[ "$ALPACA" = 1 ] && [ "$(var enable_alpaca)" != true ] && setvar enable_alpaca true'
+        in setup
+    )
+    # Symbols are sanitized before they reach a remote shell.
+    assert "tr -cd 'A-Z0-9,.'" in setup
+    # It writes only the non-secret conf, with the US agents off, and never when the key is missing.
+    assert "AGENT_US_ENABLED=false" in setup and "AGENT_US_ENABLED=true" not in setup
+    assert "if $ALPACA_MISSING; then" in setup
+    # Only the API and the watchdog are forced; the Binance executor is not restarted for it.
+    assert (
+        '[ "$role" = executor ] || DEPLOY_CMD[$role]="sudo /usr/local/sbin/proto-deploy --force"'
+        in setup
+    )
+    assert "api.alpaca.markets" not in setup
