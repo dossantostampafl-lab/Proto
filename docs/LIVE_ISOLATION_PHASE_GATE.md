@@ -1,16 +1,21 @@
 # LIVE_MONITORING isolation gate
 
+> **Scope (2026-10-27).** This gate covers only the import-isolated, read-only public monitor
+> `apps.api.app.live_app:app` (`Dockerfile.api`, `docker-compose.live.yml`). The full application
+> `apps.api.app.main:app` (root `Dockerfile`, deployed on Oracle Cloud) also runs paper, testnet,
+> demo and paper-broker execution behind the Risk Engine; see `docs/OPERATIONS.md`.
+
 This phase separates the production-facing public crypto monitor from the legacy research and simulation application.
 
 ## Production entrypoint
 
-The default API container runs:
+The live-only API container (`Dockerfile.api`, used by `docker-compose.live.yml`) runs:
 
 `apps.api.app.live_app:app`
 
 The standalone app exposes only public read-only BTC/ETH/SOL monitoring, event-runtime health, bounded persisted history, descriptive analytics, Prometheus metrics and the two public-data WebSocket channels.
 
-The legacy `apps.api.app.main:app` remains in the repository for historical research/simulation compatibility but is not the default container entrypoint.
+`apps.api.app.main:app` is the full application. It is the entrypoint of the root `Dockerfile` and of `docker-compose.yml`, not of the live-only container.
 
 ## Required invariants
 

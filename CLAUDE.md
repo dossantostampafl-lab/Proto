@@ -41,10 +41,11 @@ OMS ─> paper venue | isolated executor (Binance testnet) ─> ledger ─> reco
 | Path | What |
 |---|---|
 | `apps/api/app/` | FastAPI app (`main:app`). Phase surfaces: `signal_surface`, `agent_surface`, `risk_surface`, `oms_surface`, `floor_surface`, `executor_client` |
-| `apps/executor/` | Isolated executor (testnet only): OMS + ledger + Binance adapter behind a private bearer-token API |
+| `apps/executor/` | Isolated executor (testnet only): OMS + ledger + one venue adapter (Binance testnet, XP demo or Alpaca paper) behind a private bearer-token API |
+| `apps/mt5_bridge/` | XP/B3 MT5 bridge (Windows, demo account only), reached only by the XP executor |
 | `apps/web/` | React + Vite dashboard. `src/views/Floor.tsx` + `floorScene.tsx` is the live trading floor |
 | `services/execution/` | Contracts (intents, permits, reports, ledger entries), constitution, paper venue |
-| `services/agents/` | Fusion, sizing, shrink-only reviewer |
+| `services/agents/` | Fusion, sizing, shrink-only reviewer, trader-agent roster (`roster.py`, `docs/agents/roster.md`) |
 | `services/risk/` | Risk Engine, governor (kill switches, lockdowns), permits |
 | `services/oms/` | Order manager, transactional ledger, reconciliation, durable store |
 | `services/venues/` | Binance Spot, XP/MT5 and Alpaca **paper** (`alpaca.py`, host pinned to `paper-api.alpaca.markets`) adapters and credential loading (executor only). Alpaca: `docs/venues/alpaca-paper.md` |
@@ -52,12 +53,13 @@ OMS ─> paper venue | isolated executor (Binance testnet) ─> ledger ─> reco
 | `services/watchdog/`, `apps/watchdog/` | Independent watchdog: probes API and executor, halt-only tokens, never releases |
 | `services/drills/` | Adversarial, recovery and rollback drills with reproducible digests (`python -m services.drills`) |
 | `migrations/` | Alembic. New tables must be registered in `migrations/env.py` and created in `init_database` |
+| `infra/` | `oci/` (Terraform, pull-based deploy scripts), `monitoring/` (Prometheus rules, Grafana), `watchdog/` (systemd unit), `xp-node/` (PC scripts) |
 | `docs/` | Per-phase docs: `tradingview/`, `agents/`, `risk/`, `oms/`, `venues/`, `executor/`, `dashboard/`, `promotion/`, `watchdog/`, `drills/`, `runbooks/`, `adr/` |
 
 ## Commands
 
 ```bash
-# Python (3.13). CI runs exactly these two.
+# Python (3.13). CI's python job runs exactly these two (other jobs: `mutmut run`, `docker compose config`).
 pip install -e '.[dev]'
 ruff check apps services tests
 pytest                       # asyncio_mode=auto, --maxfail=1

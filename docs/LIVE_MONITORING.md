@@ -1,5 +1,10 @@
 # Live Monitoring
 
+> **Scope (2026-10-27).** This gate covers only the import-isolated, read-only public monitor
+> `apps.api.app.live_app:app` (`Dockerfile.api`, `docker-compose.live.yml`). The full application
+> `apps.api.app.main:app` (root `Dockerfile`, deployed on Oracle Cloud) also runs paper, testnet,
+> demo and paper-broker execution behind the Risk Engine; see `docs/OPERATIONS.md`.
+
 `LIVE_MONITORING` is the read-only runtime for public BTC, ETH and SOL market data.
 
 ## Boundary
