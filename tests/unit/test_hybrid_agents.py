@@ -319,6 +319,29 @@ def test_apply_review_can_only_shrink() -> None:
     assert apply_review(intent, review(Verdict.VETO, 0.0), BTC) is None
 
 
+@pytest.mark.parametrize("factor", [0.01, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999999])
+@pytest.mark.parametrize("equity", ["2000", "10000"])
+def test_a_reduce_never_grows_and_stays_on_the_lot_grid(factor, equity) -> None:
+    intent = candidate(equity=Decimal(equity)).intent
+    reduced = apply_review(intent, review(Verdict.REDUCE, factor), BTC)
+    if reduced is not None:
+        assert reduced.quantity < intent.quantity
+        assert reduced.quantity <= intent.quantity * Decimal(str(factor))
+        assert reduced.quantity % BTC.lot_size == 0
+        assert reduced.limit_price == intent.limit_price and reduced.side == intent.side
+
+
+def test_a_forged_review_that_skipped_validation_still_cannot_grow() -> None:
+    """``model_construct`` bypasses the contract; apply_review must still refuse to enlarge."""
+
+    intent = candidate().intent
+    for factor in (1.0, 1.5, 10.0):
+        forged = AgentReview.model_construct(
+            verdict=Verdict.REDUCE, size_factor=factor, rationale="r", reviewer="forged"
+        )
+        assert apply_review(intent, forged, BTC) is None
+
+
 # --- Claude reviewer (fake client, no network) ----------------------------------
 
 
@@ -563,6 +586,31 @@ async def test_reviewer_that_avoids_winners_is_not_promotable() -> None:
     result = await evaluate_reviewer(cases, OracleReviewer(losers, invert=True), {BTC_ID: BTC})
     assert result.promotable is False
     assert result.reason == "reviewed PnL below the deterministic baseline"
+
+
+async def test_a_sell_candidate_counts_its_own_signed_return() -> None:
+    """``realized_return`` is already the trade's return: a SELL that avoided a fall is a gain."""
+
+    exit_decision = fuse(
+        [signal(SignalDirection.SHORT, strength=0.9)], instrument_id=BTC_ID, now=NOW
+    )
+    sell = candidate(decision=exit_decision, position_quantity=Decimal("0.01")).intent
+    assert sell is not None and sell.side == "SELL"
+    ctx = context()
+    case = ReplayCase(
+        ReviewContext(
+            candidate=sell,
+            fusion=ctx.fusion,
+            market=ctx.market,
+            portfolio=ctx.portfolio,
+            signals=[],
+            constraints=ctx.constraints,
+        ),
+        Decimal("0.01"),
+    )
+    result = await evaluate_reviewer([case], DeterministicReviewer(), {BTC_ID: BTC}, min_cases=1)
+    assert result.baseline_pnl == sell.quantity * sell.limit_price * Decimal("0.01") > 0
+    assert result.reviewed_pnl == result.baseline_pnl
 
 
 async def test_promotion_needs_enough_cases() -> None:

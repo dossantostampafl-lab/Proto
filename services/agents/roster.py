@@ -22,7 +22,7 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
@@ -42,6 +42,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.execution import Signal, SignalSource, TradableInstrument, TradeIntent
 from services.execution.constitution import MAX_GROSS_LEVERAGE, REFERENCE_CAPITAL
+
+from .fusion import _floor_to_lot
 
 logger = logging.getLogger("proto.agents.roster")
 
@@ -404,11 +406,6 @@ def agent_code(sequence: int) -> tuple[str, str]:
 # --- sizing ------------------------------------------------------------------------------
 
 
-def _floor_to_lot(quantity: Decimal, instrument: TradableInstrument) -> Decimal:
-    lots = (quantity / instrument.lot_size).to_integral_value(rounding=ROUND_DOWN)
-    return lots * instrument.lot_size
-
-
 @dataclass(frozen=True)
 class AgentSizing:
     intent: TradeIntent | None
@@ -735,7 +732,7 @@ class AgentRoster:
         async with self._lock:
             await self._ensure_loaded()
             for slot in self._slots:
-                if self._active(slot) is None:
+                if self.active_for(slot) is None:
                     try:
                         spawned.append(await self._spawn(slot))
                     except AllocationRefused:
@@ -745,12 +742,9 @@ class AgentRoster:
     async def spawn(self, slot: Slot) -> TraderAgent:
         async with self._lock:
             await self._ensure_loaded()
-            if self._active(slot) is not None:
+            if self.active_for(slot) is not None:
                 raise ValueError(f"slot {slot.key} already has an ACTIVE agent")
             return await self._spawn(slot)
-
-    def _active(self, slot: Slot) -> TraderAgent | None:
-        return self.active_for(slot)
 
     async def _spawn(self, slot: Slot, *, replaces: str | None = None) -> TraderAgent:
         if self.allocated() + AGENT_STARTING_CAPITAL > REFERENCE_CAPITAL:

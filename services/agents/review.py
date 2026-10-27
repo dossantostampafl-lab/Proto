@@ -103,7 +103,10 @@ def apply_review(
     price = intent.limit_price
     if quantity <= 0 or price is None or instrument.order_violation(quantity, price):
         return None
-    assert quantity < intent.quantity
+    if quantity >= intent.quantity:
+        # Shrink-only, even for a review that bypassed validation: never an equal or larger
+        # order. An explicit check, not an assert, so it also holds under ``python -O``.
+        return None
     return TradeIntent.model_validate({**intent.model_dump(), "quantity": quantity})
 
 
