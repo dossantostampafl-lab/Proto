@@ -216,7 +216,7 @@ export function Agents() {
     <Panel title="Conversation & research readiness">
       <span className="tag research">CAPABILITY INVENTORY · READ ONLY</span>
       <dl className="agent-dl">
-        <dt>Agent conversation</dt><dd>Unavailable in this deployment. Selecting an agent does not run it.</dd>
+        <dt>Agent conversation</dt><dd>Explanation only, opt-in: works on a private loopback host with the operator token (public hosts connect through an SSH tunnel). Selecting an agent does not run it.</dd>
         <dt>ChatGPT sign-in</dt><dd>Opt-in private local OAuth and account-owned history; disabled by default. No paid API fallback is used.</dd>
         <dt>FinRobot research</dt><dd>Original opt-in worker only (research, earnings, DCF, comps, IC memo, LBO). Not launched from the dashboard.</dd>
       </dl>

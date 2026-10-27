@@ -35,3 +35,17 @@
 .agent-conversation { min-width: 0; overflow-wrap: anywhere; }
 .agent-conversation pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-conversation button { margin: 4px 8px 4px 0; }
+.agent-conversation h3 { margin: 18px 0 8px; font: 600 13px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
+.agent-conversation p, .agent-conversation li { font-size: 13px; }
+.agent-conversation ol { padding-left: 18px; }
+.agent-conversation code { overflow-wrap: anywhere; }
+.agent-roles { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 4px; }
+.agent-roles li { padding: 4px 8px; border-left: 2px solid var(--line-strong); color: var(--muted); }
+.agent-roles li:first-child { border-left-color: var(--accent); color: var(--text); }
+.agent-roles b { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.agent-conversation article { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); }
+.agent-conversation .field textarea {
+  min-height: 90px; resize: vertical; background: rgba(169, 179, 190, 0.03); border: 0; border-bottom: 1px solid var(--line-strong);
+  padding: 8px 4px; font-family: var(--mono); color: var(--text);
+}
+.agent-conversation .field textarea:focus { border-bottom-color: var(--accent); outline: none; }
