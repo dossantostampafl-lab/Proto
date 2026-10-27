@@ -388,8 +388,11 @@ def _watchdog_summary(status: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _promotion_summary() -> list[dict[str, Any]]:
-    """Each scope's stage, clean days and what blocks its next step (operator aside)."""
+async def _promotion_summary() -> list[dict[str, Any]] | None:
+    """Each scope's stage, clean days and what blocks its next step (operator aside).
+
+    None when the registry cannot be read, so "unavailable" never looks like "no scopes".
+    """
 
     from datetime import UTC, datetime
 
@@ -403,7 +406,7 @@ async def _promotion_summary() -> list[dict[str, Any]]:
         records = await registry().records()
     except Exception:  # promotion data unavailable is shown as such, never guessed
         logger.exception("floor: promotion registry unavailable")
-        return []
+        return None
     for record in records:
         target = next_stage(record.stage)
         summary.append(
