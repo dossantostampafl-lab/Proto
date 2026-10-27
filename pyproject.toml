@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=9.0.3,<10",
+  "pytest>=9.0.3,<9.2",  # mutmut 3.8.0 reads Item._nodeid, removed in pytest 9.2.0
   "pytest-asyncio>=1.1,<2",
   "ruff>=0.12,<1",
   "mutmut>=3.7,<4",
