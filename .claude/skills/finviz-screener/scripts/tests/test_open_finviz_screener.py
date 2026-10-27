@@ -512,7 +512,7 @@ class TestMainIntegration:
             main(["--filters", "cap_small", "--elite", "--url-only"])
         captured = capsys.readouterr()
         assert "[Elite]" in captured.out
-        assert "elite.finviz.com" in captured.out
+        assert "https://elite.finviz.com/screener.ashx" in captured.out
 
     def test_view_selection(self, capsys):
         from open_finviz_screener import main

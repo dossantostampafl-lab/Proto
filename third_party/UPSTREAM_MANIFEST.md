@@ -65,7 +65,9 @@ and installed using the upstream package's `finrobot_desktop/pyproject.toml`.
 
 - **Local change:** repository-relative paths `skills/<name>/` were rewritten to
   `.claude/skills/<name>/` (80 Markdown and 24 Python files), so that the scripts and docs
-  resolve inside PROTO. Nothing else differs from upstream.
+  resolve inside PROTO. One test assertion in `finviz-screener` now checks the full URL
+  prefix instead of a bare host, which CodeQL flagged (py/incomplete-url-substring-sanitization).
+  Nothing else differs from upstream.
 - **Order flow:** none. A search found no order-placing call (no POST, `submit_order` or
   `/v2/orders`). `breakout-trade-planner` only *writes* Alpaca-format order templates as
   files. `portfolio-manager` and `parabolic-short-trade-planner` *read* Alpaca account
