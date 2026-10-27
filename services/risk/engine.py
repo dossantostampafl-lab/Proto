@@ -100,8 +100,8 @@ class RiskDecision:
 
 
 _B3_OPEN, _B3_CLOSE = time(10, 0), time(17, 55)
-# Regular sessions by the exchange's timezone (local wall-clock time, weekdays). B3 is the default
-# for any other zone, as before; New York is the US regular session (no pre/post-market).
+# Regular sessions by the exchange's timezone (local wall-clock time, weekdays). Any other zone
+# has no modelled session and is closed; New York is the US regular session (no pre/post-market).
 _SESSIONS: dict[str, tuple[time, time]] = {
     "America/Sao_Paulo": (_B3_OPEN, _B3_CLOSE),
     "America/New_York": (time(9, 30), time(16, 0)),
@@ -118,8 +118,12 @@ def session_open(instrument: TradableInstrument, now: datetime) -> bool:
 
     if instrument.session_type is SessionType.CONTINUOUS_24_7:
         return True
+    hours = _SESSIONS.get(instrument.timezone)
+    if hours is None:
+        # No modelled session for this exchange: closed (fail closed), never B3's hours by guess.
+        return False
     local = now.astimezone(ZoneInfo(instrument.timezone))
-    opens, closes = _SESSIONS.get(instrument.timezone, (_B3_OPEN, _B3_CLOSE))
+    opens, closes = hours
     return local.weekday() < 5 and opens <= local.time() < closes
 
 

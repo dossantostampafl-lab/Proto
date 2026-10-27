@@ -217,6 +217,13 @@ def test_venue_cap_can_only_tighten() -> None:
     assert "venue_order_notional" in capped.rejections
 
 
+def test_an_exchange_without_a_modelled_session_is_closed() -> None:
+    # Before: any other zone silently got B3's hours (10:00-17:55 there, open at NOW).
+    tokyo = PETR4.model_copy(update={"instrument_id": "XP_B3:TKY", "timezone": "Asia/Tokyo"})
+    assert session_open(tokyo, NOW.replace(hour=3)) is False  # 12:00 in Tokyo, a Tuesday
+    assert session_open(tokyo, NOW) is False
+
+
 def test_exchange_sessions_follow_b3_hours() -> None:
     assert session_open(PETR4, NOW) is True
     assert session_open(PETR4, NOW.replace(hour=21)) is False  # 18:00 local
