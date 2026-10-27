@@ -237,6 +237,38 @@ async def test_a_breach_halts_both_sides_once_and_again_after_a_premature_releas
     assert {path for _, path in api.calls + ex.calls} <= allowed
 
 
+async def test_a_garbled_answer_is_an_outage_never_a_crashed_cycle() -> None:
+    """A 200 with HTML (a proxy page) used to raise inside `observe`: the cycle died and halted
+    nothing, every cycle. It must count as unreadable and trip once sustained."""
+
+    api, ex = FakeSide(), FakeSide(executor=True)
+    garbled = httpx.Response(200, text="<html>maintenance</html>")
+
+    def html(request: httpx.Request) -> httpx.Response:
+        if request.url.path in ("/v1/floor/state", "/v1/watchdog/status"):
+            ex.calls.append((request.method, request.url.path))
+            return garbled
+        return (ex if request.url.host == "ex" else api).handler(request)
+
+    wd = Watchdog(
+        watchdog_id="wd-test",
+        api=httpx.AsyncClient(base_url="http://api", transport=httpx.MockTransport(html)),
+        api_token=WATCH,
+        executor=httpx.AsyncClient(base_url="http://ex", transport=httpx.MockTransport(html)),
+        executor_token=EXEC_WATCH,
+    )
+    results = [await wd.cycle() for _ in range(3)]
+    assert results[-1].trips == ["api_unreachable", "executor_unreachable"]
+    assert api.halts and ex.halts  # both sides were asked to halt
+
+
+def test_a_naive_reconcile_timestamp_is_stale_not_a_crash() -> None:
+    naive = datetime.now(UTC).replace(tzinfo=None).isoformat()
+    status = {"ready": True, "halted": None, "consistent": True, "last_reconcile_at": naive}
+    trips, _ = Checks().evaluate(obs(executor_configured=True, executor=status))
+    assert "reconciliation_stale" in trips
+
+
 async def test_an_unreachable_api_halts_the_executor() -> None:
     api, ex = FakeSide(), FakeSide(executor=True)
     wd = watchdog(api, ex)

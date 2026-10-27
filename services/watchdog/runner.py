@@ -26,6 +26,19 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _json_object(response: httpx.Response | None) -> dict[str, Any] | None:
+    """A 200 with a JSON object, else None (unreadable). A garbled answer must count as an
+    outage for the checks, never crash the cycle: a crashed cycle halts nothing."""
+
+    if response is None or response.status_code != 200:
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
 @dataclass
 class CycleResult:
     at: datetime
@@ -74,7 +87,7 @@ class Watchdog:
         return Observation(
             at=self.clock(),
             api_health=health is not None and health.status_code == 200,
-            floor=floor.json() if floor is not None and floor.status_code == 200 else None,
+            floor=_json_object(floor),
             market_ready=None if market is None else market.status_code == 200,
             executor_configured=self.executor is not None,
             executor=executor,
@@ -92,9 +105,7 @@ class Watchdog:
         response = await self._get(
             client, "/v1/watchdog/status", headers={"Authorization": f"Bearer {token}"}
         )
-        if response is not None and response.status_code == 200:
-            return response.json()
-        return None
+        return _json_object(response)
 
     async def _halt_api(self, reasons: list[str], obs: Observation) -> None:
         controls = (obs.floor or {}).get("controls") or {}
