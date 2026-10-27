@@ -62,12 +62,19 @@ async def _call(client: httpx.AsyncClient, method: str, path: str, **kwargs: Any
         response = await client.request(method, path, **kwargs)
     except httpx.HTTPError as exc:
         raise VenueOutcomeUnknown(f"{method} {path}: {type(exc).__name__}") from exc
-    if response.status_code >= 500:
+    if response.status_code >= 500 or 300 <= response.status_code < 400:
         raise VenueOutcomeUnknown(f"{method} {path}: HTTP {response.status_code}")
+    try:
+        body = response.json() if response.content else {}
+    except ValueError as exc:
+        if response.status_code >= 400:
+            raise BridgeRefused(response.status_code, "") from exc
+        # A 2xx we cannot read may still have placed the order: unknown, never a rejection.
+        raise VenueOutcomeUnknown(f"{method} {path}: unreadable response") from exc
     if response.status_code >= 400:
-        detail = response.json().get("detail", "") if response.content else ""
+        detail = body.get("detail", "") if isinstance(body, dict) else ""
         raise BridgeRefused(response.status_code, str(detail))
-    return response.json()
+    return body
 
 
 def bridge_client(base_url: str, token: str) -> httpx.AsyncClient:
@@ -91,6 +98,7 @@ class XpMt5Adapter:
         self._environment = environment
         self._instruments = {k: v for k, v in instruments.items() if v.venue is VenueId.XP_B3}
         self._clock = clock
+        self._left_demo: str | None = None
 
     @classmethod
     async def connect(cls, client: httpx.AsyncClient, *, symbols: Iterable[str]) -> XpMt5Adapter:
@@ -129,6 +137,9 @@ class XpMt5Adapter:
     # --- venue contract -------------------------------------------------------------
 
     async def submit(self, order: VenueOrder) -> ExecutionReport:
+        if self._left_demo is not None:
+            # Latched by `balances`: the terminal reported a non-DEMO login after connect.
+            return self._rejected(order, f"terminal on a {self._left_demo} account: not sent")
         if order.instrument_id not in self._instruments:
             return self._rejected(order, "instrument not loaded from the terminal")
         body = {
@@ -168,6 +179,12 @@ class XpMt5Adapter:
 
     async def balances(self) -> dict[str, Decimal]:
         body = await _call(self._client, "GET", "/v1/balances")
+        mode = body.get("account_mode")
+        if mode is not None and mode != "DEMO":
+            # The login changed under us (the bridge refuses such orders too). Latch LIVE, never
+            # back: every later submit is refused here and reconciliation fails until a restart.
+            self._environment, self._left_demo = VenueEnvironment.LIVE, str(mode)[:20]
+            raise VenueOutcomeUnknown(f"the MT5 terminal reports a {mode} account, not DEMO")
         return {
             asset: Decimal(value) for asset, value in body["balances"].items() if Decimal(value)
         }
