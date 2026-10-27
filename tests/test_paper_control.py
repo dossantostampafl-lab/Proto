@@ -32,6 +32,21 @@ def test_paper_start_enables_only_internal_paper_runtime() -> None:
     assert status["real_money_execution"] is False
 
 
+def test_start_with_the_kill_switch_triggered_is_refused_not_reported_as_started() -> None:
+    from apps.api.app.event_state import operational_journal
+    from apps.api.app.models import KillSwitchState
+
+    runtime.kill_switch = KillSwitchState.TRIGGERED
+    for path in ("/paper/start", "/simulation/start", "/shadow/start"):
+        response = client.post(path)
+        assert response.status_code == 409, path
+        assert response.json()["detail"] == "kill switch is not armed"
+        [event] = operational_journal.journal.recent(1)
+        assert event.event_type == "OPERATOR_COMMAND_REJECTED"
+    assert runtime.running is False
+    assert client.get("/paper/status").json()["paper_execution_enabled"] is False
+
+
 def test_paper_stop_disables_simulated_execution() -> None:
     client.post("/paper/start")
     response = client.post("/paper/stop")
