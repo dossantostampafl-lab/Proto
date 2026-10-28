@@ -385,3 +385,54 @@ def test_canary_needs_a_certified_scope_and_sizes_on_the_canary_capital() -> Non
         scope_stage=ReleaseStage.LIVE,
     )
     assert "stage_certified" in live.rejections
+
+
+def test_a_buy_sized_on_a_held_position_passes_the_per_position_check() -> None:
+    """Sizer and Risk Engine agree on the 0.25% budget per position (2026-10-28 drill refusal).
+
+    Production: agents held BTC, the sizer ignored it and sized the full budget, and the Risk
+    Engine refused the drill's buy with ``risk_per_position: 5.41 > 4.67``.
+    """
+
+    from services.agents import build_candidate, fuse
+    from services.execution import Signal, SignalDirection, SignalSource
+
+    reference = Decimal("1868")  # R$10,000 in USDT
+    held = Decimal("0.0006")  # ~37 USDT, what the BTC agents held
+    signal = Signal(
+        signal_id=uuid4(),
+        source=SignalSource.PROTO_STRATEGY,
+        strategy_id="e2e-drill",
+        instrument_id=BTC_ID,
+        direction=SignalDirection.LONG,
+        strength=1.0,
+        timeframe="drill",
+        observed_at=NOW,
+        received_at=NOW,
+    )
+    decision = fuse([signal], instrument_id=BTC_ID, now=NOW)
+    state = account(
+        reference_capital=reference,
+        positions={BTC_ID: held},
+        gross_exposure=held * QUOTE.ask,
+    )
+
+    def assess(position_quantity: Decimal):
+        sized = build_candidate(
+            decision,
+            instrument=PAPER_INSTRUMENTS[BTC_ID],
+            quote=QUOTE,
+            equity=reference,
+            position_quantity=position_quantity,
+            now=NOW,
+        )
+        assert sized.intent is not None
+        return engine().evaluate(
+            sized.intent, account=state, controls=Controls(), quote=QUOTE, now=NOW
+        )
+
+    # Sized as if nothing were held (the old sizer): refused per position.
+    assert "risk_per_position" in assess(Decimal("0")).rejections
+    # Sized on what is held: approved.
+    approved = assess(held)
+    assert approved.approved, approved.rejections
