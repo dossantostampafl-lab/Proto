@@ -12,6 +12,7 @@ quote at all. Every view says so.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,7 +21,8 @@ from fastapi import APIRouter
 from services.execution.catalog import US_INSTRUMENTS
 from services.execution.venue import Quote
 
-from .b3_quotes import B3QuoteFeed
+from .b3_quotes import B3QuoteFeed, Fetch
+from .executor_client import ExecutorRefused
 
 logger = logging.getLogger("proto.us_quotes")
 
@@ -33,11 +35,46 @@ def us_symbols() -> list[str]:
 
 
 _feed: B3QuoteFeed | None = None
+# Symbols of the catalog the Alpaca executor was not configured for (its ALPACA_SYMBOLS): the
+# executor refuses a whole request that names one, so they are left out of the next requests.
+_unconfigured: set[str] = set()
+_NOT_CONFIGURED = re.compile(r"not configured on this executor: ([A-Z0-9., -]+)")
+
+
+def skipping_unconfigured(fetch: Fetch) -> Fetch:
+    """``fetch`` without the symbols the executor says it was not configured for.
+
+    One refused name used to fail every read, the configured ones included (2026-10-28: AAPL in
+    the catalog, SPY,QQQ on the executor, no US quote at all). The refusal names the symbols; they
+    are dropped and the read is retried once, so the others keep flowing and the dropped ones show
+    no quote, never an invented one.
+    """
+
+    async def read(names: list[str]) -> dict[str, Any]:
+        wanted = [n for n in names if n not in _unconfigured]
+        if not wanted:
+            return {"quotes": {}}
+        try:
+            return await fetch(wanted)
+        except ExecutorRefused as exc:
+            found = _NOT_CONFIGURED.search(exc.detail) if exc.status == 422 else None
+            if found is None:
+                raise
+            dropped = {n.strip() for n in found.group(1).split(",") if n.strip()}
+            if not dropped & set(wanted):
+                raise
+            _unconfigured.update(dropped)
+            logger.warning("US quotes: Alpaca executor not configured for %s", sorted(dropped))
+            rest = [n for n in wanted if n not in _unconfigured]
+            return await fetch(rest) if rest else {"quotes": {}}
+
+    return read
 
 
 def install(feed: B3QuoteFeed | None) -> None:
     global _feed
     _feed = feed
+    _unconfigured.clear()
 
 
 def quote_for(symbol: str) -> Quote | None:
@@ -78,6 +115,7 @@ async def quotes_view() -> dict[str, Any]:
         "data_mode": "PAPER",
         "feed_running": _feed is not None and _feed.running,
         "refresh_failures": _feed.failures if _feed is not None else 0,
+        "not_configured_on_executor": sorted(_unconfigured),
         "symbols": symbols,
         **_BOUNDARY,
     }
@@ -96,7 +134,7 @@ async def start_if_enabled() -> B3QuoteFeed | None:
     client = executor_client(VenueId.ALPACA_US)
     # IEX quotes move slower than a terminal's: polling every 5 s stays well inside the free
     # plan's request budget and inside the Risk Engine's 10 s quote age.
-    feed = B3QuoteFeed(client.quotes, us_symbols(), interval=5.0, name="us")
+    feed = B3QuoteFeed(skipping_unconfigured(client.quotes), us_symbols(), interval=5.0, name="us")
     install(feed)
     feed.start()
     return feed
