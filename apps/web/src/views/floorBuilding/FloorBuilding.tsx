@@ -12,7 +12,7 @@ import { type Anchor, BuildingEngine, FLOORS, type SceneAgent, type View } from 
 
 const POLL = 10000;
 const HISTORY = 240;
-const LANE_LABEL: Record<XpLane["state"], string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
+const LANE_LABEL: Record<XpLane["state"], string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", "off-hours": "OFF HOURS", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
 const feedOf = (s: FeedState<unknown>): BoardFeed => (s.kind === "live" ? "live" : s.kind === "stale" || s.kind === "paused" ? "stale" : s.kind === "unavailable" ? "unavailable" : "loading");
 const FEED_LABEL: Record<BoardFeed, string> = { live: "LIVE", stale: "STALE", unavailable: "UNAVAILABLE", loading: "LOADING" };
 
