@@ -137,8 +137,8 @@ export function drawXpScreen(g: Ctx, w: number, h: number, lane: XpLaneState | n
   text(g, "NO REAL MONEY", 18, h - 22, 19, FAINT, 600);
 }
 
-export const XP_LABEL: Record<XpLaneState, string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
-export const XP_COLOR: Record<XpLaneState, string> = { unknown: TONE_COLOR.idle, "not-configured": TONE_COLOR.idle, unavailable: TONE_COLOR.warn, live: TONE_COLOR.ok, halted: TONE_COLOR.alert };
+export const XP_LABEL: Record<XpLaneState, string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", "off-hours": "OFF HOURS", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
+export const XP_COLOR: Record<XpLaneState, string> = { unknown: TONE_COLOR.idle, "not-configured": TONE_COLOR.idle, "off-hours": TONE_COLOR.idle, unavailable: TONE_COLOR.warn, live: TONE_COLOR.ok, halted: TONE_COLOR.alert };
 
 function wrap(g: Ctx, s: string, x: number, y: number, maxW: number, size: number, lines: number, color: string) {
   font(g, size, 500); g.fillStyle = color; g.textAlign = "left";

@@ -101,7 +101,7 @@ const B3Tag = () => <span className="fl-b3" title="XP / B3 demo account">B3</spa
 
 // ---------- the XP / B3 lane ----------
 export type XpState = { lane: XpLane; instruments: string[] | null; killedVenues: string[] | null; ledger: Feed<Ledger> };
-const LANE_LABEL: Record<XpLaneState, string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
+const LANE_LABEL: Record<XpLaneState, string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", "off-hours": "OFF HOURS", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
 
 /** XP routing as the API reports it: agent status (instruments), risk status (halted venues) and, only when routing is on, the ledger. */
 export function useXpLane(): XpState {
@@ -461,7 +461,7 @@ function XpOmsSection({ xp, ledgerFeed }: { xp: XpState; ledgerFeed: Feed<Ledger
   const brl = block?.balances.find(b => b.asset === "BRL");
   const positions = (block?.balances ?? []).filter(b => b.asset !== "BRL" && positive(b.total));
   return (
-    <Section title="XP / B3 (demo account)" state={off ? undefined : ledgerFeed.state} override={!off && (lane.state === "unavailable") ? "XP executor unavailable, nothing measured" : null}>
+    <Section title="XP / B3 (demo account)" state={off ? undefined : ledgerFeed.state} override={!off && lane.state === "unavailable" ? "XP executor unavailable, nothing measured" : !off && lane.state === "off-hours" ? "XP node off outside its schedule (09:30-18:10 São Paulo, Mon-Fri), nothing measured" : null}>
       <Rows>
         <Row label="Lane" cls={lane.state === "live" ? "up" : lane.state === "halted" || lane.state === "unavailable" ? "down" : "warn"}>{LANE_LABEL[lane.state]}</Row>
         <Row label="Account">{orDash(measured ? block?.accountId : null)}</Row>

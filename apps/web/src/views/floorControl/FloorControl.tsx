@@ -13,7 +13,7 @@ import { type Agent, brl, type Ledger, limitsOf, parseLedger, parseRoster, sign 
 import { AgentConversation } from "../AgentConversation";
 
 const POLL = 10000;
-const LANE: Record<XpLane["state"], string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
+const LANE: Record<XpLane["state"], string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", "off-hours": "OFF HOURS", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
 
 export type Summary = {
   total: number; today: number; refusedToday: number; signalsToday: number;
@@ -173,7 +173,7 @@ function Sources({ state, stateFresh, xp, summary, ledger, mobileOpen }: { state
   const wd = state?.watchdog;
   const rows: { icon: string; tone: string; name: string; status: string; ok: boolean | null; detail: string }[] = [
     { icon: "B", tone: "bin", name: "Binance Spot", ...binanceRow(state, stateFresh, ledger) },
-    { icon: "XP", tone: "xp", name: "XP / B3", ok: xp.state === "live" ? true : xp.state === "unknown" ? null : false, status: xp.state === "live" ? "Online" : LANE[xp.state], detail: "demo" },
+    { icon: "XP", tone: "xp", name: "XP / B3", ok: xp.state === "live" ? true : xp.state === "unknown" || xp.state === "off-hours" ? null : false, status: xp.state === "live" ? "Online" : LANE[xp.state], detail: "demo" },
     { icon: "TV", tone: "tv", name: "TradingView", ok: null, status: state?.stations.tradingview ? "último sinal" : "—", detail: state?.stations.tradingview ? `${state.stations.tradingview.at.slice(11, 16)} UTC` : "nenhum sinal" },
     { icon: "P", tone: "own", name: "Estratégia própria", ok: null, status: summary ? "sinais (TV + própria)" : "UNAVAILABLE", detail: summary ? `${summary.signalsToday} hoje` : "—" },
     { icon: "W", tone: "wd", name: "Watchdog", ok: wd ? wd.active : null, status: wd ? (wd.active ? "Ativo" : "Inativo") : "UNAVAILABLE", detail: wd?.last_trip ? `trip ${wd.last_trip.at.slice(5, 10)}` : "—" },

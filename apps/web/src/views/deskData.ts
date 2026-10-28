@@ -88,6 +88,19 @@ export function b3Session(at: number): B3Session {
   return { open: weekday !== "Sat" && weekday !== "Sun" && minutes >= 600 && minutes < 1075, local: `${part("hour")}:${part("minute")}`, weekday };
 }
 
+/**
+ * The XP node on the operator's PC runs on a schedule (infra/xp-node/register-xp-node-task.ps1):
+ * started 09:30 and stopped 18:10, Monday to Friday, São Paulo time. Outside that window an
+ * unreadable XP executor is the schedule, not a fault.
+ */
+export function xpNodeScheduled(at: number): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(at));
+  const part = (type: string) => parts.find(p => p.type === type)?.value ?? "";
+  const minutes = Number(part("hour")) * 60 + Number(part("minute"));
+  const weekday = part("weekday");
+  return weekday !== "Sat" && weekday !== "Sun" && minutes >= 570 && minutes < 1090;
+}
+
 // ---------- polling that stops with the drawer and with a hidden tab ----------
 export const POLL_MS = 4000;
 export type FeedState<T> =
@@ -231,24 +244,26 @@ export const parseDrill = (raw: unknown): Drill | null => isRecord(raw)
   : null;
 
 // ---------- the XP / B3 lane ----------
-export type XpLaneState = "unknown" | "not-configured" | "unavailable" | "live" | "halted";
+export type XpLaneState = "unknown" | "not-configured" | "off-hours" | "unavailable" | "live" | "halted";
 export type XpLane = { state: XpLaneState; ledger: Ledger | null; killed: boolean; reason: string };
 export const XP_OFF = "XP routing is off: XP_EXECUTOR_URL is not set on the API.";
 
 /**
  * XP / B3 as the API reports it. NOT CONFIGURED when the pipeline lists no XP_B3 instrument and the
  * ledger has no xp_b3 block (the API adds both only when XP routing is on); HALTED when the Risk
- * Governor killed the venue or the executor says it is halted; UNAVAILABLE when the XP ledger cannot be
- * read; LIVE otherwise. Nothing here is a number, so nothing here can be invented.
+ * Governor killed the venue or the executor says it is halted; OFF HOURS when the XP ledger cannot be
+ * read outside the node's scheduled window (xpNodeScheduled); UNAVAILABLE when it cannot be read inside
+ * it; LIVE otherwise. Nothing here is a number, so nothing here can be invented.
  */
-export function deriveXpLane(input: { instruments: string[] | null; ledger: Ledger | null; ledgerFailed: boolean; killedVenues: string[] | null }): XpLane {
-  const { instruments, ledger, ledgerFailed, killedVenues } = input;
+export function deriveXpLane(input: { instruments: string[] | null; ledger: Ledger | null; ledgerFailed: boolean; killedVenues: string[] | null; at?: number }): XpLane {
+  const { instruments, ledger, ledgerFailed, killedVenues, at = Date.now() } = input;
   const listed = instruments?.some(i => i.startsWith("XP_B3:")) ?? false;
   const block = ledger?.xp ?? null;
   if (instruments === null && block === null) return { state: "unknown", ledger, killed: false, reason: "The agent status could not be read, so the XP routing state is unknown." };
   if (!listed && block === null) return { state: "not-configured", ledger, killed: false, reason: XP_OFF };
   const killed = Boolean(killedVenues?.includes("XP_B3")) || block?.halted === true;
   if (killed) return { state: "halted", ledger, killed, reason: "XP_B3 is halted: new orders are refused until an operator releases it." };
+  if ((ledgerFailed || block === null || block.unavailable) && !xpNodeScheduled(at)) return { state: "off-hours", ledger, killed, reason: "Outside the XP node schedule (09:30-18:10 São Paulo, Mon-Fri): the node is off by design and back at 09:30." };
   if (ledgerFailed || block === null || block.unavailable) return { state: "unavailable", ledger, killed, reason: "The XP executor cannot be read: nothing about XP is measured." };
   return { state: "live", ledger, killed, reason: "XP demo account readable (venue environment TESTNET)." };
 }
