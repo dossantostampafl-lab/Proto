@@ -359,6 +359,17 @@ def strategy_status() -> dict[str, object]:
         "market_source": settings.live_market_source,
         "instruments": list(instruments()),
         "books": strategy.status(),
+        # The EMA agents' own strategies: per (instrument, pair, bar), bars held and last signal.
+        "agent_strategies": {
+            f"{instrument}|{fast}/{slow}|{minutes}m": found.status().get(instrument, {})
+            for (instrument, fast, slow, minutes), found in sorted(_agent_strategies.items())
+        },
+        "warmed_from_klines": sorted("|".join(map(str, key)) for key in _ema_warmed),
+        # 1h EMA200 per instrument for the entry filter (null: the last read failed).
+        "trend": {
+            instrument: {"read_at": at.isoformat(), "ema200_1h": level}
+            for instrument, (at, level) in sorted(_trend.items())
+        },
         "lab_strategies": {k: v.status() for k, v in sorted(_lab_strategies.items())},
         **_counters,
         **_BOUNDARY,
