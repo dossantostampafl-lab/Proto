@@ -269,19 +269,24 @@ def ema_bar_minutes(instrument_id: str) -> int:
     return int(own) if own is not None else settings.agent_ema_bar_minutes
 
 
-def stopped_out(instrument_id: str, mid: Decimal) -> list[TraderAgent]:
-    """EMA agents on ``instrument_id`` whose own position is ``agent_stop_loss`` under cost.
+def stopped_out(instrument_id: str, mid: Decimal) -> list[tuple[TraderAgent, str]]:
+    """EMA agents on ``instrument_id`` whose own position hit its stop or its target.
 
-    The stop is measured on the agent's own book (average entry cost of what it still holds),
-    never on the account's other holdings.
+    ``("stop", ...)`` at ``agent_stop_loss`` under the average entry cost, ``("target", ...)`` at
+    ``agent_take_profit`` above it (0 turns the target off). Measured on the agent's own book (what
+    it still holds), never on the account's other holdings.
     """
 
     agent = _ema_agent(instrument_id)
     if agent is None or agent.book.quantity <= 0 or agent.book.cost <= 0:
         return []
     average = agent.book.cost / agent.book.quantity
-    floor = average * (1 - Decimal(str(settings.agent_stop_loss)))
-    return [agent] if mid <= floor else []
+    if mid <= average * (1 - Decimal(str(settings.agent_stop_loss))):
+        return [(agent, "stop")]
+    target = Decimal(str(settings.agent_take_profit))
+    if target > 0 and mid >= average * (1 + target):
+        return [(agent, "target")]
+    return []
 
 
 def lab_params(instrument_id: str) -> dict[str, Any] | None:

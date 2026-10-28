@@ -695,7 +695,14 @@ def test_the_tradingview_webhook_routes_to_the_slot_agent(monkeypatch, surfaces)
 async def test_a_replacement_ema_agent_trades_its_own_parameters(monkeypatch, surfaces) -> None:
     from apps.api.app import strategy_surface
 
-    configure(monkeypatch)
+    # Each agent's own ladder pair (no fleet-wide pair), on the legacy 1-minute bars.
+    configure(
+        monkeypatch,
+        agent_ema_fast=0,
+        agent_ema_slow=0,
+        agent_ema_bar_minutes=1,
+        agent_ema_cooldown_minutes=15,
+    )
     monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
     strategy_surface.reset_strategy_state()
     roster = await roster_surface.ready()
@@ -711,6 +718,7 @@ async def test_lab_strategies_stay_off_unless_flagged(monkeypatch, surfaces) -> 
     from apps.api.app import strategy_surface
     from services.agents import roster as roster_module
     from services.research.live import LabSignalStrategy
+    from services.signals.proto_strategy import EmaCrossStrategy
 
     spec = {"strategy": "ts_momentum", "lookback": 3, "vol_period": 5}
     monkeypatch.setattr(
@@ -720,7 +728,7 @@ async def test_lab_strategies_stay_off_unless_flagged(monkeypatch, surfaces) -> 
     monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
     strategy_surface.reset_strategy_state()
     await roster_surface.ready()
-    assert strategy_surface._strategy_for(BTC) is strategy_surface.strategy  # flag off: EMA
+    assert isinstance(strategy_surface._strategy_for(BTC), EmaCrossStrategy)  # flag off: EMA
     assert roster_surface.lab_params(BTC) is None
 
     roster_surface.reset_roster_state()
@@ -730,7 +738,7 @@ async def test_lab_strategies_stay_off_unless_flagged(monkeypatch, surfaces) -> 
     chosen = strategy_surface._strategy_for(BTC)
     assert isinstance(chosen, LabSignalStrategy) and chosen.spec == spec
     assert strategy_surface._strategy_for(BTC) is chosen  # one adapter per lab strategy
-    assert strategy_surface._strategy_for(SOL) is strategy_surface.strategy  # no ladder there
+    assert isinstance(strategy_surface._strategy_for(SOL), EmaCrossStrategy)  # no ladder there
     assert roster_surface.ema_params(BTC) is None
 
     warmed = []
@@ -823,7 +831,9 @@ async def test_ema_agents_trade_the_configured_bar(monkeypatch, surfaces) -> Non
     chosen = strategy_surface._strategy_for(BTC)
     assert chosen is not strategy_surface.strategy
     assert chosen.policy.bar == td(minutes=5)
-    assert (chosen.policy.fast, chosen.policy.slow) == (5, 20)
+    # The fleet-wide pair and cooldown from the 2026-10-28 study, whatever the agent's own pair.
+    assert (chosen.policy.fast, chosen.policy.slow) == (20, 50)
+    assert chosen.policy.cooldown == td(minutes=600)
     strategy_surface.reset_strategy_state()
 
 
@@ -848,6 +858,7 @@ async def test_the_protective_stop_sells_only_an_ema_agents_losing_position(
 
     # 60000 x (1 - 3%) = 58200: above it, nothing; at it, a SHORT for the EMA agent.
     assert strategy_surface._protective_stop(BTC, Decimal("58200.01"), now) is None
+    assert strategy_surface._protective_stop(BTC, Decimal("63599.99"), now) is None
     stop = strategy_surface._protective_stop(BTC, Decimal("58200"), now)
     assert stop is not None
     assert stop.direction is SignalDirection.SHORT and stop.strength == 1.0
@@ -857,6 +868,10 @@ async def test_the_protective_stop_sells_only_an_ema_agents_losing_position(
     assert strategy_surface._protective_stop(BTC, Decimal("58000"), later) is None
     again = strategy_surface._protective_stop(BTC, Decimal("58000"), now + timedelta(seconds=61))
     assert again is not None and again.signal_id != stop.signal_id
+    # 60000 x (1 + 6%) = 63600: the take-profit sells the same way.
+    target = strategy_surface._protective_stop(BTC, Decimal("63600"), now + timedelta(seconds=200))
+    assert target is not None and target.direction is SignalDirection.SHORT
+    assert target.timeframe == "target" and ema.accepts(target)
     strategy_surface.reset_strategy_state()
 
 
@@ -897,3 +912,112 @@ async def test_a_protective_stop_goes_through_risk_and_oms_as_a_sell(monkeypatch
     assert Decimal(sold["filled_quantity"]) == held
     assert agent.book.quantity == 0
     strategy_surface.reset_strategy_state()
+
+
+def _minute_bars(count: int, end: datetime, start_price: float = 100.0, step: float = 0.01):
+    from services.research.data import Bar
+
+    first = int(end.timestamp() // 60) * 60_000 - count * 60_000
+    return [
+        Bar(first + i * 60_000, p, p, p, p, 1.0)
+        for i, p in enumerate(start_price + step * k for k in range(count))
+    ]
+
+
+async def test_ema_bars_are_warmed_once_from_public_klines(monkeypatch, surfaces) -> None:
+    from apps.api.app import strategy_surface
+
+    configure(monkeypatch, agent_ema_warmup_klines=True)  # 10-minute bars, EMA 20/50
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+    await roster_surface.ready()
+    calls = []
+    now = datetime.now(UTC)
+
+    def klines(instrument_id, minutes, count):
+        calls.append((instrument_id, minutes, count))
+        return _minute_bars(count, now)
+
+    monkeypatch.setattr(strategy_surface, "ema_klines", klines)
+    chosen = strategy_surface._strategy_for(BTC)
+    await strategy_surface._warm_ema(chosen, BTC)
+    await strategy_surface._warm_ema(chosen, BTC)  # once per (instrument, pair, bar)
+    assert calls == [(BTC, 1, 150 * 10 + 10)]
+    closes = chosen._books[BTC].closes
+    assert len(closes) == 150  # slow x 3 closed 10-minute bars: the EMA is ready at once
+    # Only whole bars that closed before the bar now forming.
+    step = 600_000
+    forming = int(now.timestamp() * 1000) // step * step
+    bars = _minute_bars(1510, now)
+    last_closed = [b for b in bars if b.open_time < forming][-1]
+    assert closes[-1] == last_closed.close
+
+    def broken(*_args):
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(strategy_surface, "ema_klines", broken)
+    other = strategy_surface._strategy_for(SOL)
+    await strategy_surface._warm_ema(other, SOL)  # a failed read leaves live warm-up
+    assert SOL not in other._books or not other._books[SOL].closes
+    strategy_surface.reset_strategy_state()
+
+
+async def test_entries_need_the_hourly_trend_and_exits_never_do(monkeypatch, surfaces) -> None:
+    from apps.api.app import strategy_surface
+
+    configure(monkeypatch, agent_ema_warmup_klines=True)
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+    now = datetime.now(UTC)
+    reads = []
+
+    def hourly(instrument_id, minutes, count):
+        reads.append(minutes)
+        return _minute_bars(count, now, start_price=100.0, step=0.1)  # a steady uptrend
+
+    monkeypatch.setattr(strategy_surface, "ema_klines", hourly)
+    level = strategy_surface._ema_last([100.0 + 0.1 * k for k in range(600)], 200)
+    assert await strategy_surface._trend_allows_entry(BTC, level + 1, now)
+    assert not await strategy_surface._trend_allows_entry(BTC, level - 1, now)
+    assert reads == [60]  # read once, kept for an hour
+    assert await strategy_surface._trend_allows_entry("XP_B3:PETR4F", 1.0, now)  # Binance only
+
+    def broken(*_args):
+        raise RuntimeError("no network")
+
+    strategy_surface.reset_strategy_state()
+    monkeypatch.setattr(strategy_surface, "ema_klines", broken)
+    assert not await strategy_surface._trend_allows_entry(BTC, 1e9, now)  # unknown: no entry
+    monkeypatch.setattr(strategy_surface, "ema_klines", hourly)
+    assert not await strategy_surface._trend_allows_entry(BTC, 1e9, now + timedelta(minutes=4))
+    assert await strategy_surface._trend_allows_entry(BTC, 1e9, now + timedelta(minutes=5))
+
+    # A LONG under the trend is dropped at the tick; a SHORT (exit) still goes out.
+    from types import SimpleNamespace
+
+    strategy_surface.reset_strategy_state()
+    monkeypatch.setattr(strategy_surface, "ema_klines", hourly)
+    quote = SimpleNamespace(bid=Decimal("1"), ask=Decimal("1"), observed_at=now)
+    monkeypatch.setattr(strategy_surface, "live_quote", lambda i, market_source: quote)
+    monkeypatch.setattr(strategy_surface, "instruments", lambda: (BTC,))
+    sent = []
+
+    async def accept(signal, *, event_type, source):
+        sent.append(signal.direction)
+        return True
+
+    monkeypatch.setattr(strategy_surface, "accept_internal_signal", accept)
+    chosen = strategy_surface._strategy_for(BTC)
+    monkeypatch.setattr(strategy_surface, "_warm_ema", lambda *_a: _noop())
+    for direction in (SignalDirection.LONG, SignalDirection.SHORT):
+        emitted = signal(SignalSource.PROTO_STRATEGY, "proto-ema-cross-1m")
+        emitted = emitted.model_copy(update={"direction": direction})
+        monkeypatch.setattr(chosen, "observe", lambda i, mid, at, e=emitted: e)
+        await strategy_surface.tick(now)
+    assert sent == [SignalDirection.SHORT]
+    assert strategy_surface._counters["trend_blocked"] == 1
+    strategy_surface.reset_strategy_state()
+
+
+async def _noop() -> None:
+    return None

@@ -4,8 +4,12 @@ Every few seconds the fresh Binance mid of each symbol is fed to the EMA-cross s
 1 to 10 minutes). A signal it produces is journaled as PROTO_STRATEGY_SIGNAL and handed to the
 agent pipeline, exactly like an accepted TradingView alert. A missing or stale quote feeds nothing.
 
-The same mid checks the EMA agent's protective stop: at ``agent_stop_loss`` under the agent's
-average cost a SHORT of strength 1.0 goes the same way (journaled, then fusion, Risk Engine, OMS).
+With ``agent_ema_warmup_klines`` the EMA bars are seeded from Binance public klines at start (no
+hours of idle warm-up after a restart), and ``agent_ema_trend_filter`` lets an entry (LONG) through
+only while the mid is above the 1h EMA200 of those klines; an unknown trend blocks entries, never
+exits. The same mid checks the EMA agent's protective stop and target: at ``agent_stop_loss``
+under (or ``agent_take_profit`` above) the agent's average cost a SHORT of strength 1.0 goes the
+same way (journaled, then fusion, Risk Engine, OMS).
 """
 
 from __future__ import annotations
@@ -37,6 +41,11 @@ _MAX_QUOTE_AGE_SECONDS = 10.0
 # A stop that was not acted on (refused, nothing filled) is sent again at most this often.
 _STOP_RETRY = timedelta(seconds=60)
 _STOP_NAMESPACE = uuid5(NAMESPACE_URL, "proto:strategy:protective-stop")
+# Hourly trend for the entry filter: EMA200 of 1h closes, refreshed every hour; a failed read is
+# retried after a few minutes and blocks entries meanwhile.
+_TREND_MINUTES, _TREND_PERIOD, _TREND_BARS = 60, 200, 600
+_TREND_REFRESH = timedelta(hours=1)
+_TREND_RETRY = timedelta(minutes=5)
 _INSTRUMENTS = tuple(
     i for i in sorted(PAPER_INSTRUMENTS) if i.startswith("BINANCE_SPOT:") and i.endswith("USDT")
 )
@@ -76,11 +85,14 @@ strategy = EmaCrossStrategy()
 _agent_strategies: dict[tuple[str, int, int, int], EmaCrossStrategy] = {}
 # Last protective stop sent per agent, so a stop is retried once a minute, not every tick.
 _stops_sent: dict[str, datetime] = {}
+_ema_warmed: set[tuple[str, int, int, int]] = set()
+# instrument -> (read at, 1h EMA200 or None when the read failed)
+_trend: dict[str, tuple[datetime, float | None]] = {}
 # With agent_lab_strategies_enabled, an agent spawned with a lab strategy gets the lab adapter
 # (signals only), one per lab strategy id; warmed once per instrument when enabled.
 _lab_strategies: dict[str, LabSignalStrategy] = {}
 _lab_warmed: set[tuple[str, str]] = set()
-_counters = {"ticks": 0, "signals": 0, "journal_failures": 0}
+_counters = {"ticks": 0, "signals": 0, "journal_failures": 0, "trend_blocked": 0}
 _task: asyncio.Task[None] | None = None
 
 
@@ -89,6 +101,8 @@ def reset_strategy_state() -> None:
     strategy = EmaCrossStrategy()
     _agent_strategies.clear()
     _stops_sent.clear()
+    _ema_warmed.clear()
+    _trend.clear()
     _lab_strategies.clear()
     _lab_warmed.clear()
     for key in _counters:
@@ -108,20 +122,29 @@ def _strategy_for(instrument_id: str) -> EmaCrossStrategy | LabSignalStrategy:
             )
         return found_lab
 
-    params = ema_params(instrument_id) or (strategy.policy.fast, strategy.policy.slow)
+    pair = (settings.agent_ema_fast, settings.agent_ema_slow)
+    if pair == (0, 0):
+        pair = ema_params(instrument_id) or (strategy.policy.fast, strategy.policy.slow)
     minutes = ema_bar_minutes(instrument_id)
-    if (*params, timedelta(minutes=minutes)) == (
+    cooldown = settings.agent_ema_cooldown_minutes
+    if (*pair, timedelta(minutes=minutes), timedelta(minutes=cooldown)) == (
         strategy.policy.fast,
         strategy.policy.slow,
         strategy.policy.bar,
+        strategy.policy.cooldown,
     ):
         return strategy
-    key = (instrument_id, *params, minutes)
+    key = (instrument_id, *pair, minutes)
     found = _agent_strategies.get(key)
     if found is None:
-        fast, slow = params
+        fast, slow = pair
         found = _agent_strategies[key] = EmaCrossStrategy(
-            EmaCrossPolicy(bar=timedelta(minutes=minutes), fast=fast, slow=slow)
+            EmaCrossPolicy(
+                bar=timedelta(minutes=minutes),
+                fast=fast,
+                slow=slow,
+                cooldown=timedelta(minutes=cooldown),
+            )
         )
     return found
 
@@ -140,7 +163,17 @@ async def tick(now: datetime | None = None) -> int:
         chosen = _strategy_for(instrument_id)
         if isinstance(chosen, LabSignalStrategy):
             await _warm_lab(chosen, instrument_id)
+        else:
+            await _warm_ema(chosen, instrument_id)
         signal = chosen.observe(instrument_id, mid, now)
+        if (
+            signal is not None
+            and isinstance(chosen, EmaCrossStrategy)
+            and signal.direction is SignalDirection.LONG
+            and not await _trend_allows_entry(instrument_id, mid, now)
+        ):
+            _counters["trend_blocked"] += 1
+            signal = None
         if signal is None:
             signal = _protective_stop(instrument_id, quote.bid, now)
         if signal is None:
@@ -158,7 +191,8 @@ async def tick(now: datetime | None = None) -> int:
 
 
 def _protective_stop(instrument_id: str, bid: Decimal, now: datetime) -> Signal | None:
-    """A SHORT when the EMA agent's own position is ``agent_stop_loss`` under its cost.
+    """A SHORT when the EMA agent's own position is ``agent_stop_loss`` under its cost, or
+    ``agent_take_profit`` above it (timeframe ``stop`` or ``target``).
 
     Measured at the bid, the price a sale would get. Signals only: fusion, the Risk Engine permit
     and the OMS still decide, and a SHORT only ever sells the agent's own holdings.
@@ -168,7 +202,7 @@ def _protective_stop(instrument_id: str, bid: Decimal, now: datetime) -> Signal 
         return None
     from .roster_surface import stopped_out
 
-    for agent in stopped_out(instrument_id, bid):
+    for agent, reason in stopped_out(instrument_id, bid):
         last = _stops_sent.get(agent.agent_id)
         if last is not None and now - last < _STOP_RETRY:
             continue
@@ -183,11 +217,77 @@ def _protective_stop(instrument_id: str, bid: Decimal, now: datetime) -> Signal 
             instrument_id=instrument_id,
             direction=SignalDirection.SHORT,
             strength=1.0,
-            timeframe="stop",
+            timeframe=reason,
             observed_at=now,
             received_at=now,
         )
     return None
+
+
+def _binance(instrument_id: str) -> bool:
+    return instrument_id.startswith("BINANCE_SPOT:")
+
+
+async def _warm_ema(chosen: EmaCrossStrategy, instrument_id: str) -> None:
+    """Seed the EMA bars once per (instrument, pair, bar) from Binance public 1m klines."""
+
+    policy = chosen.policy
+    minutes = int(policy.bar.total_seconds() // 60)
+    key = (instrument_id, policy.fast, policy.slow, minutes)
+    if not settings.agent_ema_warmup_klines or not _binance(instrument_id) or key in _ema_warmed:
+        return
+    _ema_warmed.add(key)
+    wanted = policy.slow * 3
+    try:
+        count = wanted * minutes + minutes
+        minute_bars = await asyncio.to_thread(ema_klines, instrument_id, 1, count)
+    except Exception:
+        logger.exception("EMA warm-up failed for %s; it warms from live mids", instrument_id)
+        return
+    from services.research.data import resample
+
+    bars = minute_bars if minutes == 1 else resample(minute_bars, minutes)
+    # Only whole bars that closed before the bar now forming (resample keeps a partial tail).
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    step = minutes * 60_000
+    closed = [b.close for b in bars if b.open_time + step <= now_ms - now_ms % step]
+    chosen.warm(instrument_id, closed[-wanted:])
+
+
+async def _trend_allows_entry(instrument_id: str, mid: float, now: datetime) -> bool:
+    """Whether an entry may go out: mid above the 1h EMA200 (Binance pairs).
+
+    Active with the filter and the klines on (production). With the klines on, a trend that
+    cannot be read blocks the entry.
+    """
+
+    if not (settings.agent_ema_trend_filter and settings.agent_ema_warmup_klines):
+        return True
+    if not _binance(instrument_id):
+        return True
+    read = _trend.get(instrument_id)
+    wait = _TREND_REFRESH if read is not None and read[1] is not None else _TREND_RETRY
+    stale = read is None or now - read[0] >= wait
+    if stale:
+        level: float | None
+        try:
+            bars = await asyncio.to_thread(ema_klines, instrument_id, _TREND_MINUTES, _TREND_BARS)
+            closes = [b.close for b in bars]
+            level = _ema_last(closes, _TREND_PERIOD) if len(closes) > _TREND_PERIOD else None
+        except Exception:
+            logger.exception("hourly trend unavailable for %s; entries blocked", instrument_id)
+            level = None
+        read = _trend[instrument_id] = (now, level)
+    assert read is not None
+    return read[1] is not None and mid > read[1]
+
+
+def _ema_last(values: list[float], period: int) -> float:
+    alpha = 2.0 / (period + 1)
+    level = values[0]
+    for value in values[1:]:
+        level = alpha * value + (1 - alpha) * level
+    return level
 
 
 def _public_klines(instrument_id: str, minutes: int, bars: int) -> list:
@@ -204,6 +304,8 @@ def _public_klines(instrument_id: str, minutes: int, bars: int) -> list:
 
 # Replaced in tests; never called unless agent_lab_warmup_klines is on.
 lab_klines = _public_klines
+# Replaced in tests; never called unless agent_ema_warmup_klines is on.
+ema_klines = _public_klines
 
 
 async def _warm_lab(lab: LabSignalStrategy, instrument_id: str) -> None:

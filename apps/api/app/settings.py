@@ -11,7 +11,7 @@ _SYMBOL_RE = re.compile(r"^[A-Z0-9.-]{1,40}$")
 _ALLOWED_ALPACA_EQUITY_FEEDS = frozenset({"iex", "sip", "delayed_sip", "otc", "boats", "overnight"})
 _MIN_PRODUCTION_SECRET_LENGTH = 32
 # Bar of the own-strategy EMA cross, chosen in docs/research/short-timeframes-2026-10-28.md.
-AGENT_EMA_BAR_MINUTES_DEFAULT = 1
+AGENT_EMA_BAR_MINUTES_DEFAULT = 10
 
 
 class Settings(BaseSettings):
@@ -87,8 +87,23 @@ class Settings(BaseSettings):
     # Protective stop of the own-strategy (EMA) agents: a SHORT at once when the mid falls this
     # fraction below the agent's average entry cost. Signals only; the Risk Engine and OMS decide.
     agent_stop_loss: float = Field(default=0.03, gt=0.0, lt=0.5, allow_inf_nan=False)
+    # Take-profit of the same agents: a SHORT at once this fraction above the average cost (0: off).
+    agent_take_profit: float = Field(default=0.06, ge=0.0, le=1.0, allow_inf_nan=False)
     # Bar length of the own-strategy EMA cross, in minutes (an agent's own bar_minutes wins).
     agent_ema_bar_minutes: int = Field(default=AGENT_EMA_BAR_MINUTES_DEFAULT, ge=1, le=10)
+    # EMA pair of every own-strategy agent (the research's best on 10-minute bars); 0 and 0 let
+    # each agent trade its own ladder pair instead.
+    agent_ema_fast: int = Field(default=20, ge=0, le=200)
+    agent_ema_slow: int = Field(default=50, ge=0, le=400)
+    # Minimum time between two signals of one EMA agent (600 = 60 ten-minute bars, as studied).
+    agent_ema_cooldown_minutes: int = Field(default=600, ge=1, le=1440)
+    # Seed the EMA bars from Binance public 1m klines (read-only market data) at start, so a
+    # restart does not leave the agents idle for hours, and read the hourly trend for the filter.
+    agent_ema_warmup_klines: bool = False
+    # Entries only while the mid is above the 1h EMA200 (Binance pairs). Active only with
+    # agent_ema_warmup_klines on (its data source); then an unknown trend blocks entries, never
+    # exits.
+    agent_ema_trend_filter: bool = True
     # Risk Engine (Phase 3). Unset key -> ephemeral per-process key (permits live seconds).
     risk_permit_signing_key: str | None = None
     # Ed25519 seed (base64, 32 bytes). Takes precedence over the HMAC key; required for canary.
@@ -218,6 +233,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 "RISK_PERMIT_SIGNING_KEY or RISK_PERMIT_PRIVATE_KEY is required with the executor"
             )
+        return self
+
+    @model_validator(mode="after")
+    def enforce_ema_pair(self) -> Settings:
+        pair = (self.agent_ema_fast, self.agent_ema_slow)
+        if pair != (0, 0) and not 1 < pair[0] < pair[1]:
+            raise ValueError("AGENT_EMA_FAST/SLOW need 1 < fast < slow (or both 0)")
         return self
 
     @model_validator(mode="after")

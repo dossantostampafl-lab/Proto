@@ -105,6 +105,20 @@ class EmaCrossStrategy:
         book.last_mid = mid
         return signal
 
+    def warm(self, instrument_id: str, closes: list[float]) -> None:
+        """Seed an instrument that has no closed bar yet with closes of already closed bars.
+
+        The bars must end before the bar now forming (e.g. public klines up to the last closed
+        bar); live mids then continue from there. An instrument with live history is left alone.
+        """
+
+        book = self._books.setdefault(
+            instrument_id, _Book(closes=deque(maxlen=self.policy.slow * 3))
+        )
+        if book.closes:
+            return
+        book.closes.extend(c for c in closes if math.isfinite(c) and c > 0)
+
     def _evaluate(self, instrument_id: str, book: _Book, at: datetime) -> Signal | None:
         closes = list(book.closes)
         if len(closes) < self.policy.slow + 1:

@@ -270,3 +270,49 @@ async def test_us_agents_get_r200_each_and_unique_codes() -> None:
     assert len({a.agent_id for a in agents}) == len(agents) == 8
     us = [roster.active_for(slot) for slot in US_SLOTS]
     assert all(a is not None and a.capital_brl == Decimal("200") for a in us)
+
+
+async def test_us_quotes_keep_flowing_when_the_executor_lacks_a_catalog_symbol(monkeypatch) -> None:
+    """2026-10-28: AAPL in the catalog, SPY,QQQ on the executor: every read was refused (422)."""
+
+    from apps.api.app.executor_client import ExecutorClient, ExecutorRefused
+
+    configured = {"SPY", "QQQ"}
+    asked: list[str] = []
+
+    def executor(request: httpx.Request) -> httpx.Response:  # the executor's own /v1/quotes rule
+        names = request.url.params["names"].split(",")
+        asked.append(request.url.params["names"])
+        unknown = sorted(set(names) - configured)
+        if unknown:
+            detail = f"not configured on this executor: {', '.join(unknown)}"
+            return httpx.Response(422, json={"detail": detail})
+        at = datetime.now(UTC).isoformat()
+        quotes = {n: {"bid": "99.9", "ask": "100", "observed_at": at, "feed": "IEX"} for n in names}
+        return httpx.Response(200, json={"quotes": quotes})
+
+    client = ExecutorClient(
+        "http://alpaca", "t" * 32, client=httpx.AsyncClient(transport=httpx.MockTransport(executor))
+    )
+    symbols = us_quotes.us_symbols()
+    assert symbols == ["AAPL", "QQQ", "SPY"]
+
+    # Before: the whole read fails, SPY and QQQ included.
+    plain = b3_quotes.B3QuoteFeed(client.quotes, symbols, name="us")
+    with pytest.raises(ExecutorRefused):
+        await plain.refresh()
+    assert plain.quote("SPY") is None
+
+    feed = b3_quotes.B3QuoteFeed(us_quotes.skipping_unconfigured(client.quotes), symbols, name="us")
+    us_quotes.install(feed)
+    await feed.refresh()
+    assert feed.quote("SPY") is not None and feed.quote("QQQ") is not None
+    assert feed.quote("AAPL") is None  # not configured: no quote, never an invented one
+    asked.clear()
+    await feed.refresh()
+    assert asked == ["QQQ,SPY"]  # AAPL is no longer asked for
+    configure(monkeypatch, **ALPACA_ON)
+    body = await us_quotes.quotes_view()
+    assert body["not_configured_on_executor"] == ["AAPL"]
+    assert body["symbols"]["AAPL"] is None and body["symbols"]["SPY"]["ask"] == "100"
+    us_quotes.install(None)

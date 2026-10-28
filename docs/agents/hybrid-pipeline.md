@@ -31,13 +31,19 @@ TradingView / PROTO signals ─> fusion ─> sized candidate ─> reviewer ─> 
   - The order is a LIMIT at the ask with time in force IOC.
 - **SHORT → SELL.** Sells only existing holdings (`reduce_only`). Spot cannot open a short, so
   the pipeline abstains when there is nothing to sell.
-- **Protective stop (own-strategy EMA agents).** When the bid falls `AGENT_STOP_LOSS` (3%) under the
-  agent's own average cost, a SHORT of strength 1.0 is journaled as a `PROTO_STRATEGY_SIGNAL`
-  (timeframe `stop`) and goes through fusion, the Risk Engine and the OMS like any exit. It is
+- **Protective stop and target (own-strategy EMA agents).** When the bid falls `AGENT_STOP_LOSS` (3%)
+  under, or rises `AGENT_TAKE_PROFIT` (6%) above, the agent's own average cost, a SHORT of strength 1.0 is journaled as a `PROTO_STRATEGY_SIGNAL`
+  (timeframe `stop` or `target`) and goes through fusion, the Risk Engine and the OMS like any exit. It is
   retried once a minute while the position is still there. The stop is never wider than the stop
   the position was sized on (settings validation). TradingView agents exit on their alerts only.
-- **Bars.** The EMA agents run on `AGENT_EMA_BAR_MINUTES` bars (1 to 10 minutes); an agent's own
-  `bar_minutes` parameter wins.
+- **Bars and pair.** The EMA agents run on `AGENT_EMA_BAR_MINUTES` bars (1 to 10, default 10; an
+  agent's own `bar_minutes` wins) with the fleet-wide pair `AGENT_EMA_FAST`/`AGENT_EMA_SLOW` (20/50;
+  0/0 keeps each agent's ladder pair) and `AGENT_EMA_COOLDOWN_MINUTES` (600) between signals. Why:
+  `docs/research/short-timeframes-2026-10-28.md`.
+- **Warm-up and trend filter.** With `AGENT_EMA_WARMUP_KLINES=true` (production image) the EMA bars
+  are seeded from Binance public 1m klines at start, and an entry (LONG) only goes out while the mid
+  is above the 1h EMA200 (`AGENT_EMA_TREND_FILTER`). A trend that cannot be read blocks entries,
+  never exits. B3 and US agents are not filtered (no Binance klines for them).
 - **The pipeline abstains when:**
   - the quote is missing, older than 10 seconds, or crossed;
   - the order would fall below the venue minimum;
