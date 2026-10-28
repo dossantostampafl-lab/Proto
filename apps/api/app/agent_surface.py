@@ -259,9 +259,10 @@ async def _evaluate_agent_locked(
     from . import roster_surface
 
     book = await roster_surface.ready()
-    await roster_surface.sync_fills()
-    agent: TraderAgent | None = book.active_for(slot)
     instrument = active_instruments().get(slot.instrument_id)
+    # Only this slot's venue: a switched-off XP node must not slow a Binance agent down.
+    await roster_surface.sync_fills([instrument.venue] if instrument is not None else None)
+    agent: TraderAgent | None = book.active_for(slot)
     if agent is None or instrument is None:
         return None, None, None
     valuation = await roster_surface.value(agent, for_trading=True)

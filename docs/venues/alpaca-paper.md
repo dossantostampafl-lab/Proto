@@ -81,6 +81,18 @@ roster's monotonic sequence, like every other agent's. They run the same EMA cro
 agents. The lab's hourly momentum assumes 24/7 bars and Binance warm-up klines, so it does not fit
 6.5-hour US sessions.
 
+Their fills reach their virtual books the same way the Binance agents' fills do.
+`roster_surface.sync_venues` reads the recent orders of every venue that has agents, all venues at
+once, and folds new fills into each agent's book exactly once. That covers Binance, and also XP_B3
+and ALPACA_US when they are routed. An unreachable executor marks only its own venue as not synced
+(`fills_synced_by_venue` in `GET /v1/agents/roster`), so a switched-off XP node never hides an
+Alpaca fill. An agent about to trade reads only its own venue.
+
+On the dashboard, the floor shows a **US · Alpaca** strip (paper account, the New York session,
+the USD balance) whenever Alpaca routing is on. The Fusion, Risk and OMS desks have Alpaca
+sections, and the "Prédio" view has a third floor, **03 · US / Alpaca (paper)**, with the US agents
+and the limits of the USD account.
+
 ## Enabling it (operator)
 
 1. **Account.** Sign up for free at alpaca.markets. In the dashboard, switch to the **Paper**
@@ -149,7 +161,4 @@ dead link, and the API already blocks US risk while it cannot read the account.
 - No fractional shares, MARKET, GTC, short selling, options, crypto, extended hours or margin use.
 - No consolidated (SIP) data. IEX only, and labelled as such.
 - No holiday calendar in the Risk Engine. Alpaca's clock refuses orders on closed days instead.
-- US agents' fills are not yet folded into their virtual books. `sync_fills` reads the Binance
-  executor's orders only, which is the same limit the B3 agents have today.
-- The dashboard has no Alpaca lane yet. US agents would show on the default (Binance) floor.
 - No deposits, withdrawals or transfers. Alpaca paper has none, and the adapter has no such route.

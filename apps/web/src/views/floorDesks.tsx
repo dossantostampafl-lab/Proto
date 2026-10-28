@@ -1,17 +1,18 @@
-// The desks of the trading floor, opened one at a time in a drawer, and the XP / B3 lane strip.
+// The desks of the trading floor, opened one at a time in a drawer, and the XP / B3 and Alpaca US lane strips.
 // Every value comes from an existing read-only API surface (see deskData.ts for the narrowing), is
 // labelled with its freshness (live / stale / unavailable) and the data mode, and a value that is not
 // measured (a frozen checkpoint) is never printed as if it were. The drawer polls only while it is open
 // and the tab is visible. Operator actions reuse the System view's token and are inert, with the reason,
-// without it. Nothing here can release a halt or raise a limit. XP is a DEMO account: never real money.
+// without it. Nothing here can release a halt or raise a limit. XP is a DEMO account and Alpaca a PAPER
+// account: never real money.
 import { Component, createContext, type ErrorInfo, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { operatorToken } from "../api";
 import { Tag, useCommand } from "../ui";
 import {
-  amt, assertNever, b3Session, type B3Session, dataOf, type Decision, deriveXpLane, fin, fmt2, type Feed, type FeedState, isB3, type Ledger,
+  amt, assertNever, b3Session, type B3Session, dataOf, type Decision, deriveUsLane, deriveXpLane, fin, fmt2, type Feed, type FeedState, isB3, isUs, type Ledger,
   orDash, type Order, parseAgentStatus, parseDecisions, parseDrill, parseLedger, parseOrders, parseRisk, parseRiskDecisions, parseSignals,
-  parseStrategy, parseWatchdog, pctOf, positive, short, subDecimal, useDeskFeed, type XpLane, type XpLaneState,
+  parseStrategy, parseWatchdog, pctOf, positive, short, subDecimal, type UsLane, type UsLaneState, usSession, useDeskFeed, type XpLane, type XpLaneState,
 } from "./deskData";
 import { clockUtc, type FloorAction, type FloorState, STATIONS, type StationId, TONE_COLOR, TONE_LABEL, type Tone } from "./floorModel";
 
@@ -98,33 +99,37 @@ const NoData = ({ children }: { children: ReactNode }) => <p className="empty">{
 const Missing = ({ what }: { what: string }) => <NoData>{what} unavailable.</NoData>;
 const flag = (v: boolean | null, yes: string, no: string) => (v === null ? "—" : v ? yes : no);
 const B3Tag = () => <span className="fl-b3" title="XP / B3 demo account">B3</span>;
+const UsTag = () => <span className="fl-b3 fl-us" title="Alpaca US paper account">US</span>;
+const VenueTag = ({ instrument }: { instrument: string | null }) => (isB3(instrument) ? <B3Tag /> : isUs(instrument) ? <UsTag /> : null);
 
 // ---------- the XP / B3 lane ----------
-export type XpState = { lane: XpLane; instruments: string[] | null; killedVenues: string[] | null; ledger: Feed<Ledger> };
+/** Both executor lanes, read from the same feeds: XP / B3 (lane) and Alpaca US (us). */
+export type XpState = { lane: XpLane; us: UsLane; instruments: string[] | null; killedVenues: string[] | null; ledger: Feed<Ledger> };
 const LANE_LABEL: Record<XpLaneState, string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", "off-hours": "OFF HOURS", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
 
-/** XP routing as the API reports it: agent status (instruments), risk status (halted venues) and, only when routing is on, the ledger. */
+/** XP and Alpaca routing as the API reports it: agent status (instruments), risk status (halted venues) and, only when either is on, the ledger. */
 export function useXpLane(): XpState {
   const agents = useDeskFeed("/v1/agents/status", parseAgentStatus, 10000);
   const risk = useDeskFeed("/v1/risk/status", parseRisk, 10000);
   const instruments = dataOf(agents.state)?.instruments ?? null;
-  const listed = instruments?.some(i => i.startsWith("XP_B3:")) ?? false;
+  const listed = instruments?.some(i => i.startsWith("XP_B3:") || i.startsWith("ALPACA_US:")) ?? false;
   const ledger = useDeskFeed(listed ? "/v1/oms/ledger" : null, parseLedger, 15000);
   const killedVenues = dataOf(risk.state)?.controls.venues ?? null;
   const failed = ledger.state.kind === "unavailable" || (ledger.state.kind === "stale" && ledger.state.failed !== null);
   const lane = deriveXpLane({ instruments, ledger: dataOf(ledger.state), ledgerFailed: failed, killedVenues });
-  return { lane, instruments, killedVenues, ledger };
+  const us = deriveUsLane({ instruments, ledger: dataOf(ledger.state), ledgerFailed: failed, killedVenues });
+  return { lane, us, instruments, killedVenues, ledger };
 }
 
-function useSession(): B3Session {
+function useSession(at: (now: number) => B3Session = b3Session): B3Session {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => { if (document.visibilityState === "visible") setNow(Date.now()); }, 30000);
     return () => window.clearInterval(id);
   }, []);
-  return b3Session(now);
+  return at(now);
 }
-const sessionText = (s: B3Session) => `${s.open ? "OPEN" : "CLOSED"} · ${s.weekday} ${s.local} in São Paulo`;
+const sessionText = (s: B3Session, city = "São Paulo") => `${s.open ? "OPEN" : "CLOSED"} · ${s.weekday} ${s.local} in ${city}`;
 
 /** A small status strip: what the XP / B3 lane is right now, in words, with no number that was not measured. */
 export function XpStrip({ xp }: { xp: XpState }) {
@@ -146,6 +151,33 @@ export function XpStrip({ xp }: { xp: XpState }) {
       <span className="fl-xp-why">{lane.reason}</span>
       {lane.state !== "not-configured" && lane.state !== "unknown" && <span>B3 session {sessionText(session)} (no holiday calendar)</span>}
       {lane.state === "live" && brl && <span>BRL {fmt2(brl.total)} (XP ledger)</span>}
+      <span className="sr-only" role="status">{said}</span>
+    </section>
+  );
+}
+
+const US_LABEL: Record<UsLaneState, string> = LANE_LABEL;
+
+/** The Alpaca US lane, like the XP one: paper account, no number that was not measured. Hidden while Alpaca routing is off. */
+export function UsStrip({ xp }: { xp: XpState }) {
+  const { us } = xp;
+  const session = useSession(usSession);
+  const usd = us.ledger?.us?.balances.find(b => b.asset === "USD");
+  const [said, setSaid] = useState("");
+  const before = useRef<UsLaneState | null>(null);
+  useEffect(() => {
+    if (before.current !== null && before.current !== "unknown" && before.current !== us.state) setSaid(`Alpaca US lane: ${US_LABEL[us.state]}`);
+    before.current = us.state;
+  }, [us.state]);
+  if (us.state === "not-configured") return null;
+  return (
+    <section className={`fl-xp fl-us ${us.state}`} aria-label="Alpaca US lane">
+      <b>US · Alpaca</b>
+      <span className="fl-xp-env">PAPER ACCOUNT · SIMULATED FILLS · NO REAL MONEY</span>
+      <span className={`fl-xp-state ${us.state}`}>{US_LABEL[us.state]}</span>
+      <span className="fl-xp-why">{us.reason}</span>
+      {us.state !== "unknown" && <span>US session {sessionText(session, "New York")} (no holiday calendar)</span>}
+      {us.state === "live" && usd && <span>USD {fmt2(usd.total)} (Alpaca ledger)</span>}
       <span className="sr-only" role="status">{said}</span>
     </section>
   );
@@ -200,7 +232,7 @@ function TradingViewDesk({ actions }: { actions: FloorAction[] }) {
       <ol className="fl-list">
         {(list ?? []).slice(0, 8).map(s => (
           <li key={s.key}>
-            <time>{clockUtc(s.at)}</time><b>{short(s.instrument)} {isB3(s.instrument) && <B3Tag />}</b>
+            <time>{clockUtc(s.at)}</time><b>{short(s.instrument)} <VenueTag instrument={s.instrument} /></b>
             <span className={s.direction === "LONG" ? "up" : s.direction === "SHORT" ? "down" : ""}>{orDash(s.direction)} · strength {fin(s.strength)}</span>
             <small>{orDash(s.source)} · {orDash(s.strategy)} · {orDash(s.timeframe)}</small>
           </li>
@@ -217,7 +249,7 @@ function DecisionList({ decisions }: { decisions: Decision[] }) {
     <ol className="fl-list">
       {decisions.slice(0, 6).map(d => (
         <li key={d.key}>
-          <time>{clockUtc(d.at)}</time><b>{short(d.instrument)} {isB3(d.instrument) && <B3Tag />}</b>
+          <time>{clockUtc(d.at)}</time><b>{short(d.instrument)} <VenueTag instrument={d.instrument} /></b>
           <span className={d.outcome === "APPROVED" ? "up" : d.outcome === "ABSTAINED" || d.outcome === "BLOCKED" ? "warn" : ""}>{orDash(d.outcome)}</span>
           <small>
             {d.hasFusion ? `${orDash(d.direction)} · score ${fin(d.score)} · ${orDash(d.reason)}` : "no fusion data"}
@@ -245,6 +277,22 @@ function XpFusionSection({ xp }: { xp: XpState }) {
   );
 }
 
+function UsFusionSection({ xp }: { xp: XpState }) {
+  const session = useSession(usSession);
+  const us = (xp.instruments ?? []).filter(i => i.startsWith("ALPACA_US:")).map(short);
+  if (xp.us.state === "not-configured") return null;
+  return (
+    <Section title="US / Alpaca">
+      <Rows>
+        <Row label="Lane" cls={xp.us.state === "live" ? "up" : xp.us.state === "halted" || xp.us.state === "unavailable" ? "down" : "warn"}>{US_LABEL[xp.us.state]}</Row>
+        <Row label="US session hours (no holiday calendar)" cls={session.open ? "up" : ""}>{sessionText(session, "New York")}</Row>
+        <Row label="US instruments in the pipeline">{xp.instruments === null ? "—" : us.length ? us.join(", ") : "none"}</Row>
+      </Rows>
+      <p className="hint">{xp.us.reason} US stocks trade Monday to Friday, 09:30 to 16:00 New York time; outside it the Risk Engine refuses and quotes age out. The account is a PAPER account.</p>
+    </Section>
+  );
+}
+
 function FusionDesk({ xp }: { xp: XpState }) {
   const status = useDeskFeed("/v1/agents/status", parseAgentStatus);
   const decisions = useDeskFeed("/v1/agents/decisions/recent", parseDecisions);
@@ -263,6 +311,7 @@ function FusionDesk({ xp }: { xp: XpState }) {
         </Rows>
       </Section>
       <XpFusionSection xp={xp} />
+      <UsFusionSection xp={xp} />
       <Section title="Latest decisions" state={decisions.state}>
         {d ? <DecisionList decisions={d} /> : <Missing what="Decisions" />}
       </Section>
@@ -315,7 +364,7 @@ function ReviewerDesk() {
           <ol className="fl-list">
             {reviewed.map(x => (
               <li key={x.key}>
-                <time>{clockUtc(x.at)}</time><b>{short(x.instrument)} {isB3(x.instrument) && <B3Tag />}</b>
+                <time>{clockUtc(x.at)}</time><b>{short(x.instrument)} <VenueTag instrument={x.instrument} /></b>
                 <span className={x.review?.verdict === "APPROVE" ? "up" : "warn"}>{orDash(x.review?.verdict)} · size ×{fin(x.review?.sizeFactor)}</span>
                 <small>{orDash(x.review?.rationale)}</small>
               </li>
@@ -356,9 +405,10 @@ function RiskDesk({ xp }: { xp: XpState }) {
           <Row label="Global kill switch" cls={c?.globalKill ? "down" : c?.globalKill === false ? "up" : ""}>{c ? flag(c.globalKill, "ON", "armed") : "—"}</Row>
           <Row label="Runtime kill switch" cls={c && c.runtime !== null && c.runtime !== "ARMED" ? "down" : ""}>{orDash(c?.runtime)}</Row>
           <Row label="Halted venues">
-            {c?.venues ? (c.venues.length ? c.venues.map(v => <span key={v} className={`fl-venue down${v === "XP_B3" ? " xp" : ""}`}>{v}{v === "XP_B3" ? " (XP / B3 demo)" : ""}</span>) : "none") : "—"}
+            {c?.venues ? (c.venues.length ? c.venues.map(v => <span key={v} className={`fl-venue down${v === "XP_B3" ? " xp" : v === "ALPACA_US" ? " us" : ""}`}>{v}{v === "XP_B3" ? " (XP / B3 demo)" : v === "ALPACA_US" ? " (Alpaca US paper)" : ""}</span>) : "none") : "—"}
           </Row>
           <Row label="XP / B3 venue" cls={xp.lane.state === "halted" ? "down" : ""}>{LANE_LABEL[xp.lane.state]}</Row>
+          <Row label="Alpaca US venue" cls={xp.us.state === "halted" ? "down" : ""}>{US_LABEL[xp.us.state]}</Row>
           <Row label="Halted strategies" cls={c?.strategies?.length ? "down" : ""}>{c?.strategies ? c.strategies.join(", ") || "none" : "—"}</Row>
           <Row label="Lockdown" cls={c?.lockdown.value ? "down" : ""}>{c ? (c.lockdown.known ? c.lockdown.value ?? "none" : "—") : "—"}</Row>
         </Rows>
@@ -390,7 +440,7 @@ function RiskDesk({ xp }: { xp: XpState }) {
           <ol className="fl-list">
             {d.slice(0, 6).map(x => (
               <li key={x.key}>
-                <b>{short(x.instrument)} {isB3(x.instrument) && <B3Tag />}</b>
+                <b>{short(x.instrument)} <VenueTag instrument={x.instrument} /></b>
                 <span className={x.approved ? "up" : x.approved === false ? "down" : ""}>{x.approved === null ? "—" : x.approved ? "permit issued" : "rejected"}</span>
                 <small>{x.approved ? `daily loss ${orDash(x.dailyLoss)} · drawdown ${orDash(x.drawdown)}` : x.rejections.join(", ") || "no reason given"}{x.breach ? ` · breach ${x.breach}` : ""}</small>
               </li>
@@ -423,7 +473,9 @@ function RiskDesk({ xp }: { xp: XpState }) {
 const OPEN = new Set(["NEW", "SUBMITTED", "ACKNOWLEDGED", "PARTIALLY_FILLED"]);
 const MAIN_ASSETS = ["USDT", "BTC", "ETH", "SOL", "BNB", "BRL"];
 
-/** Orders with their cancel / resolve actions; `suffix` carries ?venue=XP_B3 for the XP list. */
+const venueWord = (suffix: string) => (suffix.includes("ALPACA_US") ? " (Alpaca)" : suffix ? " (XP)" : "");
+
+/** Orders with their cancel / resolve actions; `suffix` carries ?venue=XP_B3 or ?venue=ALPACA_US for those lists. */
 function OrderList({ orders, suffix, refresh, tag }: { orders: Order[]; suffix: string; refresh: () => void; tag: ReactNode }) {
   return (
     <ol className="fl-list">
@@ -437,8 +489,8 @@ function OrderList({ orders, suffix, refresh, tag }: { orders: Order[]; suffix: 
             <small>limit {orDash(o.limit)} · filled {amt(o.filled)}{o.average ? ` @ ${amt(o.average)}` : ""} · fee {amt(o.fee)}{o.reason ? ` · ${o.reason}` : ""}</small>
             {actionable && o.id && (
               <span className="fl-actions">
-                {open && <Action label={`Cancel ${o.id}${suffix ? " (XP)" : ""}`} path={`/v1/oms/orders/${o.id}/cancel${suffix}`} verb="Cancel" target={o.id} refresh={refresh} />}
-                {o.status === "UNKNOWN" && <Action label={`Resolve ${o.id}${suffix ? " (XP)" : ""}`} path={`/v1/oms/orders/${o.id}/resolve${suffix}`} verb="Resolve" target={o.id} refresh={refresh} confirm />}
+                {open && <Action label={`Cancel ${o.id}${venueWord(suffix)}`} path={`/v1/oms/orders/${o.id}/cancel${suffix}`} verb="Cancel" target={o.id} refresh={refresh} />}
+                {o.status === "UNKNOWN" && <Action label={`Resolve ${o.id}${venueWord(suffix)}`} path={`/v1/oms/orders/${o.id}/resolve${suffix}`} verb="Resolve" target={o.id} refresh={refresh} confirm />}
               </span>
             )}
           </li>
@@ -536,7 +588,57 @@ function OmsDesk({ state, stateFresh, xp }: { state: FloorState | null; stateFre
         <TokenHint />
       </Section>
       <XpOmsSection xp={xp} ledgerFeed={ledger} />
+      <UsOmsSection xp={xp} ledgerFeed={ledger} />
     </>
+  );
+}
+
+/** The Alpaca US paper account: USD, PROTO's own positions, orders and fills, all read from the Alpaca executor through the API. */
+function UsOmsSection({ xp, ledgerFeed }: { xp: XpState; ledgerFeed: Feed<Ledger> }) {
+  const l = dataOf(ledgerFeed.state);
+  const failed = ledgerFeed.state.kind === "unavailable" || (ledgerFeed.state.kind === "stale" && ledgerFeed.state.failed !== null);
+  const lane = deriveUsLane({ instruments: xp.instruments, ledger: l, ledgerFailed: failed, killedVenues: xp.killedVenues });
+  const off = lane.state === "not-configured" || lane.state === "unknown";
+  const orders = useDeskFeed(off ? null : "/v1/oms/orders?venue=ALPACA_US&limit=20", parseOrders);
+  if (lane.state === "not-configured") return null;
+  const list = dataOf(orders.state);
+  const block = l?.us ?? null;
+  const measured = lane.state === "live" || lane.state === "halted";
+  const usd = block?.balances.find(b => b.asset === "USD");
+  const positions = (block?.balances ?? []).filter(b => b.asset !== "USD" && positive(b.total));
+  return (
+    <Section title="US / Alpaca (paper account)" state={off ? undefined : ledgerFeed.state} override={!off && lane.state === "unavailable" ? "Alpaca executor unavailable, nothing measured" : null}>
+      <Rows>
+        <Row label="Lane" cls={lane.state === "live" ? "up" : lane.state === "halted" || lane.state === "unavailable" ? "down" : "warn"}>{US_LABEL[lane.state]}</Row>
+        <Row label="Account">{orDash(measured ? block?.accountId : null)}</Row>
+        <Row label="Environment">{measured ? "PAPER (Alpaca paper account, simulated fills)" : "—"}</Row>
+      </Rows>
+      <p className="hint">{lane.reason}</p>
+      {measured && block && (
+        <>
+          <Rows>
+            <Row label="USD balance">{usd ? fmt2(usd.total) : "—"}</Row>
+            <Row label="USD opening balance">{usd?.opening != null ? fmt2(usd.opening) : "not reported"}</Row>
+          </Rows>
+          {positions.length ? (
+            <Rows>
+              {positions.map(p => {
+                const own = p.opening === null ? null : subDecimal(p.total, p.opening);
+                return <Row key={p.asset} label={p.asset}>{amt(p.total)} total · {own === null ? "own position unknown (opening not reported)" : `${amt(own)} PROTO's own`}</Row>;
+              })}
+            </Rows>
+          ) : <NoData>No US position held.</NoData>}
+        </>
+      )}
+      {!off && (
+        <>
+          <h4 className="fl-sub">Orders and fills (Alpaca)</h4>
+          <Freshness name="Alpaca orders" state={orders.state} />
+          {list === null ? <Missing what="Alpaca orders" /> : !list.length ? <NoData>No Alpaca order yet.</NoData> : <OrderList orders={list} suffix="?venue=ALPACA_US" refresh={orders.refresh} tag={<UsTag />} />}
+          <TokenHint />
+        </>
+      )}
+    </Section>
   );
 }
 

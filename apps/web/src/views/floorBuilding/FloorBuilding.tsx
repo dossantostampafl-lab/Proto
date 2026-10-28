@@ -4,7 +4,7 @@
 // floor state; an unavailable source shows empty desks and says UNAVAILABLE, never a number.
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Shared } from "../../main";
-import { dataOf, type FeedState, type XpLane, useDeskFeed } from "../deskData";
+import { dataOf, type FeedState, type UsLane, useDeskFeed, type XpLane } from "../deskData";
 import { type FloorAction, type FloorState, STATIONS, type StationId } from "../floorModel";
 import type { Feed as BoardFeed, LimitBoard, ResultBoard } from "./boards";
 import { type Agent, brl, brlOf, type FloorId, type Ledger, limitsOf, parseLedger, parseRoster, pnlSum, realizedSum, type Roster, shortTime, sign, toNum } from "./data";
@@ -12,15 +12,17 @@ import { type Anchor, BuildingEngine, FLOORS, type SceneAgent, type View } from 
 
 const POLL = 10000;
 const HISTORY = 240;
-const LANE_LABEL: Record<XpLane["state"], string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", "off-hours": "OFF HOURS", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
+const LANE_LABEL: Record<XpLane["state"] | UsLane["state"], string> = { unknown: "UNKNOWN", "not-configured": "NOT CONFIGURED", "off-hours": "OFF HOURS", unavailable: "UNAVAILABLE", live: "LIVE", halted: "HALTED" };
 const feedOf = (s: FeedState<unknown>): BoardFeed => (s.kind === "live" ? "live" : s.kind === "stale" || s.kind === "paused" ? "stale" : s.kind === "unavailable" ? "unavailable" : "loading");
+const FLOOR_VENUE: Record<FloorId, string> = { binance: "Binance Spot", xp: "XP / B3", us: "US / Alpaca" };
+const FLOOR_QUOTE: Record<FloorId, string> = { binance: "USDT", xp: "BRL", us: "USD" };
 const FEED_LABEL: Record<BoardFeed, string> = { live: "LIVE", stale: "STALE", unavailable: "UNAVAILABLE", loading: "LOADING" };
 
 type Point = { at: number; v: number };
 
 /** Values read during this session only (never back-filled): per-floor P&L sum and per-agent equity. */
 function useSessionHistory(roster: Roster | null, at: number | null) {
-  const floors = useRef<Record<FloorId, Point[]>>({ binance: [], xp: [] });
+  const floors = useRef<Record<FloorId, Point[]>>({ binance: [], xp: [], us: [] });
   const agents = useRef(new Map<string, Point[]>());
   const last = useRef<number | null>(null);
   if (roster && at !== null && at !== last.current) {
@@ -62,7 +64,7 @@ function StationPanel({ agent, history, capital, feed, onClose }: { agent: Agent
       </header>
       <p className={`fb-chip ${feed}`}>{capital} · ROSTER {FEED_LABEL[feed]}</p>
       <dl>
-        <dt>Slot</dt><dd>{agent.symbol} · {agent.floor === "xp" ? "XP / B3" : "Binance Spot"}</dd>
+        <dt>Slot</dt><dd>{agent.symbol} · {FLOOR_VENUE[agent.floor]}</dd>
         <dt>Status</dt><dd className={agent.status === "ACTIVE" ? "up" : "muted"}>{agent.status === "ACTIVE" ? "ACTIVE" : "ELIMINATED"}</dd>
         <dt>Equity</dt><dd>{brl(agent.equity)}{agent.valued ? "" : " · não avaliado"}</dd>
         <dt>P&amp;L</dt><dd className={tone}>{brl(agent.pnl, true)}</dd>
@@ -98,9 +100,9 @@ function Results({ agents, onPick, onClose }: { agents: Agent[]; onPick: (id: st
   );
 }
 
-export default function FloorBuilding({ market, state, stateFresh, latest, active, xp }: {
+export default function FloorBuilding({ market, state, stateFresh, latest, active, xp, us }: {
   market: Shared["market"]; state: FloorState | null; stateFresh: boolean; actions: FloorAction[];
-  latest: Partial<Record<StationId, FloorAction>>; active: (s: StationId) => boolean; xp: XpLane;
+  latest: Partial<Record<StationId, FloorAction>>; active: (s: StationId) => boolean; xp: XpLane; us?: UsLane;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -114,6 +116,7 @@ export default function FloorBuilding({ market, state, stateFresh, latest, activ
   const [showResults, setShowResults] = useState(false);
   const reduced = useMemo(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   const [paused, setPaused] = useState(reduced);
+  const usState = us?.state ?? "unknown";
 
   const rosterFeed = useDeskFeed("/v1/agents/roster", parseRoster, POLL);
   const ledgerFeed = useDeskFeed("/v1/oms/ledger", parseLedger, POLL);
@@ -211,7 +214,7 @@ export default function FloorBuilding({ market, state, stateFresh, latest, activ
       }
       down = null;
     };
-    const ORDER: View[] = ["binance", "xp", "building"];
+    const ORDER: View[] = [...FLOORS, "building"];
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); instance.zoom(Math.exp(e.deltaY * 0.002)); return; }
       const i = ORDER.indexOf(viewRef.current), next = ORDER[i + (e.deltaY < 0 ? 1 : -1)];
@@ -244,6 +247,7 @@ export default function FloorBuilding({ market, state, stateFresh, latest, activ
   useEffect(() => { engine.current?.setAnimate(!paused); }, [paused, ready]);
   useEffect(() => { engine.current?.setAgents(sceneAgents); }, [sceneKey, ready]);
   useEffect(() => { engine.current?.setFloorDim("xp", xp.state !== "live" && xp.state !== "halted"); }, [xp.state, ready]);
+  useEffect(() => { engine.current?.setFloorDim("us", usState !== "live" && usState !== "halted"); }, [usState, ready]);
 
   // Wall boards per floor, from the roster (agents) and the ledger account of that floor's currency.
   const lockdown = state == null ? null : state.controls.lockdown ?? "nenhum";
@@ -251,13 +255,13 @@ export default function FloorBuilding({ market, state, stateFresh, latest, activ
   const floorInfo = FLOORS.map(id => {
     const here = roster?.agents.filter(a => a.floor === id) ?? [];
     const live = here.filter(a => a.status === "ACTIVE");
-    const quote = id === "xp" ? "BRL" : "USDT";
+    const quote = FLOOR_QUOTE[id];
     const account = ledger?.accounts.find(a => a.quote === quote) ?? null;
     const lim = limitsOf(account);
     const pnl = roster ? (live.length ? pnlSum(live) : 0) : null;
     const eq = toNum(account?.equity ?? null), sod = toNum(account?.startOfDay ?? null);
     const result: ResultBoard = {
-      feed: rf, floor: id === "xp" ? "XP / B3" : "Binance Spot", capital,
+      feed: rf, floor: FLOOR_VENUE[id], capital,
       pnl: live.length ? pnl : null, pnlText: roster ? (live.length ? brlOf(pnl, true) : "R$ —") : "—", agents: live.length,
       history: history.floors[id].map(p => p.v),
       accountDay: lim.measured && eq !== null && sod !== null ? `conta hoje: ${eq - sod >= 0 ? "+" : ""}${(eq - sod).toFixed(2)} ${quote}` : null,
@@ -274,8 +278,9 @@ export default function FloorBuilding({ market, state, stateFresh, latest, activ
   const working = (inFloor ? inFloor.live : all.filter(a => a.status === "ACTIVE")).length;
   const total = (inFloor ? inFloor.here : all).length;
   const agent = picked ? all.find(a => a.id === picked) ?? null : null;
-  const floorName = (id: FloorId) => (id === "xp" ? "02 · XP / B3 (demo)" : `01 · Binance Spot (${venueWord})`);
-  const floorState = (id: FloorId) => (id === "xp" ? LANE_LABEL[xp.state] : state == null ? "UNAVAILABLE" : `${state.data_mode} · ${stateFresh ? "LIVE" : "STALE"}`);
+  const floorName = (id: FloorId) => (id === "xp" ? "02 · XP / B3 (demo)" : id === "us" ? "03 · US / Alpaca (paper)" : `01 · Binance Spot (${venueWord})`);
+  const floorState = (id: FloorId) => (id === "xp" ? LANE_LABEL[xp.state] : id === "us" ? LANE_LABEL[usState] : state == null ? "UNAVAILABLE" : `${state.data_mode} · ${stateFresh ? "LIVE" : "STALE"}`);
+  const dimmed = (id: FloorId) => (id === "xp" ? xp.state !== "live" : id === "us" ? usState !== "live" : false);
   const ref = (key: string) => (node: HTMLElement | null) => { if (node) tags.current.set(key, node); else tags.current.delete(key); };
   const summary = floorInfo.map(f => `${floorName(f.id)}: ${f.live.length} agentes, ${floorState(f.id)}`).join("; ");
 
@@ -312,7 +317,7 @@ export default function FloorBuilding({ market, state, stateFresh, latest, activ
         {FLOORS.map(id => {
           const f = floorInfo.find(x => x.id === id)!;
           return (
-            <div key={`${id}:label`} ref={ref(`${id}:label`)} className={`fb-card${id === "xp" && xp.state !== "live" ? " dim" : ""}`}>
+            <div key={`${id}:label`} ref={ref(`${id}:label`)} className={`fb-card${dimmed(id) ? " dim" : ""}`}>
               <b>{floorName(id)}</b>
               <span>{roster ? `${f.live.length} agentes` : "agentes —"}</span>
               <em className={floorState(id).includes("LIVE") ? "live" : "stale"}>{floorState(id)}</em>

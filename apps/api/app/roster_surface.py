@@ -9,7 +9,9 @@ virtual testnet/paper sizing budget, never money. Read-only route: GET /v1/agent
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -30,7 +32,7 @@ from services.agents.roster import (
     elimination_floor,
     size_multiplier,
 )
-from services.execution import TradableInstrument
+from services.execution import TradableInstrument, VenueId
 from services.execution.constitution import REFERENCE_CAPITAL
 
 from . import control_state
@@ -179,19 +181,52 @@ async def record_order(order: dict[str, Any]) -> list[dict[str, Any]]:
     return applied
 
 
-async def sync_fills() -> bool:
-    """Read recent OMS orders and apply new fills. False when the orders cannot be read."""
+def _agent_venues(book: AgentRoster) -> list[VenueId]:
+    """Venues that hold at least one agent's instrument, Binance first."""
+
+    catalog = active_instruments()
+    venues = {
+        catalog[a.slot.instrument_id].venue
+        for a in book.agents()
+        if a.slot.instrument_id in catalog
+    }
+    return sorted(venues, key=lambda v: (v is not VenueId.BINANCE_SPOT, v.value))
+
+
+async def sync_venues(venues: Iterable[VenueId] | None = None) -> dict[VenueId, bool]:
+    """Read recent OMS orders and apply new fills; per venue, whether its orders could be read.
+
+    Every venue with agents is read (Binance, and XP_B3 / ALPACA_US when routed), at the same
+    time, so a switched-off XP node costs its own timeout once and never hides another venue's
+    fills. ``venues`` narrows the read, e.g. to the one venue an agent is about to trade on.
+    """
 
     from .oms_surface import recent_orders
 
-    try:
-        orders = await recent_orders(_SYNC_LIMIT)
-    except (ExecutorUnavailable, ExecutorRefused) as exc:
-        logger.warning("agent fills not synced: %s", exc)
-        return False
-    for order in reversed(orders):  # oldest first, so books replay in order
-        await record_order(order)
-    return True
+    chosen = list(venues) if venues is not None else _agent_venues(roster())
+    if not chosen:
+        chosen = [VenueId.BINANCE_SPOT]
+    reads = await asyncio.gather(
+        *(recent_orders(_SYNC_LIMIT, venue=venue) for venue in chosen), return_exceptions=True
+    )
+    synced: dict[VenueId, bool] = {}
+    for venue, orders in zip(chosen, reads, strict=True):
+        if isinstance(orders, (ExecutorUnavailable, ExecutorRefused)):
+            logger.warning("agent fills of %s not synced: %s", venue.value, orders)
+            synced[venue] = False
+            continue
+        if isinstance(orders, BaseException):
+            raise orders
+        for order in reversed(orders):  # oldest first, so books replay in order
+            await record_order(order)
+        synced[venue] = True
+    return synced
+
+
+async def sync_fills(venues: Iterable[VenueId] | None = None) -> bool:
+    """``sync_venues``, True only when every venue read was readable."""
+
+    return all((await sync_venues(venues)).values())
 
 
 def ema_params(instrument_id: str) -> tuple[int, int] | None:
@@ -247,7 +282,7 @@ def _agent_view(agent: TraderAgent, valuation: Valuation) -> dict[str, Any]:
 @router.get("/roster")
 async def roster_view() -> dict[str, object]:
     book = await ready()
-    synced = await sync_fills()
+    by_venue = await sync_venues()
     agents = []
     equity_total: Decimal | None = Decimal("0")
     for agent in book.agents():
@@ -273,7 +308,8 @@ async def roster_view() -> dict[str, object]:
             "starting_capital_brl": str(AGENT_STARTING_CAPITAL),
         },
         "enabled": settings.agent_roster_enabled,
-        "fills_synced": synced,
+        "fills_synced": all(by_venue.values()),
+        "fills_synced_by_venue": {venue.value: ok for venue, ok in by_venue.items()},
         "capital": "VIRTUAL",
         "currency": "BRL",
         "data_mode": data_mode(),

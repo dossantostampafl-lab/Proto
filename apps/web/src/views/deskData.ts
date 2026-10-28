@@ -74,6 +74,7 @@ export function subDecimal(a: unknown, b: unknown): string | null {
 }
 export const short = (id: string | null) => (id ? id.replace(/^[A-Z_0-9]+:/, "") : "—");
 export const isB3 = (instrumentId: string | null) => Boolean(instrumentId?.startsWith("XP_B3:"));
+export const isUs = (instrumentId: string | null) => Boolean(instrumentId?.startsWith("ALPACA_US:"));
 export const stepValue = (v: unknown): string => (v == null ? "—" : Array.isArray(v) ? (v.length ? v.map(x => (typeof x === "string" ? x : JSON.stringify(x))).join(", ") : "none") : typeof v === "object" ? JSON.stringify(v) : String(v));
 export function assertNever(value: never): never { throw new Error(`unhandled state ${JSON.stringify(value)}`); }
 
@@ -86,6 +87,16 @@ export function b3Session(at: number): B3Session {
   const minutes = Number(part("hour")) * 60 + Number(part("minute"));
   const weekday = part("weekday");
   return { open: weekday !== "Sat" && weekday !== "Sun" && minutes >= 600 && minutes < 1075, local: `${part("hour")}:${part("minute")}`, weekday };
+}
+
+export type UsSession = B3Session;
+/** Regular US hours in America/New_York, as the Risk Engine reads them: Mon-Fri, 09:30 <= time < 16:00. No holiday calendar. */
+export function usSession(at: number): UsSession {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(at));
+  const part = (type: string) => parts.find(p => p.type === type)?.value ?? "";
+  const minutes = Number(part("hour")) * 60 + Number(part("minute"));
+  const weekday = part("weekday");
+  return { open: weekday !== "Sat" && weekday !== "Sun" && minutes >= 570 && minutes < 960, local: `${part("hour")}:${part("minute")}`, weekday };
 }
 
 /**
@@ -223,18 +234,22 @@ export type Ledger = {
   accounts: { quote: string; equity: string | null; exposure: string | null }[];
   balances: { asset: string; total: string; reserved: string | null }[];
   xp: XpBlock | null;
+  /** The Alpaca US paper account (ledger "alpaca_us"), present only when Alpaca routing is on. */
+  us: XpBlock | null;
 };
 export const parseLedger = (raw: unknown): Ledger | null => {
   if (!isRecord(raw)) return null;
-  const xp = isRecord(raw.xp_b3) ? raw.xp_b3 : null;
+  const xp = isRecord(raw.xp_b3) ? raw.xp_b3 : null, us = isRecord(raw.alpaca_us) ? raw.alpaca_us : null;
+  const block = (b: Record<string, unknown>): XpBlock => ({
+    accountId: str(b.account_id), mode: str(b.mode), unavailable: b.unavailable === true, halted: bool(b.venue_halted),
+    balances: Object.entries(rec(b.balances)).flatMap(([asset, x]) => { const t = decimalOrZero(rec(x).total); return t === null ? [] : [{ asset, total: t, opening: decimalOrZero(rec(x).opening), reserved: decimalOrZero(rec(x).reserved) }]; }),
+  });
   return {
     accountId: str(raw.account_id), mode: str(raw.mode), venue: str(raw.venue), unavailable: raw.unavailable === true,
     accounts: Object.entries(rec(raw.accounts)).map(([quote, a]) => ({ quote, equity: finiteDecimal(rec(a).equity), exposure: finiteDecimal(rec(a).gross_exposure) })),
     balances: Object.entries(rec(raw.balances)).flatMap(([asset, b]) => { const t = decimalOrZero(rec(b).total); return t === null ? [] : [{ asset, total: t, reserved: decimalOrZero(rec(b).reserved) }]; }),
-    xp: xp ? {
-      accountId: str(xp.account_id), mode: str(xp.mode), unavailable: xp.unavailable === true, halted: bool(xp.venue_halted),
-      balances: Object.entries(rec(xp.balances)).flatMap(([asset, b]) => { const t = decimalOrZero(rec(b).total); return t === null ? [] : [{ asset, total: t, opening: decimalOrZero(rec(b).opening), reserved: decimalOrZero(rec(b).reserved) }]; }),
-    } : null,
+    xp: xp ? block(xp) : null,
+    us: us ? block(us) : null,
   };
 };
 
@@ -266,4 +281,28 @@ export function deriveXpLane(input: { instruments: string[] | null; ledger: Ledg
   if ((ledgerFailed || block === null || block.unavailable) && !xpNodeScheduled(at)) return { state: "off-hours", ledger, killed, reason: "Outside the XP node schedule (09:30-18:10 São Paulo, Mon-Fri): the node is off by design and back at 09:30." };
   if (ledgerFailed || block === null || block.unavailable) return { state: "unavailable", ledger, killed, reason: "The XP executor cannot be read: nothing about XP is measured." };
   return { state: "live", ledger, killed, reason: "XP demo account readable (venue environment TESTNET)." };
+}
+
+// ---------- the Alpaca US lane ----------
+/** The same states as the XP lane minus OFF HOURS: the Alpaca executor runs on the server around the clock. */
+export type UsLaneState = Exclude<XpLaneState, "off-hours">;
+export type UsLane = { state: UsLaneState; ledger: Ledger | null; killed: boolean; reason: string };
+export const US_OFF = "Alpaca routing is off: ALPACA_EXECUTOR_URL is not set on the API.";
+
+/**
+ * Alpaca US (paper) as the API reports it, read like the XP lane: NOT CONFIGURED when the pipeline
+ * lists no ALPACA_US instrument and the ledger has no alpaca_us block; HALTED when the Risk Governor
+ * killed the venue or the executor says it is halted; UNAVAILABLE when the Alpaca ledger cannot be
+ * read; LIVE otherwise. A closed US session is not a fault and is shown next to the lane, not as it.
+ */
+export function deriveUsLane(input: { instruments: string[] | null; ledger: Ledger | null; ledgerFailed: boolean; killedVenues: string[] | null }): UsLane {
+  const { instruments, ledger, ledgerFailed, killedVenues } = input;
+  const listed = instruments?.some(i => i.startsWith("ALPACA_US:")) ?? false;
+  const block = ledger?.us ?? null;
+  if (instruments === null && block === null) return { state: "unknown", ledger, killed: false, reason: "The agent status could not be read, so the Alpaca routing state is unknown." };
+  if (!listed && block === null) return { state: "not-configured", ledger, killed: false, reason: US_OFF };
+  const killed = Boolean(killedVenues?.includes("ALPACA_US")) || block?.halted === true;
+  if (killed) return { state: "halted", ledger, killed, reason: "ALPACA_US is halted: new orders are refused until an operator releases it." };
+  if (ledgerFailed || block === null || block.unavailable) return { state: "unavailable", ledger, killed, reason: "The Alpaca executor cannot be read: nothing about the US account is measured." };
+  return { state: "live", ledger, killed, reason: "Alpaca paper account readable (simulated fills, no money)." };
 }

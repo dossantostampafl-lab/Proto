@@ -3,7 +3,7 @@
 import { finiteDecimal, fmt2, isRecord, rec, str } from "../deskData";
 
 export type Kind = "own" | "tradingview";
-export type FloorId = "binance" | "xp";
+export type FloorId = "binance" | "xp" | "us";
 
 export type Agent = {
   id: string; name: string | null; floor: FloorId; kind: Kind; kindLabel: string;
@@ -26,7 +26,7 @@ export function parseRoster(raw: unknown): Roster | null {
     const kind: Kind = str(a.slot.kind) === "tradingview" ? "tradingview" : "own";
     const book = rec(a.book);
     agents.push({
-      id, name: str(a.name), floor: instrument.startsWith("XP_B3:") ? "xp" : "binance", kind,
+      id, name: str(a.name), floor: instrument.startsWith("XP_B3:") ? "xp" : instrument.startsWith("ALPACA_US:") ? "us" : "binance", kind,
       kindLabel: kind === "tradingview" ? "TradingView" : "estratégia própria",
       instrument, symbol: instrument.split(":")[1] ?? instrument, status,
       equity: finiteDecimal(a.equity_brl), pnl: finiteDecimal(a.pnl_brl),
@@ -48,13 +48,17 @@ export type Ledger = { unavailable: boolean; accounts: Account[] };
 export function parseLedger(raw: unknown): Ledger | null {
   if (!isRecord(raw) || !isRecord(raw.accounts)) return null;
   const unavailable = raw.unavailable === true;
-  return {
-    unavailable,
-    accounts: Object.entries(raw.accounts).map(([quote, a]) => {
-      const r = rec(a);
-      return { quote, equity: finiteDecimal(r.equity), startOfDay: finiteDecimal(r.start_of_day_equity), peak: finiteDecimal(r.peak_equity), reference: finiteDecimal(r.reference_capital), measured: !unavailable && finiteDecimal(r.gross_exposure) !== null };
-    }),
+  const account = (quote: string, a: unknown, down: boolean): Account => {
+    const r = rec(a);
+    return { quote, equity: finiteDecimal(r.equity), startOfDay: finiteDecimal(r.start_of_day_equity), peak: finiteDecimal(r.peak_equity), reference: finiteDecimal(r.reference_capital), measured: !down && finiteDecimal(r.gross_exposure) !== null };
   };
+  const accounts = Object.entries(raw.accounts).map(([quote, a]) => account(quote, a, unavailable));
+  // Alpaca's USD account sits in its own block, measured only when that executor was read.
+  const us = isRecord(raw.alpaca_us) ? raw.alpaca_us : null;
+  if (us && isRecord(us.accounts) && !accounts.some(a => a.quote === "USD")) {
+    accounts.push(account("USD", us.accounts.USD, us.unavailable === true));
+  }
+  return { unavailable, accounts };
 }
 
 // ---------- formatting (decimal strings in, text out; floats only for sums and ratios of real values) ----------

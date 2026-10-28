@@ -19,8 +19,6 @@ class SystemMode(StrEnum):
 class KillSwitchState(StrEnum):
     ARMED = "ARMED"
     TRIGGERED = "TRIGGERED"
-    LOCKED = "LOCKED"
-    RESET_PENDING = "RESET_PENDING"
 
 
 class RuntimeState(BaseModel):

@@ -753,3 +753,59 @@ async def test_lab_strategies_stay_off_unless_flagged(monkeypatch, surfaces) -> 
     await strategy_surface._warm_lab(chosen, BTC)  # once per instrument
     assert warmed == [(BTC, 60, chosen.history)]
     strategy_surface.reset_strategy_state()
+
+
+async def test_xp_and_alpaca_fills_reach_their_agents_books(monkeypatch, surfaces) -> None:
+    from apps.api.app import instrument_registry
+    from apps.api.app.executor_client import ExecutorUnavailable
+
+    configured = configure(
+        monkeypatch,
+        oms_execution_backend="executor",
+        executor_url="http://binance-executor",
+        executor_api_token="b" * 32,
+        xp_executor_url="http://xp-executor",
+        xp_executor_api_token="x" * 32,
+        alpaca_executor_url="http://alpaca-executor",
+        alpaca_executor_api_token="a" * 32,
+        risk_permit_signing_key="k" * 32,
+        agent_b3_enabled=True,
+        agent_us_enabled=True,
+    )
+    monkeypatch.setattr(instrument_registry, "settings", configured)
+    roster = await roster_surface.ready()
+    spy = roster.active_for(Slot(SlotKind.EMA, "ALPACA_US:SPY"))
+    petr = roster.active_for(Slot(SlotKind.EMA, "XP_B3:PETR4F"))
+    assert spy is not None and petr is not None
+    buy = str(uuid4())
+    await roster.attribute(buy, spy.agent_id, instrument_id="ALPACA_US:SPY", side="BUY")
+    read: list[VenueId] = []
+
+    async def recent_orders(_limit, venue=VenueId.BINANCE_SPOT):
+        read.append(venue)
+        if venue is VenueId.XP_B3:  # the XP node is off outside its schedule
+            raise ExecutorUnavailable("xp executor unreachable")
+        if venue is VenueId.ALPACA_US:
+            return [order(buy, "BUY", "1", "500", "0", instrument_id="ALPACA_US:SPY")]
+        return []
+
+    monkeypatch.setattr(oms_surface, "recent_orders", recent_orders)
+
+    synced = await roster_surface.sync_venues()
+    # An unreachable XP node is reported for XP only and never hides the Alpaca fill.
+    assert synced == {VenueId.BINANCE_SPOT: True, VenueId.ALPACA_US: True, VenueId.XP_B3: False}
+    assert spy.book.quantity == Decimal("1") and spy.book.cost == Decimal("500")
+    assert petr.book.empty
+    assert not await roster_surface.sync_fills()
+    assert spy.book.quantity == Decimal("1")  # read twice, applied once
+
+    # A narrowed sync reads only the venue asked for.
+    read.clear()
+    assert await roster_surface.sync_fills([VenueId.ALPACA_US])
+    assert read == [VenueId.ALPACA_US]
+
+
+async def test_paper_mode_has_no_xp_or_alpaca_orders_to_read(monkeypatch, surfaces) -> None:
+    configure(monkeypatch)
+    assert await oms_surface.recent_orders(10, venue=VenueId.XP_B3) == []
+    assert await oms_surface.recent_orders(10, venue=VenueId.ALPACA_US) == []

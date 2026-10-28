@@ -143,7 +143,8 @@ async def _agent_holdings() -> dict[tuple[str, str], Decimal] | None:
     try:
         book = roster_surface.roster()
         await book.load()
-        if not await roster_surface.sync_fills():
+        # The drill's own venue: holdings elsewhere are never sold here.
+        if not await roster_surface.sync_fills([active_instruments()[INSTRUMENT].venue]):
             return None
         agents = book.agents()
     except Exception as exc:  # an unreadable roster is "unknown", never "empty"
