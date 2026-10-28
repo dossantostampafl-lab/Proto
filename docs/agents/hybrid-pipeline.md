@@ -23,12 +23,21 @@ TradingView / PROTO signals ─> fusion ─> sized candidate ─> reviewer ─> 
 
 - **LONG → BUY.** The quantity comes from the per-position risk limit:
   `risk = min(equity, R$10,000) × 0.25% × conviction`, and
-  `quantity = risk ÷ (price × stop_distance)`.
+  `quantity = risk ÷ (price × stop_distance)` (3% by default, `AGENT_STOP_DISTANCE`).
+  - The per-position budget counts what is already held: a buy only fills the room left in it,
+    and the pipeline abstains with `risk per position limit reached` when none is left.
   - The total position is capped at 1.0× of that equity (gross leverage limit).
   - The quantity is floored to the venue's lot size, and the price is rounded to its tick.
   - The order is a LIMIT at the ask with time in force IOC.
 - **SHORT → SELL.** Sells only existing holdings (`reduce_only`). Spot cannot open a short, so
   the pipeline abstains when there is nothing to sell.
+- **Protective stop (own-strategy EMA agents).** When the bid falls `AGENT_STOP_LOSS` (3%) under the
+  agent's own average cost, a SHORT of strength 1.0 is journaled as a `PROTO_STRATEGY_SIGNAL`
+  (timeframe `stop`) and goes through fusion, the Risk Engine and the OMS like any exit. It is
+  retried once a minute while the position is still there. The stop is never wider than the stop
+  the position was sized on (settings validation). TradingView agents exit on their alerts only.
+- **Bars.** The EMA agents run on `AGENT_EMA_BAR_MINUTES` bars (1 to 10 minutes); an agent's own
+  `bar_minutes` parameter wins.
 - **The pipeline abstains when:**
   - the quote is missing, older than 10 seconds, or crossed;
   - the order would fall below the venue minimum;

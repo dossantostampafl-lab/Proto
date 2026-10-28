@@ -1,4 +1,4 @@
-"""PROTO's own deterministic strategy: an EMA crossover on one-minute bars of the live mid.
+"""PROTO's own deterministic strategy: an EMA crossover on bars of the live mid (1 to 10 minutes).
 
 The strategy only produces `Signal`s (opinions). It has no order authority: every signal still
 goes through fusion, the shrink-only reviewer, the Risk Engine permit and the OMS. It is fed
@@ -146,7 +146,7 @@ class EmaCrossStrategy:
             instrument_id=instrument_id,
             direction=direction,
             strength=strength,
-            timeframe="1m",
+            timeframe=_timeframe(self.policy.bar),
             observed_at=bar_close,
             received_at=max(at, bar_close),
         )
@@ -160,6 +160,11 @@ class EmaCrossStrategy:
             }
             for instrument, book in sorted(self._books.items())
         }
+
+
+def _timeframe(bar: timedelta) -> str:
+    minutes, seconds = divmod(int(bar.total_seconds()), 60)
+    return f"{minutes}m" if not seconds else f"{int(bar.total_seconds())}s"
 
 
 def _floor(at: datetime, step: timedelta) -> datetime:

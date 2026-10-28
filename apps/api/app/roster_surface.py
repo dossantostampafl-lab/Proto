@@ -245,6 +245,45 @@ def ema_params(instrument_id: str) -> tuple[int, int] | None:
     return None
 
 
+def _ema_agent(instrument_id: str) -> TraderAgent | None:
+    """The ACTIVE EMA-pair agent (not a lab one) on ``instrument_id``, from the loaded roster."""
+
+    if _roster is None:
+        return None
+    for agent in _roster.agents():
+        if (
+            agent.active
+            and agent.slot.kind is SlotKind.EMA
+            and agent.slot.instrument_id == instrument_id
+            and "fast" in agent.params
+        ):
+            return agent
+    return None
+
+
+def ema_bar_minutes(instrument_id: str) -> int:
+    """Bar length of the EMA agent on ``instrument_id``: its own ``bar_minutes`` or the setting."""
+
+    agent = _ema_agent(instrument_id)
+    own = agent.params.get("bar_minutes") if agent is not None else None
+    return int(own) if own is not None else settings.agent_ema_bar_minutes
+
+
+def stopped_out(instrument_id: str, mid: Decimal) -> list[TraderAgent]:
+    """EMA agents on ``instrument_id`` whose own position is ``agent_stop_loss`` under cost.
+
+    The stop is measured on the agent's own book (average entry cost of what it still holds),
+    never on the account's other holdings.
+    """
+
+    agent = _ema_agent(instrument_id)
+    if agent is None or agent.book.quantity <= 0 or agent.book.cost <= 0:
+        return []
+    average = agent.book.cost / agent.book.quantity
+    floor = average * (1 - Decimal(str(settings.agent_stop_loss)))
+    return [agent] if mid <= floor else []
+
+
 def lab_params(instrument_id: str) -> dict[str, Any] | None:
     """Lab strategy params of the ACTIVE own-strategy agent on ``instrument_id``, if it has one."""
 
