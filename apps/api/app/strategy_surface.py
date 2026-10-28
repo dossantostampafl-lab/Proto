@@ -1,8 +1,11 @@
 """PROTO's own strategy, fed by the live public market stream (signals only, no order authority).
 
-Every few seconds the fresh Binance mid of each symbol is fed to the EMA-cross strategy. A
-signal it produces is journaled as PROTO_STRATEGY_SIGNAL and handed to the agent pipeline,
-exactly like an accepted TradingView alert. A missing or stale quote feeds nothing.
+Every few seconds the fresh Binance mid of each symbol is fed to the EMA-cross strategy (bars of
+1 to 10 minutes). A signal it produces is journaled as PROTO_STRATEGY_SIGNAL and handed to the
+agent pipeline, exactly like an accepted TradingView alert. A missing or stale quote feeds nothing.
+
+The same mid checks the EMA agent's protective stop: at ``agent_stop_loss`` under the agent's
+average cost a SHORT of strength 1.0 goes the same way (journaled, then fusion, Risk Engine, OMS).
 """
 
 from __future__ import annotations
@@ -12,9 +15,12 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import APIRouter
 
+from services.execution import Signal, SignalDirection, SignalSource
 from services.execution.catalog import PAPER_INSTRUMENTS
 from services.research.live import LabSignalStrategy
 from services.signals.proto_strategy import STRATEGY_ID, EmaCrossPolicy, EmaCrossStrategy
@@ -28,6 +34,9 @@ logger = logging.getLogger("proto.strategy")
 
 _POLL_SECONDS = 5.0
 _MAX_QUOTE_AGE_SECONDS = 10.0
+# A stop that was not acted on (refused, nothing filled) is sent again at most this often.
+_STOP_RETRY = timedelta(seconds=60)
+_STOP_NAMESPACE = uuid5(NAMESPACE_URL, "proto:strategy:protective-stop")
 _INSTRUMENTS = tuple(
     i for i in sorted(PAPER_INSTRUMENTS) if i.startswith("BINANCE_SPOT:") and i.endswith("USDT")
 )
@@ -64,7 +73,9 @@ _BOUNDARY = {
 strategy = EmaCrossStrategy()
 # With the agent roster on, an EMA agent whose (fast, slow) differs from the default gets its
 # own strategy instance per instrument (a replacement trades varied parameters).
-_agent_strategies: dict[tuple[str, int, int], EmaCrossStrategy] = {}
+_agent_strategies: dict[tuple[str, int, int, int], EmaCrossStrategy] = {}
+# Last protective stop sent per agent, so a stop is retried once a minute, not every tick.
+_stops_sent: dict[str, datetime] = {}
 # With agent_lab_strategies_enabled, an agent spawned with a lab strategy gets the lab adapter
 # (signals only), one per lab strategy id; warmed once per instrument when enabled.
 _lab_strategies: dict[str, LabSignalStrategy] = {}
@@ -77,6 +88,7 @@ def reset_strategy_state() -> None:
     global strategy
     strategy = EmaCrossStrategy()
     _agent_strategies.clear()
+    _stops_sent.clear()
     _lab_strategies.clear()
     _lab_warmed.clear()
     for key in _counters:
@@ -86,7 +98,7 @@ def reset_strategy_state() -> None:
 def _strategy_for(instrument_id: str) -> EmaCrossStrategy | LabSignalStrategy:
     if not settings.agent_roster_enabled:
         return strategy
-    from .roster_surface import ema_params, lab_params
+    from .roster_surface import ema_bar_minutes, ema_params, lab_params
 
     if settings.agent_lab_strategies_enabled and (lab := lab_params(instrument_id)) is not None:
         found_lab = _lab_strategies.get(lab["lab_strategy"])
@@ -96,14 +108,21 @@ def _strategy_for(instrument_id: str) -> EmaCrossStrategy | LabSignalStrategy:
             )
         return found_lab
 
-    params = ema_params(instrument_id)
-    if params is None or params == (strategy.policy.fast, strategy.policy.slow):
+    params = ema_params(instrument_id) or (strategy.policy.fast, strategy.policy.slow)
+    minutes = ema_bar_minutes(instrument_id)
+    if (*params, timedelta(minutes=minutes)) == (
+        strategy.policy.fast,
+        strategy.policy.slow,
+        strategy.policy.bar,
+    ):
         return strategy
-    key = (instrument_id, *params)
+    key = (instrument_id, *params, minutes)
     found = _agent_strategies.get(key)
     if found is None:
         fast, slow = params
-        found = _agent_strategies[key] = EmaCrossStrategy(EmaCrossPolicy(fast=fast, slow=slow))
+        found = _agent_strategies[key] = EmaCrossStrategy(
+            EmaCrossPolicy(bar=timedelta(minutes=minutes), fast=fast, slow=slow)
+        )
     return found
 
 
@@ -123,6 +142,8 @@ async def tick(now: datetime | None = None) -> int:
             await _warm_lab(chosen, instrument_id)
         signal = chosen.observe(instrument_id, mid, now)
         if signal is None:
+            signal = _protective_stop(instrument_id, quote.bid, now)
+        if signal is None:
             continue
         try:
             if await accept_internal_signal(
@@ -134,6 +155,39 @@ async def tick(now: datetime | None = None) -> int:
             _counters["journal_failures"] += 1
             logger.exception("strategy signal %s was not journaled", signal.signal_id)
     return accepted
+
+
+def _protective_stop(instrument_id: str, bid: Decimal, now: datetime) -> Signal | None:
+    """A SHORT when the EMA agent's own position is ``agent_stop_loss`` under its cost.
+
+    Measured at the bid, the price a sale would get. Signals only: fusion, the Risk Engine permit
+    and the OMS still decide, and a SHORT only ever sells the agent's own holdings.
+    """
+
+    if not settings.agent_roster_enabled:
+        return None
+    from .roster_surface import stopped_out
+
+    for agent in stopped_out(instrument_id, bid):
+        last = _stops_sent.get(agent.agent_id)
+        if last is not None and now - last < _STOP_RETRY:
+            continue
+        _stops_sent[agent.agent_id] = now
+        minute = now.replace(second=0, microsecond=0)
+        return Signal(
+            signal_id=uuid5(
+                _STOP_NAMESPACE, f"{agent.agent_id}\x00{instrument_id}\x00{minute.isoformat()}"
+            ),
+            source=SignalSource.PROTO_STRATEGY,
+            strategy_id=STRATEGY_ID,
+            instrument_id=instrument_id,
+            direction=SignalDirection.SHORT,
+            strength=1.0,
+            timeframe="stop",
+            observed_at=now,
+            received_at=now,
+        )
+    return None
 
 
 def _public_klines(instrument_id: str, minutes: int, bars: int) -> list:

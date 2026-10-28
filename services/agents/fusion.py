@@ -205,19 +205,30 @@ def build_candidate(
         sizing: dict[str, object] = {"position_quantity": position_quantity}
     else:
         side, price = "BUY", quote.ask
+        # Room is measured at the limit price the Risk Engine will check, not the bare ask.
+        tick = instrument.tick_size
+        priced = (price / tick).to_integral_value(ROUND_CEILING) * tick
         sizing_equity = conservative_equity(equity)
+        held = max(position_quantity, Decimal("0"))
         risk_budget = sizing_equity * MAX_RISK_PER_POSITION * conviction
-        risk_quantity = risk_budget / (price * policy.stop_distance)
-        exposure = max(position_quantity, Decimal("0")) * price
+        risk_quantity = risk_budget / (priced * policy.stop_distance)
+        # The 0.25% budget is per POSITION (Risk Engine): what is already held uses part of it.
+        full_quantity = sizing_equity * MAX_RISK_PER_POSITION / (priced * policy.stop_distance)
+        position_room = full_quantity - held
+        exposure = held * price
         headroom = sizing_equity * MAX_GROSS_LEVERAGE - exposure
         if headroom <= 0:
             return abstain("gross leverage limit reached", exposure=exposure)
-        quantity = _floor_to_lot(min(risk_quantity, headroom / price), instrument)
+        if position_room <= 0:
+            return abstain("risk per position limit reached", position_quantity=held)
+        quantity = _floor_to_lot(min(risk_quantity, position_room, headroom / price), instrument)
         sizing = {
             "equity": sizing_equity,
             "risk_budget": risk_budget,
             "stop_distance": policy.stop_distance,
             "conviction": conviction,
+            "position_quantity": held,
+            "position_room": position_room,
             "leverage_headroom": headroom,
         }
 

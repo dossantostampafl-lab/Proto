@@ -10,6 +10,8 @@ from .safety_policy import SafetyPolicyError, validate_runtime_mode
 _SYMBOL_RE = re.compile(r"^[A-Z0-9.-]{1,40}$")
 _ALLOWED_ALPACA_EQUITY_FEEDS = frozenset({"iex", "sip", "delayed_sip", "otc", "boats", "overnight"})
 _MIN_PRODUCTION_SECRET_LENGTH = 32
+# Bar of the own-strategy EMA cross, chosen in docs/research/short-timeframes-2026-10-28.md.
+AGENT_EMA_BAR_MINUTES_DEFAULT = 1
 
 
 class Settings(BaseSettings):
@@ -79,13 +81,20 @@ class Settings(BaseSettings):
     agent_model: str = "claude-opus-5-5"
     agent_effort: str = "low"
     agent_timeout_seconds: float = Field(default=15.0, gt=0.0, le=60.0, allow_inf_nan=False)
-    agent_stop_distance: float = Field(default=0.02, gt=0.0, lt=0.5, allow_inf_nan=False)
+    # Stop distance the pipeline sizes on: quantity = 0.25% risk / stop distance. Never below
+    # agent_stop_loss, so a stopped-out position never loses more than the budget it was sized on.
+    agent_stop_distance: float = Field(default=0.03, gt=0.0, lt=0.5, allow_inf_nan=False)
+    # Protective stop of the own-strategy (EMA) agents: a SHORT at once when the mid falls this
+    # fraction below the agent's average entry cost. Signals only; the Risk Engine and OMS decide.
+    agent_stop_loss: float = Field(default=0.03, gt=0.0, lt=0.5, allow_inf_nan=False)
+    # Bar length of the own-strategy EMA cross, in minutes (an agent's own bar_minutes wins).
+    agent_ema_bar_minutes: int = Field(default=AGENT_EMA_BAR_MINUTES_DEFAULT, ge=1, le=10)
     # Risk Engine (Phase 3). Unset key -> ephemeral per-process key (permits live seconds).
     risk_permit_signing_key: str | None = None
     # Ed25519 seed (base64, 32 bytes). Takes precedence over the HMAC key; required for canary.
     risk_permit_private_key: str | None = None
     risk_permit_ttl_seconds: float = Field(default=10.0, gt=0.0, le=60.0, allow_inf_nan=False)
-    risk_stop_distance: float = Field(default=0.02, gt=0.0, lt=0.5, allow_inf_nan=False)
+    risk_stop_distance: float = Field(default=0.03, gt=0.0, lt=0.5, allow_inf_nan=False)
     risk_price_collar_bps: float = Field(default=50.0, gt=0.0, le=500.0, allow_inf_nan=False)
     risk_max_quote_age_seconds: float = Field(default=10.0, gt=0.0, le=60.0, allow_inf_nan=False)
     # OMS (Phase 4): send approved proposals to the paper venue. Paper only.
@@ -208,6 +217,15 @@ class Settings(BaseSettings):
         if not (self.risk_permit_signing_key or self.risk_permit_private_key):
             raise ValueError(
                 "RISK_PERMIT_SIGNING_KEY or RISK_PERMIT_PRIVATE_KEY is required with the executor"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def enforce_stop_inside_sizing(self) -> Settings:
+        # Sizing on a tighter stop than the one that exits would understate the risk taken.
+        if self.agent_stop_loss > min(self.agent_stop_distance, self.risk_stop_distance):
+            raise ValueError(
+                "AGENT_STOP_LOSS must not exceed AGENT_STOP_DISTANCE or RISK_STOP_DISTANCE"
             )
         return self
 

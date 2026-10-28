@@ -809,3 +809,91 @@ async def test_paper_mode_has_no_xp_or_alpaca_orders_to_read(monkeypatch, surfac
     configure(monkeypatch)
     assert await oms_surface.recent_orders(10, venue=VenueId.XP_B3) == []
     assert await oms_surface.recent_orders(10, venue=VenueId.ALPACA_US) == []
+
+
+async def test_ema_agents_trade_the_configured_bar(monkeypatch, surfaces) -> None:
+    from datetime import timedelta as td
+
+    from apps.api.app import strategy_surface
+
+    configure(monkeypatch, agent_ema_bar_minutes=5)
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+    await roster_surface.ready()
+    chosen = strategy_surface._strategy_for(BTC)
+    assert chosen is not strategy_surface.strategy
+    assert chosen.policy.bar == td(minutes=5)
+    assert (chosen.policy.fast, chosen.policy.slow) == (5, 20)
+    strategy_surface.reset_strategy_state()
+
+
+async def test_the_protective_stop_sells_only_an_ema_agents_losing_position(
+    monkeypatch, surfaces
+) -> None:
+    from apps.api.app import strategy_surface
+
+    configure(monkeypatch)  # agent_stop_loss 3%
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+    roster = await roster_surface.ready()
+    ema = roster.active_for(ema_slot())
+    tv = roster.active_for(tv_slot())
+    now = datetime(2026, 10, 28, 12, 0, 30, tzinfo=UTC)
+    assert strategy_surface._protective_stop(BTC, Decimal("1"), now) is None  # nothing held
+
+    for agent in (ema, tv):
+        buy = str(uuid4())
+        await roster.attribute(buy, agent.agent_id, instrument_id=BTC, side="BUY")
+        await roster.apply_order(order(buy, "BUY", "0.001", "60000", "0"))
+
+    # 60000 x (1 - 3%) = 58200: above it, nothing; at it, a SHORT for the EMA agent.
+    assert strategy_surface._protective_stop(BTC, Decimal("58200.01"), now) is None
+    stop = strategy_surface._protective_stop(BTC, Decimal("58200"), now)
+    assert stop is not None
+    assert stop.direction is SignalDirection.SHORT and stop.strength == 1.0
+    assert stop.timeframe == "stop" and ema.accepts(stop) and not tv.accepts(stop)
+    # Retried once a minute while the position is still there, never every tick.
+    later = now + timedelta(seconds=30)
+    assert strategy_surface._protective_stop(BTC, Decimal("58000"), later) is None
+    again = strategy_surface._protective_stop(BTC, Decimal("58000"), now + timedelta(seconds=61))
+    assert again is not None and again.signal_id != stop.signal_id
+    strategy_surface.reset_strategy_state()
+
+
+def test_the_exit_stop_may_never_be_wider_than_the_sizing_stop() -> None:
+    with pytest.raises(ValueError, match="AGENT_STOP_LOSS"):
+        Settings(agent_stop_loss=0.05)
+    with pytest.raises(ValueError, match="AGENT_STOP_LOSS"):
+        Settings(agent_stop_loss=0.03, risk_stop_distance=0.02)
+    assert Settings().agent_stop_loss == 0.03
+    assert Settings().agent_stop_distance == Settings().risk_stop_distance == 0.03
+
+
+async def test_a_protective_stop_goes_through_risk_and_oms_as_a_sell(monkeypatch, surfaces) -> None:
+    from apps.api.app import strategy_surface
+
+    configure(monkeypatch)
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+
+    async def fx(_quote):
+        return FX
+
+    monkeypatch.setattr(roster_surface, "brl_per", fx)
+    agent_surface.buffer_signal(signal(SignalSource.PROTO_STRATEGY, "proto-ema-cross-1m"))
+    _, _, bought = await agent_surface._evaluate_agent(ema_slot())
+    assert bought is not None and bought["side"] == "BUY" and bought["status"] == "FILLED"
+    agent = roster_surface.roster().active_for(ema_slot())
+    held = agent.book.quantity
+    assert held > 0
+
+    cost = agent.book.cost / held
+    stop = strategy_surface._protective_stop(BTC, cost * Decimal("0.97"), datetime.now(UTC))
+    assert stop is not None
+    agent_surface.buffer_signal(stop)
+    _, risk, sold = await agent_surface._evaluate_agent(ema_slot())
+    assert risk is not None and risk.approved
+    assert sold is not None and sold["side"] == "SELL" and sold["status"] == "FILLED"
+    assert Decimal(sold["filled_quantity"]) == held
+    assert agent.book.quantity == 0
+    strategy_surface.reset_strategy_state()

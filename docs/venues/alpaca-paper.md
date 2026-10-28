@@ -67,8 +67,8 @@ The constitutional limits stay as they are (R$10,000 reference, 0.25% per positi
 - No fresh, sane rate means a USD reference capital of 0. The Risk Engine then sizes nothing new:
   the account abstains.
 
-**What this means for sizing.** The 0.25% risk rule with a 2% stop allows a position of about
-R$1,250 (about US$220). An agent's R$200 is about US$36. In whole shares, **SPY and QQQ cost more
+**What this means for sizing.** The 0.25% risk rule with a 3% stop allows a position of about
+R$833 (about US$150). An agent's R$200 is about US$36. In whole shares, **SPY and QQQ cost more
 than one agent's budget**, so the two US agents will normally abstain ("below one lot"). That is
 correct behaviour, not a bug. To see trades, configure lower-priced liquid symbols. Never loosen
 a limit.

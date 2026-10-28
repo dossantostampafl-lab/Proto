@@ -245,6 +245,24 @@ def test_equity_above_reference_capital_does_not_raise_size() -> None:
     assert candidate(equity=Decimal("5000")).intent.quantity == Decimal("0.00142")
 
 
+def test_a_held_position_uses_part_of_the_per_position_budget() -> None:
+    """The Risk Engine checks the 0.25% budget per POSITION: a buy only fills what is left."""
+
+    # Full budget: 10000 * 0.25% = 25 BRL risk / (350010 * 2%) = 0.003571 BTC of position.
+    full = candidate(decision=long_decision(1.0)).intent
+    assert full is not None and full.quantity == Decimal("0.00357")
+    topped = candidate(decision=long_decision(1.0), position_quantity=Decimal("0.003")).intent
+    assert topped is not None and topped.quantity == Decimal("0.00057")
+    # Held + new, at the limit price, stays inside the budget the Risk Engine measures.
+    held_and_new = (Decimal("0.003") + topped.quantity) * topped.limit_price
+    assert held_and_new * Decimal("0.02") <= Decimal("25")
+    # A lower conviction still sizes below the room left.
+    assert candidate(position_quantity=Decimal("0.001")).intent.quantity == Decimal("0.00257")
+    full_already = candidate(decision=long_decision(1.0), position_quantity=Decimal("0.0036"))
+    assert full_already.intent is None
+    assert full_already.abstain_reason == "risk per position limit reached"
+
+
 def test_gross_leverage_headroom_caps_and_blocks_buys() -> None:
     full = candidate(position_quantity=Decimal("0.03"))  # 0.03 * 350010 > 10000
     assert full.intent is None
