@@ -943,6 +943,9 @@ async def test_ema_bars_are_warmed_once_from_public_klines(monkeypatch, surfaces
     await strategy_surface._warm_ema(chosen, BTC)
     await strategy_surface._warm_ema(chosen, BTC)  # once per (instrument, pair, bar)
     assert calls == [(BTC, 1, 150 * 10 + 10)]
+    status = strategy_surface.strategy_status()
+    assert status["agent_strategies"][f"{BTC}|20/50|10m"]["bars"] == 150
+    assert status["warmed_from_klines"] == [f"{BTC}|20|50|10"]
     closes = chosen._books[BTC].closes
     assert len(closes) == 150  # slow x 3 closed 10-minute bars: the EMA is ready at once
     # Only whole bars that closed before the bar now forming.
@@ -980,6 +983,8 @@ async def test_entries_need_the_hourly_trend_and_exits_never_do(monkeypatch, sur
     assert await strategy_surface._trend_allows_entry(BTC, level + 1, now)
     assert not await strategy_surface._trend_allows_entry(BTC, level - 1, now)
     assert reads == [60]  # read once, kept for an hour
+    shown = strategy_surface.strategy_status()["trend"][BTC]
+    assert shown["ema200_1h"] == level
     assert await strategy_surface._trend_allows_entry("XP_B3:PETR4F", 1.0, now)  # Binance only
 
     def broken(*_args):
