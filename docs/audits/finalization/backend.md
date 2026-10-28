@@ -88,7 +88,7 @@ total.
 | Infra | `infra/oci/deploy/proto-deploy.sh:164`, `infra/xp-node/start-xp-node.ps1:113` | Ledgers dos executores Alpaca/XP em SQLite com coluna NUMERIC legada | Recriar o volume do ledger em janela de manutenção (com reconciliação antes/depois) ou migrar a coluna para texto |
 | Infra/API | `apps/api/app/websockets.py:11` | Origens padrão só `:5173`/`:8000`; outra porta local exige `PUBLIC_ORIGIN` | Documentar em OPERATIONS |
 | API (registrado, não alterado) | `apps/api/app/main.py:228` | Recusas 401 de comandos ainda geram uma escrita no journal por requisição (auditoria), limitadas pelo rate limit HTTP | Avaliar amostragem se virar ruído |
-| API (registrado, não alterado) | `apps/api/app/models.py:22`, `core_routes.py:516` | `KillSwitchState.LOCKED` nunca é atribuído; o ramo LOCKED→RESET_PENDING é inalcançável | Remover ou ligar a uma fonte real numa mudança própria |
+| API (registrado, não alterado) | `apps/api/app/models.py:22`, `core_routes.py:516` | `KillSwitchState.LOCKED` nunca é atribuído; o ramo LOCKED→RESET_PENDING é inalcançável | Removido numa mudança própria, depois da finalização |
 
 ## Pendências
 

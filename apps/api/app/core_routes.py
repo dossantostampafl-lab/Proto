@@ -513,10 +513,7 @@ async def killswitch_trigger() -> RuntimeState:
 
 @router.post("/killswitch/reset", response_model=RuntimeState)
 async def killswitch_reset() -> RuntimeState:
-    if runtime.kill_switch == KillSwitchState.LOCKED:
-        runtime.kill_switch = KillSwitchState.RESET_PENDING
-    else:
-        runtime.kill_switch = KillSwitchState.ARMED
+    runtime.kill_switch = KillSwitchState.ARMED
     await hub.broadcast("risk", {"type": "risk", "data": risk()})
     return runtime
 

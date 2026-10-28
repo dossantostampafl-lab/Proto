@@ -175,8 +175,9 @@ Os avisos de depreciação do three.js e do Vite foram zerados.
 - **Ativação da Alpaca:** depende do item 1 acima. Não é bloqueio do código.
 - **`AGENT_REVIEWER=claude`:** não há gerador de casos históricos, então falta evidência para a
   promoção. Continua desligado.
-- **`KillSwitchState.LOCKED`:** nunca é atribuído, então o caminho LOCKED→RESET_PENDING fica
-  inativo. Registrado, sem mudança.
+- **`KillSwitchState.LOCKED`:** nunca era atribuído, então o caminho LOCKED→RESET_PENDING ficava
+  inativo. Foi removido depois da finalização, junto com `RESET_PENDING`. O estado do runtime fica
+  só em memória, e nada persistido usava esses valores.
 - **Volatilidade no sizing:** não entra; o stop é fixo em 2%. Registrado como limitação.
 - **Produção:** merge e deploy dependem da sua autorização. Nada foi implantado nesta finalização.
 

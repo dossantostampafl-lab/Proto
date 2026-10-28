@@ -602,16 +602,21 @@ async def _from_executor(call) -> dict:
         raise HTTPException(503, "executor unavailable") from exc
 
 
-async def recent_orders(limit: int = 200) -> list[dict]:
-    """Recent Binance orders as the API already reads them (executor or in-process paper OMS).
+async def recent_orders(limit: int = 200, venue: VenueId = VENUE) -> list[dict]:
+    """Recent orders of one venue as the API already reads them (executor or in-process paper OMS).
 
     Used to fold fills into the trader agents' books; raises ExecutorUnavailable/Refused when
-    the executor cannot be read.
+    the executor cannot be read. XP_B3 and ALPACA_US exist only behind their executors: in
+    paper mode, or when that venue is not routed, they have no orders to read.
     """
 
     if executor_mode():
-        body = await executor_client().orders(limit)
+        if not _routed(venue):
+            return []
+        body = await _call_client(venue).orders(limit)
         return list(body.get("orders", []))
+    if venue is not VENUE:
+        return []
     oms, _, _ = await components()
     return [order.to_dict() for order in oms.orders[-max(1, min(limit, 500)) :]]
 

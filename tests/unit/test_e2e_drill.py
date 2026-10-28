@@ -171,7 +171,7 @@ def _wire(
 
     monkeypatch.setattr(roster_surface, "roster", lambda: FakeRoster(agents))
 
-    async def sync_fills():
+    async def sync_fills(_venues=None):
         return synced
 
     monkeypatch.setattr(roster_surface, "sync_fills", sync_fills)

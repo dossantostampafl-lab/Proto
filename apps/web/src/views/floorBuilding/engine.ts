@@ -11,7 +11,7 @@ export type SceneAgent = { id: string; kind: Kind; floor: FloorId; status: "ACTI
 export type Anchor = { x: number; y: number; visible: boolean };
 export type Pick = { type: "floor"; id: FloorId } | { type: "agent"; id: string } | null;
 
-export const FLOORS: FloorId[] = ["binance", "xp"]; // bottom to top
+export const FLOORS: FloorId[] = ["binance", "xp", "us"]; // bottom to top
 const W = 22, D = 15, H = 4.4, GAP = 8.4;
 const KIND_COLOR: Record<Kind, number> = { own: 0x22d3ee, tradingview: 0xb06cff };
 const AMBER = 0xffb21e;

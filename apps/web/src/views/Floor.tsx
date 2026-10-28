@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { get, WS_BASE } from "../api";
 import type { Shared } from "../main";
 import { Button, Panel, Tag } from "../ui";
-import { DeskBoundary, DeskDrawer, DeskFailed, useDeskSelection, useXpLane, XpStrip } from "./floorDesks";
+import { DeskBoundary, DeskDrawer, DeskFailed, UsStrip, useDeskSelection, useXpLane, XpStrip } from "./floorDesks";
 import { hms, TONE_LABEL } from "./floorModel";
 
 import { type FloorViewMode, useFloorViewMode } from "./floorViewPref";
@@ -195,6 +195,7 @@ export function Floor({ market }: Shared) {
   return (
     <div className={`floor-view${viewMode === "control" ? " floor-view-wide" : ""}`}>
       <XpStrip xp={xp} />
+      <UsStrip xp={xp} />
       <Panel
         title="Trading floor"
         className="floor-stage"
@@ -218,7 +219,7 @@ export function Floor({ market }: Shared) {
           buildingFailed || !canRender3d() ? <BuildingUnavailable text="Prédio indisponível: este dispositivo não roda WebGL. Use a vista Realista." /> : (
             <Fallback onError={() => setBuildingFailed(true)}>
               <Suspense fallback={<BuildingUnavailable text="Carregando prédio…" />}>
-                <FloorBuilding market={market} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} active={floor.active} xp={xp.lane} />
+                <FloorBuilding market={market} state={state} stateFresh={floor.stateFresh} actions={floor.actions} latest={floor.latest} active={floor.active} xp={xp.lane} us={xp.us} />
               </Suspense>
             </Fallback>
           )
