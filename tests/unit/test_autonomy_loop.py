@@ -124,7 +124,7 @@ def test_the_strategy_surface_feeds_only_fresh_quotes_and_hands_signals_to_the_a
         return True
 
     monkeypatch.setattr(strategy_surface, "accept_internal_signal", accept)
-    emitted = SimpleNamespace(signal_id="x")
+    emitted = SimpleNamespace(signal_id="x", direction=SignalDirection.LONG)
     monkeypatch.setattr(strategy_surface.strategy, "observe", lambda i, mid, at: emitted)
     assert asyncio.run(strategy_surface.tick(now)) == 1
     assert accepted == [(emitted, "PROTO_STRATEGY_SIGNAL", "proto-strategy")]
