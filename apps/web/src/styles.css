@@ -854,7 +854,7 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 
 /* Phones: header, then the picture with its stations, then the panels at a readable size. */
 .fc-scene.fc-photo.fc-phone { aspect-ratio: auto; overflow: visible; display: flex; flex-direction: column; gap: 10px; padding: 8px; box-sizing: border-box; }
-.fc-phone .fc-stage { position: relative; inset: auto; order: 1; width: 100%; aspect-ratio: 1672 / 941; overflow: hidden; border-radius: 6px; }
+.fc-phone .fc-stage { position: relative; inset: auto; order: 1; width: 100%; aspect-ratio: 856 / 596; overflow: hidden; border-radius: 6px; }
 .fc-phone .fc-head { position: static; order: 0; flex-wrap: wrap; padding: 6px 4px; gap: 6px; white-space: normal; background: none; border: 0; font-size: 12px; }
 .fc-phone .fc-head nav, .fc-phone .fc-me, .fc-phone .fc-head time { display: none; }
 .fc-phone .fc-head ul { margin: 0; flex-wrap: wrap; flex-basis: 100%; order: 5; }
@@ -862,7 +862,6 @@ tbody tr:hover td { background: rgba(169, 179, 190, 0.06); }
 .fc-phone .fc-panels { order: 2; display: flex; flex-direction: column; gap: 10px; }
 .fc-phone .fc-total, .fc-phone .fc-today, .fc-phone .fc-sources, .fc-phone .fc-roster, .fc-phone .fc-activity, .fc-phone .fc-queue, .fc-phone .fc-agent-detail { position: relative; left: auto; top: auto; width: auto; height: auto; padding: 12px 14px; }
 .fc-phone .fc-ico { top: 14px; right: 14px; }
-.fc-mask { position: absolute; z-index: 1; border-radius: 3px; background: linear-gradient(160deg, #0c1b38, #060f22); border: 1px solid rgba(125, 170, 255, 0.28); }
 .fc-phone .fc-roster-select { grid-template-columns: 26px minmax(0, 1fr) auto; column-gap: 8px; }
 .fc-phone .fc-roster-select > :last-child { grid-column: 2 / -1; font-weight: 400; color: #94a3b8; }
 .fc-phone .fc-today { grid-template-columns: 1fr; }

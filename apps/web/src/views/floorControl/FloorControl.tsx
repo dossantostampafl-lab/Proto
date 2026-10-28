@@ -75,10 +75,10 @@ type Rect = [number, number, number, number]; // x0, y0, x1, y1 in picture pixel
 // The panels sit on their counterparts by CSS (styles.css, "fc-photo"), in these same pixels.
 // The agent detail opens as a drawer over the right-hand column (sources and activity).
 const AT = { head: [0, 0, 1672, 56] as Rect, detail: [1262, 64, 1660, 806] as Rect };
-// On phones the panels move below the picture, so these blocks cover the picture's sample panels
-// (header, totals, sources, agents, activity, queue): none of its sample numbers ever shows.
-const SAMPLES: Rect[] = [[0, 0, 1672, 60], [22, 70, 373, 246], [609, 70, 1101, 208], [1302, 70, 1648, 336],
-  [19, 594, 416, 793], [1272, 575, 1653, 798], [17, 812, 1655, 921]];
+// On phones and narrow tablets the panels move below the picture, and the picture shows only this
+// crop: the globe and the agents' ring, clear of every sample panel (header, totals, sources, agents,
+// activity, queue), so none of its sample numbers shows and no empty block stands in for them.
+const CROP: Rect = [416, 212, 1272, 808];
 // The picture's four agent stations, each tag drawn exactly over the picture's own, in the colour of
 // the station's pedestal; further agents stand on the free floor of the ring in front of the globe.
 const STATIONS_AT: { tag: Rect; hue: number }[] = [
@@ -90,6 +90,12 @@ const STATIONS_AT: { tag: Rect; hue: number }[] = [
   { tag: [925, 655, 1125, 729], hue: 145 },
 ];
 const SPRITE = `${import.meta.env.BASE_URL}floorcontrol/robot.webp`;
+
+/** Where the picture lands when a box of width `w` shows only CROP. */
+function cropRect(w: number) {
+  const u = w / (CROP[2] - CROP[0]);
+  return { x: -CROP[0] * u, y: -CROP[1] * u, w: PHOTO.w * u, h: PHOTO.h * u };
+}
 
 /** Where the picture lands inside the box with object-fit: cover. */
 function coverRect(w: number, h: number) {
@@ -338,9 +344,15 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
   const animate = !paused && running;
   // Phones: the header, then the picture at full width with the agents on it, then the panels.
   const phone = size.w > 0 && size.w <= 760;
-  const rect = coverRect(Math.max(1, size.w), Math.max(1, size.h));
+  const rect = phone ? cropRect(size.w) : coverRect(Math.max(1, size.w), Math.max(1, size.h));
   const u = rect.w / PHOTO.w; // screen pixels per picture pixel
   const place = ([x0, y0, x1, y1]: Rect) => ({ left: rect.x + x0 * u, top: rect.y + y0 * u, width: (x1 - x0) * u, height: (y1 - y0) * u });
+  // In the crop a side station's tag would stick out of the picture: slide it back inside (it still
+  // covers the visible part of the picture's own tag, which only ever extends outwards).
+  const placeTag = (r: Rect) => {
+    const at = place(r);
+    return phone ? { ...at, left: Math.min(Math.max(at.left, 0), Math.max(0, size.w - at.width)) } : at;
+  };
   const mode = state == null ? "MODE UNAVAILABLE" : state.data_mode === "TESTNET" ? "TESTNET · NO REAL MONEY" : "PAPER / SIM · NO REAL MONEY";
   const day = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", weekday: "short", day: "2-digit", month: "short", year: "numeric" }).format(now);
   const time = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(now);
@@ -351,7 +363,7 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
         if (!a && i >= 4) return null;
         const busy = a ? busySymbols.has(a.symbol) : false;
         return (
-          <div key={i} className={`fc-bot${!a ? " free" : a.status === "ACTIVE" ? "" : " out"}`} style={place(st.tag)}>
+          <div key={i} className={`fc-bot${!a ? " free" : a.status === "ACTIVE" ? "" : " out"}`} style={placeTag(st.tag)}>
             {a && pulse[a.symbol] !== undefined && <span key={pulse[a.symbol]} className="fc-ripple" aria-hidden="true" />}
             {a ? <Avatar hue={st.hue} active={a.status === "ACTIVE"} /> : <i className="fc-avatar empty" aria-hidden="true" />}
             {a ? (
@@ -374,7 +386,6 @@ export default function FloorControl({ market, state, stateFresh, actions, lates
       <div ref={stage} className="fc-stage">
       <img className="fc-room" src={`${import.meta.env.BASE_URL}${PHOTO.src}`} alt="" aria-hidden="true" decoding="async"
         style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
-      {phone && SAMPLES.map((r, i) => <i key={i} className="fc-mask" aria-hidden="true" style={place(r)} />)}
       {stations}
       </div>
       <header className="fc-head" style={phone ? undefined : place(AT.head)}>
