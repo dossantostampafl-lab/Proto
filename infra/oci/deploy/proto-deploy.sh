@@ -117,6 +117,9 @@ alpaca_ready() {  # true once alpaca.conf exists and this role's Alpaca secrets 
     return 1
   fi
 }
+alpaca_answers() {  # alpaca_answers <port>: its public /health answers from this host
+  curl -fsS --max-time 5 "http://${EXECUTOR_IP}:$1/health" >/dev/null 2>&1
+}
 alpaca_args() {  # extra podman args for the API and the watchdog, one per line
   alpaca_ready || return 0
   local url="http://${EXECUTOR_IP}:$(alpaca_port)"
@@ -165,7 +168,13 @@ ensure_alpaca_executor() {  # ensure_alpaca_executor <image id>
     && [ "$(podman container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ] \
     && [ "$(podman container inspect --format '{{index .Config.Labels "proto.envsum"}}' "$name" 2>/dev/null)" = "$envsum" ] \
     && ! $force; then
-    return 0
+    # Running is not enough: a container that no longer answers looked healthy to every deploy
+    # while the API and the watchdog saw it "unreachable" (2026-10-29). It is recreated, with
+    # its last lines in the journal (and in setup.sh) first.
+    alpaca_answers "$port" && return 0
+    log "alpaca executor runs but does not answer on port $port; its last lines:"
+    masked_logs "$name" /run/proto/executor-alpaca.env
+    log "recreating the alpaca executor"
   fi
   podman rm -f "$name" >/dev/null 2>&1 || true
   # on-failure:5, not always: a refused key (401) stops after five tries instead of hammering
@@ -176,8 +185,14 @@ ensure_alpaca_executor() {  # ensure_alpaca_executor <image id>
     -e "EXECUTOR_SYMBOLS=$(alpaca_value ALPACA_SYMBOLS SPY,QQQ)" \
     -e EXECUTOR_DATABASE_URL=sqlite+aiosqlite:////data/executor-alpaca.db \
     "$image" uvicorn apps.executor.main:app --host "$EXECUTOR_IP" --port "$port" >/dev/null \
-    && log "alpaca executor started on port $port (paper account)" \
-    || log "alpaca executor did not start"
+    || { log "alpaca executor did not start"; return 0; }
+  log "alpaca executor started on port $port (paper account)"
+  for _ in $(seq 30); do
+    sleep 2
+    alpaca_answers "$port" && { log "alpaca executor answers on port $port"; return 0; }
+  done
+  log "alpaca executor does not answer on port $port after 60 s; its last lines:"
+  masked_logs "$name" /run/proto/executor-alpaca.env
 }
 
 start() {  # start <image id>
@@ -208,10 +223,12 @@ start() {  # start <image id>
   esac
 }
 
-# The container's last lines, with every secret value of this role replaced: a failed start shows
-# its cause in the journal (and in setup.sh) without printing a credential.
-show_logs() {
-  podman logs --tail 30 "proto-${role}" 2>&1 | python3 -c '
+# A container's last lines, with every secret value in the given env files replaced: a failed start
+# shows its cause in the journal (and in setup.sh) without printing a credential.
+masked_logs() {  # masked_logs <container> <env file>...
+  local name="$1"
+  shift
+  podman logs --tail 30 "$name" 2>&1 | python3 -c '
 import os, sys
 values = [l.split("=", 1)[1].strip() for f in sys.argv[1:] if os.path.exists(f)
           for l in open(f) if "=" in l]
@@ -220,7 +237,10 @@ for line in sys.stdin:
         if len(v) >= 16:  # tokens, keys and passwords; not the database user or name
             line = line.replace(v, "***")
     sys.stdout.write("  | " + line)
-' "$secrets" "/run/proto/${role}-db.env" || true
+' "$@" || true
+}
+show_logs() {
+  masked_logs "proto-${role}" "$secrets" "/run/proto/${role}-db.env"
 }
 
 healthy() {

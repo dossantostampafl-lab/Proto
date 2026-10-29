@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 OCI = Path("infra/oci")
@@ -255,7 +257,8 @@ def test_the_deploy_unit_leaves_the_containers_running_and_failures_show_their_c
     failure = deploy.split("if healthy; then", 1)[1]
     assert "show_logs" in failure
     show = deploy.split("show_logs() {", 1)[1].split("\n}\n", 1)[0]
-    assert '"***"' in show and '"$secrets"' in show and "-db.env" in show
+    assert '"$secrets"' in show and "-db.env" in show
+    assert '"***"' in deploy.split("masked_logs() {", 1)[1].split("\n}\n", 1)[0]
     # setup.sh shows only the script's and systemd's lines, never the raw container output.
     setup = (OCI / "deploy/setup.sh").read_text()
     assert "journalctl -u proto-deploy -t proto-deploy -t systemd" in setup
@@ -368,7 +371,6 @@ def test_a_failed_alpaca_secret_fetch_keeps_a_healthy_container() -> None:
     assert "return 0" in failed.split("podman rm -f", 1)[0]
 
 
-
 def test_the_alpaca_port_survives_a_firewall_reload() -> None:
     deploy = (OCI / "deploy/proto-deploy.sh").read_text()
     body = deploy.split("ensure_alpaca_executor() {", 1)[1].split("\n}\n", 1)[0]
@@ -378,6 +380,70 @@ def test_the_alpaca_port_survives_a_firewall_reload() -> None:
     assert opened < body.index('index .Config.Labels "proto.envsum"')
     assert 'firewall-cmd -q --add-port="${port}/tcp"' in body
     assert "firewall-cmd -q --reload" in (OCI / "deploy/bootstrap.sh").read_text()
+
+
+_ALPACA_SIM = r"""
+set -euo pipefail
+src="$1"
+fn() { sed -n "/^$1() {/,/^}/p" "$src"; }
+for f in alpaca_value alpaca_port alpaca_answers masked_logs ensure_alpaca_executor; do
+  eval "$(fn $f)"
+done
+log() { echo "LOG $*"; }
+role=executor force=false EXECUTOR_IP=10.0.0.5
+alpaca_conf="$2"
+alpaca_ready() { return 0; }
+sleep() { :; }
+firewall-cmd() { :; }
+cat() {
+  if [ "$1" = /run/proto/executor-alpaca.env ]; then shift; printf 'K=v\n'; fi
+  command cat "$@"
+}
+envsum="$(printf 'K=v\n' | command cat - "$alpaca_conf" | sha256sum | cut -c1-16)"
+podman() {
+  case "$1 $2" in
+    "container inspect")
+      case "$4" in *Image*) echo IMG ;; *Running*) echo true ;; *envsum*) echo "$envsum" ;; esac ;;
+    "logs --tail") echo "last line" ;;
+    "rm -f") echo RM >>"$CALLS" ;;
+    "run -d") echo RUN >>"$CALLS" ;;
+  esac
+}
+curl() { [ "$ANSWERS" = yes ]; }
+ensure_alpaca_executor IMG
+"""
+
+
+def test_an_alpaca_executor_that_stops_answering_is_recreated_and_its_lines_logged(
+    tmp_path: Path,
+) -> None:
+    conf = tmp_path / "alpaca.conf"
+    conf.write_text("ALPACA_EXECUTOR_PORT=8101\n")
+    script = tmp_path / "sim.sh"
+    script.write_text(_ALPACA_SIM)
+    deploy = str(OCI / "deploy/proto-deploy.sh")
+
+    def sim(answers: str) -> tuple[str, str]:
+        calls = tmp_path / f"calls-{answers}"
+        calls.write_text("")
+        done = subprocess.run(
+            ["bash", str(script), deploy, str(conf)],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "ANSWERS": answers, "CALLS": str(calls)},
+            check=True,
+        )
+        return done.stdout, calls.read_text()
+
+    out, calls = sim("yes")
+    assert calls == "" and "LOG" not in out
+    out, calls = sim("no")
+    assert "does not answer on port 8101; its last lines:" in out
+    assert "  | last line" in out
+    assert calls.split() == ["RM", "RUN"]
+    assert "after 60 s" in out
+    setup = (OCI / "deploy/setup.sh").read_text()
+    assert 'note "alpaca executor (paper): $alpaca"' in setup
 
 
 # ---------- a Binance pair that cannot sign never reaches the executor (2026-10-28) ----------
