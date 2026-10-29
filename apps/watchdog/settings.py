@@ -34,6 +34,9 @@ class WatchdogSettings(BaseSettings):
     # How long the API or the executor may stay unreachable before it counts as an outage. It
     # covers a deploy restart (image pull, migrations, warm-up); a real outage still halts.
     outage_grace_seconds: float = Field(default=180.0, ge=15.0, le=300.0, allow_inf_nan=False)
+    # false: the operator turned automatic halts off (until they turn them back on). The watchdog
+    # still probes and reports every trip, as "halts": "disabled", and halts nothing.
+    halts: bool = True
     # Fractions of the constitutional limits; the watchdog may only tighten them.
     daily_loss_fraction: Decimal = Field(default=Decimal("1"), gt=0, le=1)
     drawdown_fraction: Decimal = Field(default=Decimal("1"), gt=0, le=1)

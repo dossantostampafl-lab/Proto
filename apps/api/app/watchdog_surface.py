@@ -215,6 +215,15 @@ async def halt(
 
     _authorize(x_proto_watchdog_token)
     gov = await governor_ready()
+    if not settings.risk_automatic_kill:
+        # The operator turned automatic kills off: the trip is kept and shown, nothing is killed.
+        now = _utc_now()
+        _state.trips.append({"at": now.isoformat(), "reasons": body.reasons, "ignored": True})
+        await _persist()
+        await _journal(
+            "WATCHDOG_TRIP_IGNORED", {"watchdog_id": body.watchdog_id, "reasons": body.reasons}
+        )
+        return {"controls": gov.snapshot(), "ignored": "automatic kill disabled", **_BOUNDARY}
     already = bool(gov.snapshot()["global_kill"])
     gov.trigger_kill(KillScope.GLOBAL)
     if not await persist_controls():

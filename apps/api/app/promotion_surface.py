@@ -196,7 +196,15 @@ async def add_watchdog_evidence(body: ScopeOnlyBody) -> dict[str, object]:
     now = datetime.now(UTC)
     watch = state()
     covered = watch.coverage(now)
-    passed = watch.active(now) and covered >= MIN_COVERAGE
+    # A watchdog that may not halt (the operator turned halts or automatic kills off) is no
+    # evidence for promotion, however long it has been beating.
+    halts_off = watch.last_report.get("checks", {}).get("halts") == "disabled"
+    passed = (
+        watch.active(now)
+        and covered >= MIN_COVERAGE
+        and not halts_off
+        and settings.risk_automatic_kill
+    )
     reference = (
         f"watchdog:{watch.watchdog_id or 'none'}:covered={covered.total_seconds() / 3600:.1f}h"
         f":since={watch.covered_since.isoformat() if watch.covered_since else 'never'}"

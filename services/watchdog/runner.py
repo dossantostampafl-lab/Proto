@@ -60,6 +60,8 @@ class Watchdog:
     alpaca_executor: httpx.AsyncClient | None = None  # base_url = Alpaca executor, private net
     alpaca_executor_token: str | None = field(default=None, repr=False)
     limits: Limits = field(default_factory=Limits)
+    # Off only by the operator's choice: every trip is still reported, nothing is halted.
+    halts: bool = True
     clock: Callable[[], datetime] = _utc_now
     _checks: Checks = field(init=False)
     _api_halted: bool = field(default=False, init=False)
@@ -200,6 +202,23 @@ class Watchdog:
     async def cycle(self) -> CycleResult:
         obs = await self.observe()
         trips, status = self._checks.evaluate(obs)
+        xp_trips, xp_status = self._checks.evaluate_xp(obs)
+        us_trips, us_status = self._checks.evaluate_alpaca(obs)
+        if not self.halts:
+            if trips or xp_trips or us_trips:
+                logger.warning(
+                    "watchdog would trip (halts disabled by the operator): %s",
+                    trips + xp_trips + us_trips,
+                )
+            result = CycleResult(
+                obs.at,
+                trips + xp_trips + us_trips,
+                {**status, **xp_status, **us_status, "halts": "disabled"},
+                False,
+                False,
+            )
+            await self._heartbeat(result)
+            return result
         if trips:
             # Halt every side we can reach, every cycle the condition persists, until it took.
             logger.error("watchdog tripped: %s", trips)
@@ -209,7 +228,6 @@ class Watchdog:
             # A clear cycle ends the incident; halts stay until an operator releases them.
             self._api_halted = self._executor_halted = False
         # The XP node is its own incident: it halts the XP executor only.
-        xp_trips, xp_status = self._checks.evaluate_xp(obs)
         if xp_trips:
             logger.error("watchdog tripped on the XP node: %s", xp_trips)
             await self._halt_xp(xp_trips, obs)
@@ -218,7 +236,6 @@ class Watchdog:
         if self.xp_executor is not None:
             xp_status["xp_halted_by_watchdog"] = str(self._xp_halted).lower()
         # The Alpaca executor too: it halts the Alpaca executor only.
-        us_trips, us_status = self._checks.evaluate_alpaca(obs)
         if us_trips:
             logger.error("watchdog tripped on the Alpaca executor: %s", us_trips)
             await self._halt_alpaca(us_trips, obs)

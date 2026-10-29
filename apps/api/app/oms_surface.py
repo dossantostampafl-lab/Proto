@@ -491,10 +491,17 @@ async def _halt_venue(divergences: list[dict], venue: VenueId = VENUE) -> None:
 
     from .risk_surface import governor_ready, persist_controls
 
-    (await governor_ready()).trigger_kill(KillScope.VENUE, venue.value)
-    if not await persist_controls():
-        logger.critical("venue kill %s held in memory only", venue.value)
-    await _record("RECONCILIATION_DIVERGENCE", {"venue": venue.value, "divergences": divergences})
+    killed = settings.risk_automatic_kill
+    if killed:
+        (await governor_ready()).trigger_kill(KillScope.VENUE, venue.value)
+        if not await persist_controls():
+            logger.critical("venue kill %s held in memory only", venue.value)
+    else:
+        logger.warning("divergence on %s: automatic kill disabled by the operator", venue.value)
+    await _record(
+        "RECONCILIATION_DIVERGENCE",
+        {"venue": venue.value, "divergences": divergences, "venue_killed": killed},
+    )
     from .promotion_surface import violation
 
     await violation(venue=venue.value, kind="RECONCILIATION_DIVERGENCE", detail="ledger != venue")
