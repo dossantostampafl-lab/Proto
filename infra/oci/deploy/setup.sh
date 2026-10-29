@@ -316,6 +316,15 @@ for role in "${ROLES[@]}"; do
   else RESULT[$role.deploy]=FAILED; fi
 done
 
+# The Alpaca (paper) executor runs beside the Binance one and has no row of its own: say whether it
+# answers, as the API and the watchdog would reach it.
+if [ "${RESULT[executor.deploy]:-}" = running ]; then
+  alpaca="$(run executor '. /etc/proto/deploy.env; [ -s /etc/proto/alpaca.conf ] || { echo off; exit 0; }
+    port="$(sed -n "s/^ALPACA_EXECUTOR_PORT=//p" /etc/proto/alpaca.conf | tr -cd 0-9)"
+    curl -fsS --max-time 5 "http://${EXECUTOR_IP}:${port:-8101}/health" >/dev/null 2>&1 \
+      && echo answering || echo "NOT answering (its last lines are in the executor deploy output above)"' </dev/null)"
+fi
+
 # --- Summary -----------------------------------------------------------------------------------
 for role in "${ROLES[@]}"; do
   [ -n "${SESSION[$role]:-}" ] && oci bastion session delete --session-id "${SESSION[$role]}" --force >/dev/null 2>&1
@@ -325,5 +334,6 @@ printf '  %-9s %-10s %-10s %s\n' role bootstrap secrets deploy
 for role in "${ROLES[@]}"; do
   printf '  %-9s %-10s %-10s %s\n' "$role" "${RESULT[$role.bootstrap]:--}" "${RESULT[$role.secrets]:--}" "${RESULT[$role.deploy]:--}"
 done
+[ -n "${alpaca:-}" ] && note "alpaca executor (paper): $alpaca"
 [ -n "$DOMAIN" ] && note "dashboard: https://$DOMAIN (the certificate can take a minute after the first deploy)"
 note "full log: $LOG"
