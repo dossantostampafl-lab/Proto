@@ -261,12 +261,15 @@ def _ema_agent(instrument_id: str) -> TraderAgent | None:
     return None
 
 
-def ema_bar_minutes(instrument_id: str) -> int:
-    """Bar length of the EMA agent on ``instrument_id``: its own ``bar_minutes`` or the setting."""
+def ema_bar_seconds(instrument_id: str) -> int:
+    """Bar length, in seconds, of the EMA agent on ``instrument_id``: its own ``bar_minutes``, or
+    the setting (``agent_ema_bar_seconds`` when set, else ``agent_ema_bar_minutes``)."""
 
     agent = _ema_agent(instrument_id)
     own = agent.params.get("bar_minutes") if agent is not None else None
-    return int(own) if own is not None else settings.agent_ema_bar_minutes
+    if own is not None:
+        return int(own) * 60
+    return settings.agent_ema_bar_seconds or settings.agent_ema_bar_minutes * 60
 
 
 def stopped_out(instrument_id: str, mid: Decimal) -> list[tuple[TraderAgent, str]]:

@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     agent_take_profit: float = Field(default=0.06, ge=0.0, le=1.0, allow_inf_nan=False)
     # Bar length of the own-strategy EMA cross, in minutes (an agent's own bar_minutes wins).
     agent_ema_bar_minutes: int = Field(default=AGENT_EMA_BAR_MINUTES_DEFAULT, ge=1, le=10)
+    # Bars shorter than a minute, in seconds (5-59); wins over agent_ema_bar_minutes when set.
+    # 0 keeps minute bars. Warmed from Binance public 1s klines; the strategy polls every second.
+    agent_ema_bar_seconds: int = Field(default=0, ge=0, le=59)
     # EMA pair of every own-strategy agent (the research's best on 10-minute bars); 0 and 0 let
     # each agent trade its own ladder pair instead.
     agent_ema_fast: int = Field(default=20, ge=0, le=200)
@@ -244,6 +247,8 @@ class Settings(BaseSettings):
         pair = (self.agent_ema_fast, self.agent_ema_slow)
         if pair != (0, 0) and not 1 < pair[0] < pair[1]:
             raise ValueError("AGENT_EMA_FAST/SLOW need 1 < fast < slow (or both 0)")
+        if 0 < self.agent_ema_bar_seconds < 5:
+            raise ValueError("AGENT_EMA_BAR_SECONDS must be 0 or between 5 and 59")
         return self
 
     @model_validator(mode="after")

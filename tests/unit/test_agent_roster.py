@@ -1026,3 +1026,63 @@ async def test_entries_need_the_hourly_trend_and_exits_never_do(monkeypatch, sur
 
 async def _noop() -> None:
     return None
+
+
+async def test_ema_agents_trade_ten_second_bars_warmed_from_second_klines(
+    monkeypatch, surfaces
+) -> None:
+    from datetime import timedelta as td
+
+    from apps.api.app import strategy_surface
+    from services.research.data import Bar
+
+    configure(
+        monkeypatch,
+        agent_ema_bar_seconds=10,
+        agent_ema_cooldown_minutes=5,
+        agent_ema_warmup_klines=True,
+    )
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+    await roster_surface.ready()
+    chosen = strategy_surface._strategy_for(BTC)
+    assert chosen.policy.bar == td(seconds=10) and chosen.policy.cooldown == td(minutes=5)
+    assert strategy_surface._poll_seconds() == 1.0
+
+    now = datetime.now(UTC)
+    calls = []
+
+    def seconds(instrument_id, count):
+        calls.append((instrument_id, count))
+        end = int(now.timestamp()) * 1000
+        return [
+            Bar(end - (count - k) * 1000, 100.0 + k, 100.0 + k, 100.0 + k, 100.0 + k, 1.0)
+            for k in range(count)
+        ]
+
+    def minutes(*_args):
+        raise AssertionError("second bars warm from 1s klines")
+
+    monkeypatch.setattr(strategy_surface, "ema_second_klines", seconds)
+    monkeypatch.setattr(strategy_surface, "ema_klines", minutes)
+    await strategy_surface._warm_ema(chosen, BTC)
+    await strategy_surface._warm_ema(chosen, BTC)  # once per (instrument, pair, bar)
+    assert calls == [(BTC, 150 * 10 + 10)]
+    closes = chosen._books[BTC].closes
+    assert len(closes) == 150
+    status = strategy_surface.strategy_status()
+    assert status["agent_strategies"][f"{BTC}|20/50|10s"]["bars"] == 150
+    assert status["warmed_from_klines"] == [f"{BTC}|20|50|10s"]
+    assert status["bar"] == "10s" and status["cooldown_minutes"] == 5
+    strategy_surface.reset_strategy_state()
+
+
+def test_second_bars_are_five_to_fifty_nine_seconds() -> None:
+    import pytest
+
+    from apps.api.app.settings import Settings
+
+    assert Settings(agent_ema_bar_seconds=5).agent_ema_bar_seconds == 5
+    for bad in (1, 4, 60):
+        with pytest.raises(ValueError):
+            Settings(agent_ema_bar_seconds=bad)

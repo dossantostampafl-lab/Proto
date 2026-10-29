@@ -47,7 +47,13 @@ def cache_path(symbol: str, interval: str, root: Path | None = None) -> Path:
     return (root or data_dir()) / f"{symbol}-{interval}.csv.gz"
 
 
+# Sub-minute klines (live EMA warm-up of second bars only; the research cache stays minutes).
+SECOND_INTERVALS: dict[str, int] = {"1s": 1}
+
+
 def interval_ms(interval: str) -> int:
+    if interval in SECOND_INTERVALS:
+        return SECOND_INTERVALS[interval] * 1000
     if interval not in INTERVALS:
         raise ValueError(f"unknown interval {interval!r}")
     return INTERVALS[interval] * 60_000
@@ -185,7 +191,13 @@ def check_gaps(bars: Sequence[Bar], interval: str) -> int:
 def resample(bars: Sequence[Bar], minutes: int) -> list[Bar]:
     """Aggregate bars into ``minutes`` buckets (UTC-aligned); a partial last bucket is dropped."""
 
-    step = minutes * 60_000
+    return resample_ms(bars, minutes * 60_000)
+
+
+def resample_ms(bars: Sequence[Bar], step: int) -> list[Bar]:
+    """Aggregate bars into ``step``-millisecond buckets (UTC-aligned); a partial last bucket is
+    dropped."""
+
     out: list[Bar] = []
     bucket: list[Bar] = []
     for b in bars:
