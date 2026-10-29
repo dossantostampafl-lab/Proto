@@ -141,6 +141,12 @@ ensure_alpaca_executor() {  # ensure_alpaca_executor <image id>
     podman rm -f "$name" >/dev/null 2>&1 || true
     return 0
   fi
+  # Opened on every run, before any "already running" return, and permanently too: bootstrap.sh's
+  # firewall-cmd --reload drops a live-only rule, and the running container then sat behind a closed
+  # port, "unreachable" from the API and the watchdog (2026-10-29).
+  port="$(alpaca_port)"
+  firewall-cmd -q --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
+  firewall-cmd -q --add-port="${port}/tcp" >/dev/null 2>&1 || true
   # Fetch first: a key fixed in the Vault (new secret version) must reach the container. The
   # container keeps the env it was created with, so it is recreated when that env changes.
   if ! alpaca_ready; then
@@ -161,8 +167,6 @@ ensure_alpaca_executor() {  # ensure_alpaca_executor <image id>
     && ! $force; then
     return 0
   fi
-  port="$(alpaca_port)"
-  firewall-cmd -q --add-port="${port}/tcp" >/dev/null 2>&1 || true
   podman rm -f "$name" >/dev/null 2>&1 || true
   # on-failure:5, not always: a refused key (401) stops after five tries instead of hammering
   # Alpaca; the next deploy tick (every 5 min) recreates it and tries again.
