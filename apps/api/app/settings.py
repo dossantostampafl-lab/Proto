@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # trading whole shares on the Alpaca PAPER account. Effective only while Alpaca routing is
     # configured; off, or without the Alpaca executor, the roster is exactly as before.
     agent_us_enabled: bool = False
+    # Ten more liquid Binance USDT pairs (BINANCE_MORE_INSTRUMENTS): streamed, sized, routed and
+    # traded by one more EMA agent each (virtual R$200, the same limits). Off: three pairs.
+    agent_more_pairs: bool = False
     # Seed a lab strategy's bars from Binance public klines (read-only market data) instead of
     # waiting for live mids to fill its history. Required by agent_lab_strategies_enabled.
     agent_lab_warmup_klines: bool = False

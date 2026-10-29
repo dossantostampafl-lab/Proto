@@ -45,6 +45,27 @@ PAPER_INSTRUMENTS: dict[str, TradableInstrument] = {
 }
 
 
+# More liquid Binance USDT pairs for the EMA agents, added only with settings.agent_more_pairs.
+# Not part of PAPER_INSTRUMENTS (the drills and the paper venue keep their three pairs). Grids
+# from Binance's public exchangeInfo (2026-10-29); the executor loads the testnet's own grids and
+# a mismatch rejects the order, so these only size proposals.
+BINANCE_MORE_INSTRUMENTS: dict[str, TradableInstrument] = {
+    item.instrument_id: item
+    for item in (
+        _binance_spot("BNB", "USDT", tick="0.01", lot="0.001", min_notional="5"),
+        _binance_spot("XRP", "USDT", tick="0.0001", lot="0.1", min_notional="5"),
+        _binance_spot("DOGE", "USDT", tick="0.00001", lot="1", min_notional="1"),
+        _binance_spot("ADA", "USDT", tick="0.0001", lot="0.1", min_notional="5"),
+        _binance_spot("AVAX", "USDT", tick="0.001", lot="0.01", min_notional="5"),
+        _binance_spot("LINK", "USDT", tick="0.001", lot="0.01", min_notional="5"),
+        _binance_spot("LTC", "USDT", tick="0.01", lot="0.001", min_notional="5"),
+        _binance_spot("DOT", "USDT", tick="0.001", lot="0.01", min_notional="5"),
+        _binance_spot("TRX", "USDT", tick="0.0001", lot="0.1", min_notional="5"),
+        _binance_spot("BCH", "USDT", tick="0.1", lot="0.001", min_notional="5"),
+    )
+}
+
+
 def _b3_fractional(symbol: str, *, asset_class: AssetClass) -> TradableInstrument:
     """B3 fractional-market symbol: a lot of one share, tick R$0.01.
 

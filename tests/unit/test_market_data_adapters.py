@@ -131,7 +131,7 @@ def test_binance_public_ticker_parser_normalizes_supported_crypto() -> None:
 
 
 def test_binance_public_ticker_parser_ignores_unsupported_symbol() -> None:
-    assert parse_binance_public_ticker_message(_binance_payload(symbol="DOGEUSDT")) == []
+    assert parse_binance_public_ticker_message(_binance_payload(symbol="PEPEUSDT")) == []
 
 
 def test_binance_public_ticker_parser_rejects_nonfinite_market_values() -> None:
@@ -156,7 +156,7 @@ def test_binance_public_adapter_is_anonymous_allowlisted_spot_only() -> None:
     assert "api_key" not in adapter.endpoint.lower()
 
     with pytest.raises(ValueError, match="unsupported Binance public products"):
-        BinancePublicMarketDataAdapter(products=("DOGEUSDT",))
+        BinancePublicMarketDataAdapter(products=("PEPEUSDT",))
 
     with pytest.raises(ValueError, match="host is not allowlisted"):
         BinancePublicMarketDataAdapter(endpoint_base="wss://example.com:9443/stream")

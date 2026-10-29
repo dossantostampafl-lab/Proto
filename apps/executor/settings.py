@@ -12,6 +12,14 @@ from services.venues.credentials import VenueEnvironment
 _MIN_SECRET = 32
 
 
+# The three original pairs and the EMA agents' ten extra ones. A symbol the testnet does not list
+# is left out at start (load_instruments), so its orders are rejected; the rest still trade.
+_BINANCE_DEFAULT_SYMBOLS = (
+    "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,LTCUSDT,"
+    "DOTUSDT,TRXUSDT,BCHUSDT"
+)
+
+
 class ExecutorSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="EXECUTOR_", extra="ignore", hide_input_in_errors=True
@@ -96,7 +104,7 @@ class ExecutorSettings(BaseSettings):
     def symbol_list(self) -> list[str]:
         raw = self.symbols
         if raw is None:
-            raw = "BTCUSDT,ETHUSDT,SOLUSDT" if self.venue is VenueId.BINANCE_SPOT else ""
+            raw = _BINANCE_DEFAULT_SYMBOLS if self.venue is VenueId.BINANCE_SPOT else ""
         return [s.strip().upper() for s in raw.split(",") if s.strip()]
 
     @property

@@ -389,13 +389,26 @@ async def load_instruments(
 
     owned = client is None
     http = client or httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+    url = f"{BASE_URLS[environment]}/api/v3/exchangeInfo"
     try:
         response = await http.get(
-            f"{BASE_URLS[environment]}/api/v3/exchangeInfo",
-            params={"symbols": json.dumps(sorted(set(symbols)), separators=(",", ":"))},
+            url, params={"symbols": json.dumps(sorted(set(symbols)), separators=(",", ":"))}
         )
-        response.raise_for_status()
-        body = response.json()
+        if response.status_code == 400:
+            # Binance refuses the whole list when one symbol does not exist there (-1121): ask
+            # for each symbol alone and leave out only the ones it does not list.
+            rows: list[dict] = []
+            for symbol in sorted(set(symbols)):
+                single = await http.get(url, params={"symbol": symbol})
+                if single.status_code == 400:
+                    logger.warning("%s is not listed on Binance; left out", symbol)
+                    continue
+                single.raise_for_status()
+                rows.extend(single.json().get("symbols", ()))
+            body = {"symbols": rows}
+        else:
+            response.raise_for_status()
+            body = response.json()
     finally:
         if owned:
             await http.aclose()

@@ -63,6 +63,10 @@ def instruments() -> tuple[str, ...]:
     """
 
     found = _INSTRUMENTS
+    if settings.agent_more_pairs:
+        from services.execution.catalog import BINANCE_MORE_INSTRUMENTS
+
+        found += tuple(sorted(BINANCE_MORE_INSTRUMENTS))
     if settings.agent_b3_enabled and settings.xp_routing_enabled:
         from services.agents.roster import B3_SLOTS
 

@@ -160,6 +160,23 @@ INITIAL_SLOTS: tuple[Slot, ...] = tuple(
     for kind in (SlotKind.EMA, SlotKind.TRADINGVIEW)
 )
 
+# One more own-strategy agent per extra Binance pair, added only with settings.agent_more_pairs.
+MORE_SLOTS: tuple[Slot, ...] = tuple(
+    Slot(SlotKind.EMA, f"BINANCE_SPOT:{symbol}")
+    for symbol in (
+        "BNBUSDT",
+        "XRPUSDT",
+        "DOGEUSDT",
+        "ADAUSDT",
+        "AVAXUSDT",
+        "LINKUSDT",
+        "LTCUSDT",
+        "DOTUSDT",
+        "TRXUSDT",
+        "BCHUSDT",
+    )
+)
+
 # Own-strategy agents on B3 (XP demo account), added only with settings.agent_b3_enabled and XP
 # routing configured: the two most liquid fractional symbols of the catalog.
 B3_SLOTS: tuple[Slot, ...] = tuple(

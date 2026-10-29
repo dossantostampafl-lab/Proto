@@ -38,6 +38,11 @@ _SOURCE_MESSAGE_STALE_SECONDS = 30.0
 
 def configured_public_market_adapter() -> PublicMarketDataAdapter:
     if settings.live_market_source == "BINANCE":
+        if settings.agent_more_pairs:
+            from services.market_data.binance_public_feed import MORE_BINANCE_PRODUCTS
+
+            products = ("BTCUSDT", "ETHUSDT", "SOLUSDT", *MORE_BINANCE_PRODUCTS)
+            return BinancePublicMarketDataAdapter(products=products)
         return BinancePublicMarketDataAdapter()
     return CoinbasePublicMarketDataAdapter()
 
@@ -196,9 +201,7 @@ class LiveCryptoMonitor:
         }
 
     def snapshots(self) -> list[dict[str, object]]:
-        return [
-            self._payload_for_tick(self._latest[symbol]) for symbol in sorted(self._latest)
-        ]
+        return [self._payload_for_tick(self._latest[symbol]) for symbol in sorted(self._latest)]
 
     def snapshot(self, symbol: str) -> dict[str, object] | None:
         tick = self._latest.get(symbol.upper())

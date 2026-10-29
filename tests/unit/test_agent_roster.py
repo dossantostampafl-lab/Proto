@@ -1086,3 +1086,42 @@ def test_second_bars_are_five_to_fifty_nine_seconds() -> None:
     for bad in (1, 4, 60):
         with pytest.raises(ValueError):
             Settings(agent_ema_bar_seconds=bad)
+
+
+async def test_more_pairs_add_one_ema_agent_each_and_reach_the_feed_and_the_risk_engine(
+    monkeypatch, surfaces
+) -> None:
+    from apps.api.app import instrument_registry, live_monitor, strategy_surface
+    from services.agents.roster import MORE_SLOTS
+    from services.execution.catalog import BINANCE_MORE_INSTRUMENTS, PAPER_INSTRUMENTS
+
+    configured = configure(monkeypatch, agent_more_pairs=True)
+    for module in (strategy_surface, instrument_registry, live_monitor):
+        monkeypatch.setattr(module, "settings", configured)
+    assert len(MORE_SLOTS) == len(BINANCE_MORE_INSTRUMENTS) == 10
+    assert {s.instrument_id for s in MORE_SLOTS} == set(BINANCE_MORE_INSTRUMENTS)
+    from services.market_data.binance_public_feed import MORE_BINANCE_PRODUCTS
+
+    assert {f"BINANCE_SPOT:{p}" for p in MORE_BINANCE_PRODUCTS} == set(BINANCE_MORE_INSTRUMENTS)
+    roster = await roster_surface.ready()
+    for slot in MORE_SLOTS:
+        assert roster.active_for(slot) is not None
+    assert set(BINANCE_MORE_INSTRUMENTS) <= set(strategy_surface.instruments())
+    assert set(BINANCE_MORE_INSTRUMENTS) <= set(instrument_registry.active_instruments())
+    adapter = live_monitor.configured_public_market_adapter()
+    assert "DOGE" in adapter.symbols and len(adapter.symbols) == 13
+    # The drills and the paper venue keep the three original pairs.
+    assert not set(BINANCE_MORE_INSTRUMENTS) & set(PAPER_INSTRUMENTS)
+
+
+def test_without_more_pairs_nothing_changes(monkeypatch) -> None:
+    from apps.api.app import instrument_registry, live_monitor
+    from apps.api.app.settings import Settings
+    from services.execution.catalog import PAPER_INSTRUMENTS
+
+    plain = Settings(live_market_source="BINANCE")
+    for module in (instrument_registry, live_monitor, roster_surface):
+        monkeypatch.setattr(module, "settings", plain)
+    assert instrument_registry.active_instruments() is PAPER_INSTRUMENTS
+    assert len(live_monitor.configured_public_market_adapter().symbols) == 3
+    assert len(roster_surface.roster_slots()) == 6

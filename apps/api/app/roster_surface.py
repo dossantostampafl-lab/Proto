@@ -23,6 +23,7 @@ from services.agents.roster import (
     AGENT_STARTING_CAPITAL,
     B3_SLOTS,
     INITIAL_SLOTS,
+    MORE_SLOTS,
     US_SLOTS,
     AgentEliminated,
     AgentRoster,
@@ -64,6 +65,8 @@ def roster_slots() -> tuple[Slot, ...]:
     plus the US ones when US agents are on and the Alpaca executor is configured."""
 
     slots = INITIAL_SLOTS
+    if settings.agent_more_pairs:
+        slots += MORE_SLOTS
     if settings.agent_b3_enabled and settings.xp_routing_enabled:
         slots += B3_SLOTS
     if settings.agent_us_enabled and settings.alpaca_routing_enabled:
