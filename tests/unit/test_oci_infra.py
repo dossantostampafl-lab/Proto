@@ -368,6 +368,18 @@ def test_a_failed_alpaca_secret_fetch_keeps_a_healthy_container() -> None:
     assert "return 0" in failed.split("podman rm -f", 1)[0]
 
 
+
+def test_the_alpaca_port_survives_a_firewall_reload() -> None:
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    body = deploy.split("ensure_alpaca_executor() {", 1)[1].split("\n}\n", 1)[0]
+    opened = body.index('firewall-cmd -q --permanent --add-port="${port}/tcp"')
+    # Before the shortcuts that leave a running container alone: bootstrap reloads the firewall.
+    assert opened < body.index("if ! alpaca_ready")
+    assert opened < body.index('index .Config.Labels "proto.envsum"')
+    assert 'firewall-cmd -q --add-port="${port}/tcp"' in body
+    assert "firewall-cmd -q --reload" in (OCI / "deploy/bootstrap.sh").read_text()
+
+
 # ---------- a Binance pair that cannot sign never reaches the executor (2026-10-28) ----------
 
 GOOD_KEY, GOOD_SECRET = "K" * 64, "s3cret" * 10 + "abcd"
