@@ -312,7 +312,11 @@ def risk_status() -> dict[str, object]:
                 else "configured" if settings.risk_permit_signing_key else "ephemeral"
             ),
         },
-        "controls": {**gov.snapshot(), "runtime_kill_switch": runtime.kill_switch},
+        "controls": {
+            **gov.snapshot(),
+            "runtime_kill_switch": runtime.kill_switch,
+            "automatic_kill": "on" if settings.risk_automatic_kill else "disabled_by_operator",
+        },
         "controls_persistence": controls_durability(),
         # Where the account state is read from, as /health labels it (it was always
         # "paper_ledger", even when the testnet executor's ledger was the source).

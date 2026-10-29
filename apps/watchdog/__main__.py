@@ -55,6 +55,7 @@ async def main() -> None:
                 alpaca_executor_token=settings.alpaca_executor_token.get_secret_value()
                 if settings.alpaca_executor_token
                 else None,
+                halts=settings.halts,
                 limits=Limits(
                     daily_loss_fraction=settings.daily_loss_fraction,
                     drawdown_fraction=settings.drawdown_fraction,

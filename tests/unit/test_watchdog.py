@@ -521,3 +521,89 @@ def test_a_deploy_restart_is_not_an_outage_but_a_real_one_still_trips() -> None:
     assert checks.evaluate(down)[0] == ["api_unreachable"]
     with pytest.raises(ValidationError):  # the grace is bounded: 5 min at most
         WatchdogSettings(api_url="http://api", api_token=token, outage_grace_seconds=600)
+
+
+# --- automatic kill turned off by the operator ---------------------------------------
+
+
+async def test_a_watchdog_with_halts_off_reports_every_trip_and_halts_nothing() -> None:
+    api, ex = FakeSide(), FakeSide(executor=True)
+    wd = watchdog(api, ex)
+    wd.halts = False
+    api.floor["accounts"]["USDT"] = account(equity="9890")
+    result = await wd.cycle()
+    assert result.trips == ["daily_loss:USDT"]
+    assert not result.api_halted and not result.executor_halted
+    assert api.halts == [] and ex.halts == []
+    assert api.beats[-1]["checks"]["halts"] == "disabled"
+    assert api.beats[-1]["trips"] == ["daily_loss:USDT"]
+
+
+def test_with_automatic_kill_off_a_watchdog_halt_is_kept_but_kills_nothing(
+    api_app, monkeypatch
+) -> None:
+    from apps.api.app import main, promotion_surface, risk_surface, watchdog_surface
+
+    for module in (main, promotion_surface, risk_surface, watchdog_surface):
+        monkeypatch.setattr(module.settings, "risk_automatic_kill", False)
+    token = {API_TOKEN_HEADER: WATCH}
+    with TestClient(main.app) as client:
+        halted = client.post(
+            "/v1/watchdog/halt",
+            json={"watchdog_id": "wd-1", "reasons": ["executor_unreachable"]},
+            headers=token,
+        )
+        assert halted.status_code == 200 and halted.json()["controls"]["global_kill"] is False
+        assert halted.json()["ignored"] == "automatic kill disabled"
+        status = client.get("/v1/watchdog/status").json()
+        risk = client.get("/v1/risk/status").json()
+    assert status["recent_trips"][-1]["ignored"] is True
+    assert risk["controls"]["automatic_kill"] == "disabled_by_operator"
+    assert risk["controls"]["global_kill"] is False
+
+
+def test_a_watchdog_that_may_not_halt_is_no_promotion_evidence(api_app, monkeypatch) -> None:
+    from apps.api.app import main
+
+    clock = {"now": NOW}
+    monkeypatch.setattr(api_app, "_utc_now", lambda: clock["now"])
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"]
+
+    from apps.api.app import promotion_surface
+
+    monkeypatch.setattr(promotion_surface, "datetime", Frozen)
+    scope = {
+        "account": "paper-binance-spot",
+        "venue": "BINANCE_SPOT",
+        "strategy_id": "hybrid-fusion-v1",
+        "model_version": "fusion-v1",
+        "credential_id": "paper",
+    }
+    beat = {"watchdog_id": "wd-1", "checks": {"halts": "disabled"}}
+    with TestClient(main.app) as client:
+        token = {API_TOKEN_HEADER: WATCH}
+        for _ in range(int(24 * 3600 / 20) + 2):
+            client.post("/v1/watchdog/heartbeat", json=beat, headers=token)
+            clock["now"] += timedelta(seconds=20)
+        evidence = client.post(
+            "/v1/promotion/evidence/watchdog",
+            json={"scope": scope},
+            headers={"X-Proto-Operator-Token": "o" * 32},
+        )
+    assert evidence.json()["passed"] is False
+
+
+def test_the_watchdog_halts_by_default_and_the_image_turns_automatic_kill_off() -> None:
+    from pathlib import Path
+
+    from apps.api.app.settings import Settings
+    from apps.watchdog.settings import WatchdogSettings
+
+    assert Settings().risk_automatic_kill is True
+    assert WatchdogSettings(api_url="http://api", api_token=WATCH).halts is True
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    assert "RISK_AUTOMATIC_KILL=false" in dockerfile and "WATCHDOG_HALTS=false" in dockerfile

@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # Seed a lab strategy's bars from Binance public klines (read-only market data) instead of
     # waiting for live mids to fill its history. Required by agent_lab_strategies_enabled.
     agent_lab_warmup_klines: bool = False
+    # false: the operator turned the automatic kill switches off until they turn them back on. A
+    # watchdog trip or a reconciliation divergence is journaled and shown, and kills nothing; the
+    # operator's own kill, the Risk Engine limits and the permits are unchanged.
+    risk_automatic_kill: bool = True
     # Run the closed-loop drill (signal -> permit -> executor testnet -> reconciliation) once
     # after start, when the executor backend is configured.
     e2e_drill_on_start: bool = False
