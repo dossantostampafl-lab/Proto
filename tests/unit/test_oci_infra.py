@@ -366,3 +366,158 @@ def test_a_failed_alpaca_secret_fetch_keeps_a_healthy_container() -> None:
     # A Vault hiccup must not remove a running container on the current image.
     assert failed.index("{{.State.Running}}") < failed.index("podman rm -f")
     assert "return 0" in failed.split("podman rm -f", 1)[0]
+
+
+# ---------- a Binance pair that cannot sign never reaches the executor (2026-10-28) ----------
+
+GOOD_KEY, GOOD_SECRET = "K" * 64, "s3cret" * 10 + "abcd"
+ALPACA_SECRET = "A" * 44
+
+
+def _fake_binance():
+    """A local testnet stand-in: 200 for the good pair's HMAC, -1022 for a bad signature."""
+    import hashlib
+    import hmac
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 (http.server API)
+            query, _, signature = self.path.split("?", 1)[1].rpartition("&signature=")
+            expected = hmac.new(GOOD_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+            if self.headers.get("X-MBX-APIKEY") != GOOD_KEY:
+                status, body = 401, {"code": -2015, "msg": "Invalid API-key"}
+            elif not hmac.compare_digest(signature, expected):
+                status, body = 400, {"code": -1022, "msg": "Signature is not valid."}
+            else:
+                status, body = 200, {"balances": []}
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}"
+
+
+def _env_file(path: Path, key: str, secret: str) -> Path:
+    path.write_text(
+        f"EXECUTOR_API_TOKEN=t\nPROTO_CRED_BINANCE_SPOT_TESTNET_MAIN_API_KEY={key}\n"
+        f"PROTO_CRED_BINANCE_SPOT_TESTNET_MAIN_API_SECRET={secret}\n"
+    )
+    return path
+
+
+def test_the_binance_pair_check_refuses_what_cannot_sign_and_never_prints_a_value(
+    tmp_path: Path,
+) -> None:
+    import os
+    import subprocess
+    import sys
+
+    server, url = _fake_binance()
+    checker = str(OCI / "scripts/check-binance-pair.py")
+    env = {
+        **os.environ,
+        "PROTO_BINANCE_TESTNET_URL": url,
+        "PROTO_ALPACA_SECRET": ALPACA_SECRET,
+        "NO_PROXY": "127.0.0.1",
+        "no_proxy": "127.0.0.1",
+    }
+
+    def check(key: str, secret: str, **extra: str) -> subprocess.CompletedProcess:
+        envfile = _env_file(tmp_path / "executor.env", key, secret)
+        return subprocess.run(
+            [sys.executable, checker, str(envfile)],
+            env={**env, **extra},
+            capture_output=True,
+            text=True,
+        )
+
+    try:
+        assert check(GOOD_KEY, GOOD_SECRET).returncode == 0
+        mixed = check(GOOD_KEY, ALPACA_SECRET)  # the 2026-10-28 mix-up
+        assert mixed.returncode == 3 and "Alpaca paper secret" in mixed.stderr
+        wrong = check(GOOD_KEY, "x" * 64)  # 64 characters, but not the pair's secret
+        assert wrong.returncode == 3 and "code -1022" in wrong.stderr
+        assert check("k" * 64, GOOD_SECRET).returncode == 3  # unknown key: -2015
+        assert check(GOOD_KEY, GOOD_SECRET, PROTO_ALPACA_SECRET=GOOD_SECRET).returncode == 3
+        for run in (mixed, wrong):
+            assert GOOD_KEY not in run.stderr and ALPACA_SECRET not in run.stderr
+    finally:
+        server.shutdown()
+    # Binance unreachable: the shape is right, so the pair is not refused for it.
+    down = check(GOOD_KEY, GOOD_SECRET, PROTO_BINANCE_TESTNET_URL="http://127.0.0.1:9")
+    assert down.returncode == 0 and "not verified" in down.stderr
+
+
+def test_fetch_secrets_keeps_the_previous_file_when_the_new_binance_pair_cannot_sign(
+    tmp_path: Path,
+) -> None:
+    import base64
+    import os
+    import subprocess
+
+    server, url = _fake_binance()
+    vault, fake, run_dir = tmp_path / "vault", tmp_path / "bin", tmp_path / "run"
+    vault.mkdir()
+    fake.mkdir()
+    (fake / "oci").write_text(
+        "#!/usr/bin/env python3\n"
+        "import base64, os, sys\n"
+        "a = sys.argv[1:]; name = a[a.index('--secret-name') + 1]\n"
+        "path = os.path.join(os.environ['FAKE_VAULT'], name)\n"
+        "if not os.path.exists(path): sys.exit(1)\n"
+        "print(base64.b64encode(open(path).read().encode()).decode())\n"
+    )
+    (fake / "oci").chmod(0o755)
+    for name in (
+        "proto-executor-token",
+        "proto-watchdog-executor-token",
+        "proto-permit-public-key",
+        "proto-executor-database-url",
+    ):
+        (vault / name).write_text("value-of-" + name)
+    (vault / "proto-binance-testnet-key").write_text(GOOD_KEY)
+    (vault / "proto-binance-testnet-secret").write_text(GOOD_SECRET)
+    (vault / "proto-alpaca-paper-secret").write_text(ALPACA_SECRET)
+    env = {
+        **os.environ,
+        "PATH": f"{fake}:{os.environ['PATH']}",
+        "FAKE_VAULT": str(vault),
+        "PROTO_RUN_DIR": str(run_dir),
+        "PROTO_BINANCE_TESTNET_URL": url,
+        "PROTO_CHECK_BINANCE": str((OCI / "scripts/check-binance-pair.py").resolve()),
+        "NO_PROXY": "127.0.0.1",
+        "no_proxy": "127.0.0.1",
+    }
+    script = str(OCI / "scripts/fetch-secrets.sh")
+    try:
+        first = subprocess.run(["bash", script, "executor", "v"], env=env, capture_output=True)
+        assert first.returncode == 0, first.stderr
+        written = (run_dir / "executor.env").read_text()
+        assert f"_API_SECRET={GOOD_SECRET}" in written
+        # A new Vault version holding the Alpaca secret: refused, the working file stays.
+        (vault / "proto-binance-testnet-secret").write_text(ALPACA_SECRET)
+        second = subprocess.run(["bash", script, "executor", "v"], env=env, capture_output=True)
+        assert second.returncode == 3
+        assert b"Alpaca paper secret" in second.stderr and b"binance-versions.sh" in second.stderr
+        assert (run_dir / "executor.env").read_text() == written
+        assert not [p for p in run_dir.iterdir() if p.name.startswith(".")]  # no temp left behind
+        assert base64.b64encode(ALPACA_SECRET.encode()) not in second.stderr
+    finally:
+        server.shutdown()
+
+
+def test_setup_reports_a_refused_binance_pair_without_probing_iam_and_skips_the_executor() -> None:
+    setup = (OCI / "deploy/setup.sh").read_text()
+    assert "ExecMainStatus --value proto-secrets" in setup and "exit 3" in setup
+    refused = setup[setup.index('elif [ "$rc" = 3 ]') :]
+    refused = refused[: refused.index("else RESULT")]
+    assert "binance-versions.sh" in refused and "continue" in refused and "all=false" not in refused
+    bootstrap = (OCI / "deploy/bootstrap.sh").read_text()
+    assert 'check-binance-pair.py" /usr/local/sbin/proto-check-binance-pair' in bootstrap
