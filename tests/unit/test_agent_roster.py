@@ -1026,3 +1026,102 @@ async def test_entries_need_the_hourly_trend_and_exits_never_do(monkeypatch, sur
 
 async def _noop() -> None:
     return None
+
+
+async def test_ema_agents_trade_ten_second_bars_warmed_from_second_klines(
+    monkeypatch, surfaces
+) -> None:
+    from datetime import timedelta as td
+
+    from apps.api.app import strategy_surface
+    from services.research.data import Bar
+
+    configure(
+        monkeypatch,
+        agent_ema_bar_seconds=10,
+        agent_ema_cooldown_minutes=5,
+        agent_ema_warmup_klines=True,
+    )
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+    await roster_surface.ready()
+    chosen = strategy_surface._strategy_for(BTC)
+    assert chosen.policy.bar == td(seconds=10) and chosen.policy.cooldown == td(minutes=5)
+    assert strategy_surface._poll_seconds() == 1.0
+
+    now = datetime.now(UTC)
+    calls = []
+
+    def seconds(instrument_id, count):
+        calls.append((instrument_id, count))
+        end = int(now.timestamp()) * 1000
+        return [
+            Bar(end - (count - k) * 1000, 100.0 + k, 100.0 + k, 100.0 + k, 100.0 + k, 1.0)
+            for k in range(count)
+        ]
+
+    def minutes(*_args):
+        raise AssertionError("second bars warm from 1s klines")
+
+    monkeypatch.setattr(strategy_surface, "ema_second_klines", seconds)
+    monkeypatch.setattr(strategy_surface, "ema_klines", minutes)
+    await strategy_surface._warm_ema(chosen, BTC)
+    await strategy_surface._warm_ema(chosen, BTC)  # once per (instrument, pair, bar)
+    assert calls == [(BTC, 150 * 10 + 10)]
+    closes = chosen._books[BTC].closes
+    assert len(closes) == 150
+    status = strategy_surface.strategy_status()
+    assert status["agent_strategies"][f"{BTC}|20/50|10s"]["bars"] == 150
+    assert status["warmed_from_klines"] == [f"{BTC}|20|50|10s"]
+    assert status["bar"] == "10s" and status["cooldown_minutes"] == 5
+    strategy_surface.reset_strategy_state()
+
+
+def test_second_bars_are_five_to_fifty_nine_seconds() -> None:
+    import pytest
+
+    from apps.api.app.settings import Settings
+
+    assert Settings(agent_ema_bar_seconds=5).agent_ema_bar_seconds == 5
+    for bad in (1, 4, 60):
+        with pytest.raises(ValueError):
+            Settings(agent_ema_bar_seconds=bad)
+
+
+async def test_more_pairs_add_one_ema_agent_each_and_reach_the_feed_and_the_risk_engine(
+    monkeypatch, surfaces
+) -> None:
+    from apps.api.app import instrument_registry, live_monitor, strategy_surface
+    from services.agents.roster import MORE_SLOTS
+    from services.execution.catalog import BINANCE_MORE_INSTRUMENTS, PAPER_INSTRUMENTS
+
+    configured = configure(monkeypatch, agent_more_pairs=True)
+    for module in (strategy_surface, instrument_registry, live_monitor):
+        monkeypatch.setattr(module, "settings", configured)
+    assert len(MORE_SLOTS) == len(BINANCE_MORE_INSTRUMENTS) == 10
+    assert {s.instrument_id for s in MORE_SLOTS} == set(BINANCE_MORE_INSTRUMENTS)
+    from services.market_data.binance_public_feed import MORE_BINANCE_PRODUCTS
+
+    assert {f"BINANCE_SPOT:{p}" for p in MORE_BINANCE_PRODUCTS} == set(BINANCE_MORE_INSTRUMENTS)
+    roster = await roster_surface.ready()
+    for slot in MORE_SLOTS:
+        assert roster.active_for(slot) is not None
+    assert set(BINANCE_MORE_INSTRUMENTS) <= set(strategy_surface.instruments())
+    assert set(BINANCE_MORE_INSTRUMENTS) <= set(instrument_registry.active_instruments())
+    adapter = live_monitor.configured_public_market_adapter()
+    assert "DOGE" in adapter.symbols and len(adapter.symbols) == 13
+    # The drills and the paper venue keep the three original pairs.
+    assert not set(BINANCE_MORE_INSTRUMENTS) & set(PAPER_INSTRUMENTS)
+
+
+def test_without_more_pairs_nothing_changes(monkeypatch) -> None:
+    from apps.api.app import instrument_registry, live_monitor
+    from apps.api.app.settings import Settings
+    from services.execution.catalog import PAPER_INSTRUMENTS
+
+    plain = Settings(live_market_source="BINANCE")
+    for module in (instrument_registry, live_monitor, roster_surface):
+        monkeypatch.setattr(module, "settings", plain)
+    assert instrument_registry.active_instruments() is PAPER_INSTRUMENTS
+    assert len(live_monitor.configured_public_market_adapter().symbols) == 3
+    assert len(roster_surface.roster_slots()) == 6

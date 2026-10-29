@@ -12,7 +12,20 @@ SUPPORTED_BINANCE_SYMBOLS: dict[str, str] = {
     "BTCUSDT": "BTC",
     "ETHUSDT": "ETH",
     "SOLUSDT": "SOL",
+    # The EMA agents' extra pairs (settings.agent_more_pairs).
+    "BNBUSDT": "BNB",
+    "XRPUSDT": "XRP",
+    "DOGEUSDT": "DOGE",
+    "ADAUSDT": "ADA",
+    "AVAXUSDT": "AVAX",
+    "LINKUSDT": "LINK",
+    "LTCUSDT": "LTC",
+    "DOTUSDT": "DOT",
+    "TRXUSDT": "TRX",
+    "BCHUSDT": "BCH",
 }
+# The products streamed for the EMA agents' extra pairs (settings.agent_more_pairs).
+MORE_BINANCE_PRODUCTS: tuple[str, ...] = tuple(SUPPORTED_BINANCE_SYMBOLS)[3:]
 
 
 def _as_object(payload: str | bytes | dict[str, Any]) -> dict[str, Any]:

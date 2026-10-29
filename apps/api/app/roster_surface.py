@@ -23,6 +23,7 @@ from services.agents.roster import (
     AGENT_STARTING_CAPITAL,
     B3_SLOTS,
     INITIAL_SLOTS,
+    MORE_SLOTS,
     US_SLOTS,
     AgentEliminated,
     AgentRoster,
@@ -64,6 +65,8 @@ def roster_slots() -> tuple[Slot, ...]:
     plus the US ones when US agents are on and the Alpaca executor is configured."""
 
     slots = INITIAL_SLOTS
+    if settings.agent_more_pairs:
+        slots += MORE_SLOTS
     if settings.agent_b3_enabled and settings.xp_routing_enabled:
         slots += B3_SLOTS
     if settings.agent_us_enabled and settings.alpaca_routing_enabled:
@@ -261,12 +264,15 @@ def _ema_agent(instrument_id: str) -> TraderAgent | None:
     return None
 
 
-def ema_bar_minutes(instrument_id: str) -> int:
-    """Bar length of the EMA agent on ``instrument_id``: its own ``bar_minutes`` or the setting."""
+def ema_bar_seconds(instrument_id: str) -> int:
+    """Bar length, in seconds, of the EMA agent on ``instrument_id``: its own ``bar_minutes``, or
+    the setting (``agent_ema_bar_seconds`` when set, else ``agent_ema_bar_minutes``)."""
 
     agent = _ema_agent(instrument_id)
     own = agent.params.get("bar_minutes") if agent is not None else None
-    return int(own) if own is not None else settings.agent_ema_bar_minutes
+    if own is not None:
+        return int(own) * 60
+    return settings.agent_ema_bar_seconds or settings.agent_ema_bar_minutes * 60
 
 
 def stopped_out(instrument_id: str, mid: Decimal) -> list[tuple[TraderAgent, str]]:

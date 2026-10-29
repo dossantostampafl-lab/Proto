@@ -8,15 +8,24 @@ exactly as before. The same holds for the US equities and Alpaca routing (``ALPA
 from __future__ import annotations
 
 from services.execution import TradableInstrument
-from services.execution.catalog import B3_INSTRUMENTS, PAPER_INSTRUMENTS, US_INSTRUMENTS
+from services.execution.catalog import (
+    B3_INSTRUMENTS,
+    BINANCE_MORE_INSTRUMENTS,
+    PAPER_INSTRUMENTS,
+    US_INSTRUMENTS,
+)
 
 from .settings import settings
 
 
 def active_instruments() -> dict[str, TradableInstrument]:
-    if not (settings.xp_routing_enabled or settings.alpaca_routing_enabled):
+    if not (
+        settings.xp_routing_enabled or settings.alpaca_routing_enabled or settings.agent_more_pairs
+    ):
         return PAPER_INSTRUMENTS
     instruments = dict(PAPER_INSTRUMENTS)
+    if settings.agent_more_pairs:
+        instruments.update(BINANCE_MORE_INSTRUMENTS)
     if settings.xp_routing_enabled:
         instruments.update(B3_INSTRUMENTS)
     if settings.alpaca_routing_enabled:

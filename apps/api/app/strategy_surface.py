@@ -1,8 +1,9 @@
 """PROTO's own strategy, fed by the live public market stream (signals only, no order authority).
 
-Every few seconds the fresh Binance mid of each symbol is fed to the EMA-cross strategy (bars of
-1 to 10 minutes). A signal it produces is journaled as PROTO_STRATEGY_SIGNAL and handed to the
-agent pipeline, exactly like an accepted TradingView alert. A missing or stale quote feeds nothing.
+Every few seconds (every second for bars under a minute) the fresh Binance mid of each symbol is
+fed to the EMA-cross strategy (bars of 5 seconds to 10 minutes). A signal it produces is journaled
+as PROTO_STRATEGY_SIGNAL and handed to the agent pipeline, exactly like an accepted TradingView
+alert. A missing or stale quote feeds nothing.
 
 With ``agent_ema_warmup_klines`` the EMA bars are seeded from Binance public klines at start (no
 hours of idle warm-up after a restart), and ``agent_ema_trend_filter`` lets an entry (LONG) through
@@ -37,6 +38,8 @@ from .signal_surface import accept_internal_signal
 logger = logging.getLogger("proto.strategy")
 
 _POLL_SECONDS = 5.0
+# Bars under a minute need a mid every second (the public ticker stream updates once a second).
+_FAST_POLL_SECONDS = 1.0
 _MAX_QUOTE_AGE_SECONDS = 10.0
 # A stop that was not acted on (refused, nothing filled) is sent again at most this often.
 _STOP_RETRY = timedelta(seconds=60)
@@ -60,6 +63,10 @@ def instruments() -> tuple[str, ...]:
     """
 
     found = _INSTRUMENTS
+    if settings.agent_more_pairs:
+        from services.execution.catalog import BINANCE_MORE_INSTRUMENTS
+
+        found += tuple(sorted(BINANCE_MORE_INSTRUMENTS))
     if settings.agent_b3_enabled and settings.xp_routing_enabled:
         from services.agents.roster import B3_SLOTS
 
@@ -82,10 +89,11 @@ _BOUNDARY = {
 strategy = EmaCrossStrategy()
 # With the agent roster on, an EMA agent whose (fast, slow) differs from the default gets its
 # own strategy instance per instrument (a replacement trades varied parameters).
+# Keyed by (instrument, fast, slow, bar seconds).
 _agent_strategies: dict[tuple[str, int, int, int], EmaCrossStrategy] = {}
 # Last protective stop sent per agent, so a stop is retried once a minute, not every tick.
 _stops_sent: dict[str, datetime] = {}
-_ema_warmed: set[tuple[str, int, int, int]] = set()
+_ema_warmed: set[tuple[str, int, int, int | str]] = set()
 # instrument -> (read at, 1h EMA200 or None when the read failed)
 _trend: dict[str, tuple[datetime, float | None]] = {}
 # With agent_lab_strategies_enabled, an agent spawned with a lab strategy gets the lab adapter
@@ -112,7 +120,7 @@ def reset_strategy_state() -> None:
 def _strategy_for(instrument_id: str) -> EmaCrossStrategy | LabSignalStrategy:
     if not settings.agent_roster_enabled:
         return strategy
-    from .roster_surface import ema_bar_minutes, ema_params, lab_params
+    from .roster_surface import ema_bar_seconds, ema_params, lab_params
 
     if settings.agent_lab_strategies_enabled and (lab := lab_params(instrument_id)) is not None:
         found_lab = _lab_strategies.get(lab["lab_strategy"])
@@ -125,22 +133,22 @@ def _strategy_for(instrument_id: str) -> EmaCrossStrategy | LabSignalStrategy:
     pair = (settings.agent_ema_fast, settings.agent_ema_slow)
     if pair == (0, 0):
         pair = ema_params(instrument_id) or (strategy.policy.fast, strategy.policy.slow)
-    minutes = ema_bar_minutes(instrument_id)
+    seconds = ema_bar_seconds(instrument_id)
     cooldown = settings.agent_ema_cooldown_minutes
-    if (*pair, timedelta(minutes=minutes), timedelta(minutes=cooldown)) == (
+    if (*pair, timedelta(seconds=seconds), timedelta(minutes=cooldown)) == (
         strategy.policy.fast,
         strategy.policy.slow,
         strategy.policy.bar,
         strategy.policy.cooldown,
     ):
         return strategy
-    key = (instrument_id, *pair, minutes)
+    key = (instrument_id, *pair, seconds)
     found = _agent_strategies.get(key)
     if found is None:
         fast, slow = pair
         found = _agent_strategies[key] = EmaCrossStrategy(
             EmaCrossPolicy(
-                bar=timedelta(minutes=minutes),
+                bar=timedelta(seconds=seconds),
                 fast=fast,
                 slow=slow,
                 cooldown=timedelta(minutes=cooldown),
@@ -228,28 +236,39 @@ def _binance(instrument_id: str) -> bool:
     return instrument_id.startswith("BINANCE_SPOT:")
 
 
+def _bar_label(seconds: int) -> str:
+    return f"{seconds // 60}m" if seconds % 60 == 0 else f"{seconds}s"
+
+
 async def _warm_ema(chosen: EmaCrossStrategy, instrument_id: str) -> None:
-    """Seed the EMA bars once per (instrument, pair, bar) from Binance public 1m klines."""
+    """Seed the EMA bars once per (instrument, pair, bar) from Binance public klines: 1m klines
+    for minute bars, 1s klines for bars under a minute."""
 
     policy = chosen.policy
-    minutes = int(policy.bar.total_seconds() // 60)
-    key = (instrument_id, policy.fast, policy.slow, minutes)
+    seconds = int(policy.bar.total_seconds())
+    minute_bar = seconds % 60 == 0
+    key = (instrument_id, policy.fast, policy.slow, seconds // 60 if minute_bar else f"{seconds}s")
     if not settings.agent_ema_warmup_klines or not _binance(instrument_id) or key in _ema_warmed:
         return
     _ema_warmed.add(key)
     wanted = policy.slow * 3
+    unit = 60 if minute_bar else 1
+    per_bar = seconds // unit
     try:
-        count = wanted * minutes + minutes
-        minute_bars = await asyncio.to_thread(ema_klines, instrument_id, 1, count)
+        count = wanted * per_bar + per_bar
+        if minute_bar:
+            raw = await asyncio.to_thread(ema_klines, instrument_id, 1, count)
+        else:
+            raw = await asyncio.to_thread(ema_second_klines, instrument_id, count)
     except Exception:
         logger.exception("EMA warm-up failed for %s; it warms from live mids", instrument_id)
         return
-    from services.research.data import resample
+    from services.research.data import resample_ms
 
-    bars = minute_bars if minutes == 1 else resample(minute_bars, minutes)
+    step = seconds * 1000
+    bars = raw if per_bar == 1 else resample_ms(raw, step)
     # Only whole bars that closed before the bar now forming (resample keeps a partial tail).
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
-    step = minutes * 60_000
     closed = [b.close for b in bars if b.open_time + step <= now_ms - now_ms % step]
     chosen.warm(instrument_id, closed[-wanted:])
 
@@ -302,10 +321,20 @@ def _public_klines(instrument_id: str, minutes: int, bars: int) -> list:
     )
 
 
+def _public_second_klines(instrument_id: str, bars: int) -> list:
+    """Closed public 1s klines (read-only market data) to seed EMA bars under a minute."""
+
+    from services.research.data import download
+
+    end = datetime.now(UTC)
+    return download(instrument_id.split(":", 1)[1], "1s", end - timedelta(seconds=bars), end)
+
+
 # Replaced in tests; never called unless agent_lab_warmup_klines is on.
 lab_klines = _public_klines
 # Replaced in tests; never called unless agent_ema_warmup_klines is on.
 ema_klines = _public_klines
+ema_second_klines = _public_second_klines
 
 
 async def _warm_lab(lab: LabSignalStrategy, instrument_id: str) -> None:
@@ -329,7 +358,15 @@ async def _run() -> None:
             await tick()
         except Exception:
             logger.exception("strategy tick failed")
-        await asyncio.sleep(_POLL_SECONDS)
+        await asyncio.sleep(_poll_seconds())
+
+
+def _poll_seconds() -> float:
+    """Every second while EMA agents trade bars under a minute, else every few seconds."""
+
+    if settings.agent_roster_enabled and 0 < settings.agent_ema_bar_seconds < 60:
+        return _FAST_POLL_SECONDS
+    return _POLL_SECONDS
 
 
 @asynccontextmanager
@@ -361,9 +398,11 @@ def strategy_status() -> dict[str, object]:
         "books": strategy.status(),
         # The EMA agents' own strategies: per (instrument, pair, bar), bars held and last signal.
         "agent_strategies": {
-            f"{instrument}|{fast}/{slow}|{minutes}m": found.status().get(instrument, {})
-            for (instrument, fast, slow, minutes), found in sorted(_agent_strategies.items())
+            f"{instrument}|{fast}/{slow}|{_bar_label(seconds)}": found.status().get(instrument, {})
+            for (instrument, fast, slow, seconds), found in sorted(_agent_strategies.items())
         },
+        "bar": _bar_label(settings.agent_ema_bar_seconds or settings.agent_ema_bar_minutes * 60),
+        "cooldown_minutes": settings.agent_ema_cooldown_minutes,
         "warmed_from_klines": sorted("|".join(map(str, key)) for key in _ema_warmed),
         # 1h EMA200 per instrument for the entry filter (null: the last read failed).
         "trend": {

@@ -110,7 +110,11 @@ def test_settings_default_to_binance_and_keep_its_account_id() -> None:
     binance = ExecutorSettings(api_token=TOKEN, permit_signing_key=KEY)
     assert binance.venue is VenueId.BINANCE_SPOT
     assert binance.account_id == "binance-spot-testnet-main"
-    assert binance.symbol_list == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    from services.execution.catalog import BINANCE_MORE_INSTRUMENTS
+
+    more = [i.split(":", 1)[1] for i in BINANCE_MORE_INSTRUMENTS]
+    assert binance.symbol_list[:3] == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    assert sorted(binance.symbol_list[3:]) == sorted(more)
     assert settings().account_id == "xp-b3-testnet-main"
     assert settings().symbol_list == ["PETR4F", "BOVA11F"]
 

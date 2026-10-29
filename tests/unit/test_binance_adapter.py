@@ -310,3 +310,24 @@ async def test_smoke_tool_is_read_only(fake, monkeypatch) -> None:
     assert abs(report["clock_offset_ms"]) < 5_000
     assert SECRET not in json.dumps(report)
     assert {r.method for r in fake.requests} == {"GET"}
+
+
+async def test_a_symbol_the_venue_does_not_list_is_left_out_not_fatal() -> None:
+    from fake_binance import EXCHANGE_INFO
+
+    btc = next(row for row in EXCHANGE_INFO["symbols"] if row["symbol"] == "BTCUSDT")
+    asked: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(parse_qsl(urlsplit(str(request.url)).query))
+        asked.append(params)
+        if "symbols" in params or params.get("symbol") != "BTCUSDT":
+            return httpx.Response(400, json={"code": -1121, "msg": "Invalid symbol."})
+        return httpx.Response(200, json={"symbols": [btc]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        grids = await load_instruments(
+            ["BTCUSDT", "NOPEUSDT"], environment=VenueEnvironment.TESTNET, client=client
+        )
+    assert list(grids) == [BTC_ID]
+    assert [a.get("symbol") for a in asked[1:]] == ["BTCUSDT", "NOPEUSDT"]
