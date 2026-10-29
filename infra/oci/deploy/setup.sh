@@ -199,16 +199,29 @@ can_read() {  # prints nothing of the secret: only its content type
     --vault-id $VAULT --secret-name $2 --query 'data.\"secret-bundle-content\".\"content-type\"' \
     --raw-output 2>/dev/null" </dev/null | grep -q BASE64
 }
-secrets_ok() { run "$1" "sudo systemctl restart proto-secrets >/dev/null 2>&1 && sudo test -s /run/proto/$1.env" </dev/null; }
+# rc 3: the executor host refused a Binance pair that cannot sign (check-binance-pair.py) and kept the
+# one it had; that is not an IAM problem, so no policy form is tried for it.
+secrets_ok() {
+  run "$1" "sudo systemctl restart proto-secrets >/dev/null 2>&1 && sudo test -s /run/proto/$1.env && exit 0; \
+    [ \"\$(sudo systemctl show -p ExecMainStatus --value proto-secrets)\" = 3 ] && exit 3; exit 1" </dev/null
+}
 check_secrets() {
-  local role all=true
+  local role rc all=true
   for role in "${ROLES[@]}"; do
     [ "${RESULT[$role.bootstrap]}" = ok ] || continue
     if [ "$role" = executor ] && $BINANCE_MISSING; then
       RESULT[$role.secrets]="needs Binance keys"; note "executor: waiting for the Binance testnet key and secret"
       continue
     fi
-    if secrets_ok "$role"; then RESULT[$role.secrets]=ok; else RESULT[$role.secrets]=FAILED; all=false; fi
+    secrets_ok "$role"; rc=$?
+    if [ "$rc" = 0 ]; then RESULT[$role.secrets]=ok
+    elif [ "$rc" = 3 ]; then
+      RESULT[$role.secrets]="Binance key refused"
+      note "executor: the Binance pair in the Vault cannot sign; the executor keeps the pair it has."
+      note "  Find and restore the version that works: bash $REPO/infra/oci/scripts/binance-versions.sh"
+      run executor "sudo journalctl -u proto-secrets -n 3 --no-pager -o cat" </dev/null | sed 's/^/    /'
+      continue
+    else RESULT[$role.secrets]=FAILED; all=false; fi
     note "$role: secrets ${RESULT[$role.secrets]}"
   done
   $all

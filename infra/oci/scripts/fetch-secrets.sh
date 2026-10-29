@@ -6,11 +6,15 @@
 # Authenticates as the instance itself (instance principal): no API key on the box. Each role
 # reads only the secret names its IAM policy allows (infra/oci/iam.tf); a missing secret fails
 # the unit, so the service that needs it never starts half-configured. Values are never echoed.
+#
+# For the executor the Binance pair is checked before the new file replaces the one in use
+# (proto-check-binance-pair): a pair that cannot sign leaves the previous file in place and exits 3,
+# so a mistaken new Vault version never reaches the running executor's next restart.
 set -euo pipefail
 
 role="${1:?role}"
 vault="${2:?vault ocid}"
-out_dir=/run/proto
+out_dir="${PROTO_RUN_DIR:-/run/proto}"
 out="${out_dir}/${role}.env"
 
 case "$role" in
@@ -49,7 +53,7 @@ esac
 
 umask 077
 mkdir -p "$out_dir"
-mountpoint -q "$out_dir" || mount -t tmpfs -o size=1m,mode=0700 tmpfs "$out_dir"
+[ "$out_dir" != /run/proto ] || mountpoint -q "$out_dir" || mount -t tmpfs -o size=1m,mode=0700 tmpfs "$out_dir"
 tmp="$(mktemp "${out_dir}/.${role}.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 
@@ -64,6 +68,19 @@ while IFS='=' read -r var name; do
   fi
   printf '%s=%s\n' "$var" "$value" >>"$tmp"
 done <<<"$pairs"
+
+if [ "$role" = executor ]; then
+  # The Alpaca paper secret, when this host may read it, to catch the two being mixed up.
+  alpaca="$(oci secrets secret-bundle get-secret-bundle-by-name \
+    --auth instance_principal --vault-id "$vault" --secret-name proto-alpaca-paper-secret \
+    --query 'data."secret-bundle-content".content' --raw-output 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if ! PROTO_ALPACA_SECRET="$alpaca" "${PROTO_CHECK_BINANCE:-/usr/local/sbin/proto-check-binance-pair}" "$tmp"; then
+    unset alpaca
+    echo "kept the previous $out (restore a working version: infra/oci/scripts/binance-versions.sh)" >&2
+    exit 3
+  fi
+  unset alpaca
+fi
 
 mv "$tmp" "$out"
 trap - EXIT

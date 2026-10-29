@@ -27,6 +27,7 @@ firewall-cmd -q --reload
 
 install -d -m 0755 /etc/proto /var/lib/proto
 install -m 0750 "$here/../scripts/fetch-secrets.sh" /usr/local/sbin/proto-fetch-secrets
+install -m 0750 "$here/../scripts/check-binance-pair.py" /usr/local/sbin/proto-check-binance-pair
 install -m 0750 "$here/proto-deploy.sh" /usr/local/sbin/proto-deploy
 echo "$role" >/etc/proto/role
 cat >/etc/proto/deploy.env <<EOF
