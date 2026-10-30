@@ -86,6 +86,13 @@ ficar em `ABSTAIN` para essas dimensões até uma rota de leitura com proveniên
 A proposta `docs/research/FINROBOTS-QUANT-CONTRACT-PROPOSAL.md` (#359) é o ponto de partida.
 Nenhum especialista deve chamar essas rotas POST.
 
+**Acordado, ainda não implementado: `quant-evidence/1`** (#360, comentário de 2026-10-30).
+
+| Dono | Parte |
+|---|---|
+| Codex | Registro por envelope completo (`evidence_id` = SHA-256 do JSON canônico; instrumento canônico, modo, `observed_at` com fuso, custos com fonte e timestamp, amostras estritamente anteriores, versões, resultado em texto exato). Persistência idempotente: conteúdo diferente com o mesmo id é conflito (409), sem sobrescrita. Tabela só por migração Alembic + `init_database`. Leitura pura `services/quant/evidence.py::recent_quant_evidence(engine, *, limit=20, instrument_id=None)`: só SELECT, limite 100, `LookupError` sem engine. |
+| Claude Code | Chave `quant.evidence` (snapshot 1.4), com proveniência = `mode` do registro (nunca LIVE), timeout de 3 s e teste de ausência de efeito. |
+
 `FinRobotReport` (pydantic, `extra="forbid"`, congelado): `robot_id`, `implementation`,
 `cycle_id`, `instrument_id | None` (None = escopo SYSTEM), `stance`
 (`ABSTAIN | SUPPORT | CAUTION | VETO`), `confidence ∈ [0,1]`, `headline`, `rationale[≤8]`,
