@@ -100,7 +100,13 @@ _trend: dict[str, tuple[datetime, float | None]] = {}
 # (signals only), one per lab strategy id; warmed once per instrument when enabled.
 _lab_strategies: dict[str, LabSignalStrategy] = {}
 _lab_warmed: set[tuple[str, str]] = set()
-_counters = {"ticks": 0, "signals": 0, "journal_failures": 0, "trend_blocked": 0}
+_counters = {
+    "ticks": 0,
+    "signals": 0,
+    "journal_failures": 0,
+    "trend_blocked": 0,
+    "flat_exits_skipped": 0,
+}
 _task: asyncio.Task[None] | None = None
 
 
@@ -182,6 +188,16 @@ async def tick(now: datetime | None = None) -> int:
         ):
             _counters["trend_blocked"] += 1
             signal = None
+        if (
+            signal is not None
+            and isinstance(chosen, EmaCrossStrategy)
+            and signal.direction is SignalDirection.SHORT
+            and _agent_flat(instrument_id)
+        ):
+            # A sell with nothing to sell: the spot venue cannot short, so it was only ever
+            # journaled and abstained ("spot venue cannot open a short"). Not sent.
+            _counters["flat_exits_skipped"] += 1
+            signal = None
         if signal is None:
             signal = _protective_stop(instrument_id, quote.bid, now)
         if signal is None:
@@ -230,6 +246,14 @@ def _protective_stop(instrument_id: str, bid: Decimal, now: datetime) -> Signal 
             received_at=now,
         )
     return None
+
+
+def _agent_flat(instrument_id: str) -> bool:
+    if not settings.agent_roster_enabled:
+        return False
+    from .roster_surface import ema_flat
+
+    return ema_flat(instrument_id)
 
 
 def _binance(instrument_id: str) -> bool:

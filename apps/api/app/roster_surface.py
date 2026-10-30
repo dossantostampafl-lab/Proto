@@ -264,6 +264,14 @@ def _ema_agent(instrument_id: str) -> TraderAgent | None:
     return None
 
 
+def ema_flat(instrument_id: str) -> bool:
+    """True when the loaded roster's EMA agent on ``instrument_id`` holds nothing (a sell signal
+    then has nothing to sell on a spot venue). False when unknown (no roster or no agent)."""
+
+    agent = _ema_agent(instrument_id)
+    return agent is not None and agent.book.quantity <= 0
+
+
 def ema_bar_seconds(instrument_id: str) -> int:
     """Bar length, in seconds, of the EMA agent on ``instrument_id``: its own ``bar_minutes``, or
     the setting (``agent_ema_bar_seconds`` when set, else ``agent_ema_bar_minutes``)."""
