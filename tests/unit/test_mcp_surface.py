@@ -146,7 +146,10 @@ def test_malformed_and_batched_requests_are_refused(client):
     assert client.get("/mcp", headers=AUTH).status_code == 405
 
 
-def test_finrobot_routes(client):
+def test_finrobot_routes(client, monkeypatch):
+    # The engines branch binds real specialists; pin the unbound case so this test does not
+    # depend on which ones exist.
+    monkeypatch.setattr(finrobot_surface, "_ROBOTS_MODULE", "services.finrobots.no_such_robots")
     view = client.get("/v1/finrobots").json()
     assert view["bound"] == 0 and view["authority"] == "ADVISORY_ONLY"
     assert client.post("/v1/finrobots/cycles").status_code == 401
