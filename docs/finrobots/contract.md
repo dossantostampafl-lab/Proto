@@ -61,7 +61,7 @@ fills.
 | `agents.decisions_recent` | `GET /v1/agents/decisions/recent?limit=50` | PAPER/TESTNET | Strategy Research, Model Validator |
 | `risk.status` | `GET /v1/risk/status` | PAPER/TESTNET | Risk Guardian |
 | `market.quotes` | `agent_surface.live_quote` por instrumento ativo (`bid`, `ask`, `observed_at`, `age_seconds`; `null` sem cotação) | LIVE (pública); `UNAVAILABLE` se nenhuma | Market Intelligence |
-| `oms.orders` | `GET /v1/oms/orders?limit=50` | PAPER/TESTNET | Execution Supervisor |
+| `oms.orders` | `GET /v1/oms/orders?limit=50` (só a venue padrão `BINANCE_SPOT`; ordens XP/Alpaca ainda não entram) | PAPER/TESTNET | Execution Supervisor |
 | `oms.ledger` | `GET /v1/oms/ledger` | PAPER/TESTNET | Portfolio Intelligence |
 | `oms.executor` | `GET /v1/oms/executor/status` | PAPER/TESTNET | Execution Supervisor |
 | `reconciliation.status` | `reconciliation_service.reconciliation_status()` | PAPER/TESTNET | Audit & Recovery |
@@ -100,7 +100,7 @@ Papéis com veto: `model-validator`, `risk-guardian`, `execution-supervisor`, `a
 
 ### Orquestrador (`services/finrobots/orchestrator.py`)
 
-Snapshot lido uma vez por ciclo; cada especialista com timeout próprio (10 s); falha, timeout,
+Snapshot lido uma vez por ciclo; cada especialista com timeout próprio (10 s) e até `max(16, instrumentos + 1)` relatórios (acima disso, os mais restritivos ficam e o corte vira erro do robô); falha, timeout,
 relatório de outro robô ou de outro ciclo vira `errors[robot_id]` e não vota. Histórico de 50
 ciclos em memória. Laço contínuo (`FINROBOTS_ENABLED`, `FINROBOTS_INTERVAL_SECONDS`, mín. 5 s),
 iniciado no lifespan da API, independente de qualquer sessão do ChatGPT.

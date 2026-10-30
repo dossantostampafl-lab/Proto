@@ -297,3 +297,55 @@ def test_finrobots_package_reaches_no_venue_executor_or_api_code():
                 names = [node.module]
             found += [f"{path}:{n}" for n in names if n.startswith(forbidden)]
     assert found == []
+
+
+class Flood:
+    def __init__(self, robot_id, instruments, extra=0):
+        self.robot_id = robot_id
+        self.implementation = "flood@fixture"
+        self._instruments = instruments
+        self._extra = extra
+
+    async def analyze(self, context):
+        vetoes = [
+            report(
+                self.robot_id,
+                Stance.VETO,
+                cycle=context.cycle_id,
+                instrument=i,
+                at=context.started_at,
+            )
+            for i in self._instruments
+        ]
+        noise = [
+            report(self.robot_id, Stance.ABSTAIN, cycle=context.cycle_id, at=context.started_at)
+            for _ in range(self._extra)
+        ]
+        return noise + vetoes
+
+
+def _orchestrator_for(robot, instruments):
+    registry = FinRobotRegistry()
+    registry.bind(robot)
+
+    async def read():
+        return {}
+
+    return FinRobotOrchestrator(registry, snapshot=read, instruments=lambda: instruments)
+
+
+async def test_one_report_per_instrument_always_fits_above_the_default_cap():
+    instruments = tuple(f"XP_B3:T{n:02d}" for n in range(30))
+    orch = _orchestrator_for(Flood(FinRobotId.RISK_GUARDIAN, instruments), instruments)
+    record = await orch.run_cycle()
+    assert len(record.reports) == 30 and record.errors == {}
+    assert all(s.verdict is Verdict.BLOCK_NEW_RISK for s in record.council.scopes)
+
+
+async def test_a_flooding_robot_is_capped_keeping_its_vetoes():
+    instruments = (BTC, "BINANCE_SPOT:ETHUSDT")
+    robot = Flood(FinRobotId.RISK_GUARDIAN, instruments, extra=40)
+    record = await _orchestrator_for(robot, instruments).run_cycle()
+    assert len(record.reports) == 16
+    assert sum(r.stance is Stance.VETO for r in record.reports) == 2
+    assert record.errors == {"risk-guardian": "26 report(s) over the limit of 16 dropped"}

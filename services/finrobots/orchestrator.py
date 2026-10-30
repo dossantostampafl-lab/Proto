@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
-from .contracts import FinRobotId, FinRobotReport
+from .contracts import FinRobotId, FinRobotReport, Stance
 from .council import CouncilResult, decide
 from .registry import CycleContext, FinRobotRegistry
 
@@ -62,6 +62,15 @@ class CycleRecord:
             "reports": [r.model_dump(mode="json") for r in self.reports],
             "council": self.council.to_dict(),
         }
+
+
+_STANCE_ORDER = {Stance.VETO: 0, Stance.CAUTION: 1, Stance.SUPPORT: 2, Stance.ABSTAIN: 3}
+
+
+def _restrictiveness(item: object) -> int:
+    if isinstance(item, FinRobotReport):
+        return _STANCE_ORDER[item.stance]
+    return len(_STANCE_ORDER)  # unvalidated items go last
 
 
 def _as_reports(raw: object) -> list[object]:
@@ -114,7 +123,16 @@ class FinRobotOrchestrator:
             return [], f"failed: {type(exc).__name__}"
         reports: list[FinRobotReport] = []
         problems: list[str] = []
-        for item in _as_reports(raw)[: self._max_reports]:
+        items = _as_reports(raw)
+        # One report per instrument plus one SYSTEM report must always fit, so a per-instrument
+        # veto is never cut by the cap; the cap only bounds a robot that floods the cycle.
+        limit = max(self._max_reports, len(context.instrument_ids) + 1)
+        if len(items) > limit:
+            # Keep the most restrictive views when something has to go.
+            items.sort(key=_restrictiveness)
+            problems.append(f"{len(items) - limit} report(s) over the limit of {limit} dropped")
+            items = items[:limit]
+        for item in items:
             if isinstance(item, dict):
                 try:
                     item = FinRobotReport.model_validate(item)
