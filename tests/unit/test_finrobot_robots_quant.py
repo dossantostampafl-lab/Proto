@@ -94,8 +94,12 @@ async def test_all_eight_robots_bound_and_quant_not_authorized_to_trade():
     assert result[FinRobotId.MODEL_VALIDATOR].stance is Stance.ABSTAIN
     assert {r.cycle_id for r in result.values()} == {context.cycle_id}
     assert all(r.instrument_id == INSTRUMENT for r in result.values())
-    assert all(r.financial_connectivity is False and r.real_money_execution is False for r in result.values())
-    assert all(r.evidence[0].metrics["evidence_id"] == context.snapshot["quant.evidence"]["records"][0]["evidence_id"] for r in result.values())
+    assert all(
+        not r.financial_connectivity and not r.real_money_execution
+        for r in result.values()
+    )
+    expected_id = context.snapshot["quant.evidence"]["records"][0]["evidence_id"]
+    assert all(r.evidence[0].metrics["evidence_id"] == expected_id for r in result.values())
 
 
 @pytest.mark.asyncio
