@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from math import isfinite
 
 from services.finrobots.contracts import (
@@ -207,7 +208,7 @@ class ExecutionSupervisor:
                                     source="oms.orders",
                                     provenance=DataProvenance(source["provenance"]),
                                     observed_at=read_at,
-                                summary="An UNKNOWN order appeared in the limited OMS snapshot.",
+                                    summary="UNKNOWN order in the limited OMS snapshot.",
                                 ),
                             ),
                         )
@@ -220,6 +221,90 @@ class ExecutionSupervisor:
             cycle_id=context.cycle_id,
             stance=Stance.ABSTAIN,
             headline="Insufficient evidence to assess order execution",
+        )
+
+
+class PortfolioIntelligence:
+    robot_id = FinRobotId.PORTFOLIO_INTELLIGENCE
+    implementation = "portfolio-intelligence@1.0.0"
+
+    async def analyze(self, context: CycleContext) -> FinRobotReport:
+        snapshot = context.snapshot
+        metadata = snapshot.get("_sources")
+        sources = metadata.get("sources") if isinstance(metadata, Mapping) else None
+        source = sources.get("oms.ledger") if isinstance(sources, Mapping) else None
+        ledger = snapshot.get("oms.ledger")
+        accounts = ledger.get("accounts") if isinstance(ledger, Mapping) else None
+        evidence = []
+        unknown = False
+        if (
+            isinstance(source, Mapping)
+            and source.get("status") == "OK"
+            and source.get("provenance") in ("PAPER", "TESTNET")
+            and isinstance(source.get("read_at"), str)
+            and isinstance(ledger, Mapping)
+            and ledger.get("unavailable") is not True
+            and ledger.get("mode") == source.get("provenance")
+            and isinstance(accounts, Mapping)
+        ):
+            try:
+                read_at = datetime.fromisoformat(source["read_at"])
+                now = datetime.now(UTC)
+                valid_time = (
+                    read_at.tzinfo is not None
+                    and read_at.utcoffset() is not None
+                    and timedelta(0) <= now - read_at <= timedelta(minutes=10)
+                )
+            except (ValueError, OverflowError):
+                valid_time = False
+            if valid_time:
+                for currency, account in accounts.items():
+                    # USDT is the Binance account; other quote currencies may route to
+                    # different venues with different environment labels.
+                    if currency != "USDT":
+                        continue
+                    if not isinstance(account, Mapping):
+                        continue
+                    equity, gross = account.get("equity"), account.get("gross_exposure")
+                    if not isinstance(equity, str) or not isinstance(gross, str):
+                        continue
+                    if len(equity) > 64 or len(gross) > 64:
+                        continue
+                    try:
+                        equity_value, gross_value = Decimal(equity), Decimal(gross)
+                    except InvalidOperation:
+                        continue
+                    if gross_value == Decimal("Infinity"):
+                        unknown = True
+                        evidence.append(
+                            Evidence(
+                                source="oms.ledger",
+                                provenance=DataProvenance(source["provenance"]),
+                                observed_at=read_at,
+                                summary=f"{currency} exposure is unknown in the account snapshot.",
+                            )
+                        )
+                    elif equity_value.is_finite() and gross_value.is_finite() and gross_value >= 0:
+                        evidence.append(
+                            Evidence(
+                                source="oms.ledger",
+                                provenance=DataProvenance(source["provenance"]),
+                                observed_at=read_at,
+                                summary=f"Observed {currency} account values.",
+                                metrics={"equity": equity, "gross_exposure": gross},
+                            )
+                        )
+                    if len(evidence) == 16:
+                        break
+        return FinRobotReport(
+            robot_id=self.robot_id,
+            implementation=self.implementation,
+            cycle_id=context.cycle_id,
+            stance=Stance.CAUTION if unknown else Stance.ABSTAIN,
+            headline="Account exposure is unknown"
+            if unknown
+            else "Portfolio values are informational",
+            evidence=tuple(evidence),
         )
 
 
@@ -255,4 +340,9 @@ class AuditRecovery:
 
 
 def default_robots() -> list[FinRobot]:
-    return [MarketIntelligence(), RiskGuardian(), ExecutionSupervisor(), AuditRecovery()]
+    return [
+        MarketIntelligence(),
+        RiskGuardian(),
+        ExecutionSupervisor(),
+        AuditRecovery(),
+    ]
