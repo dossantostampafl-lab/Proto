@@ -283,3 +283,45 @@ async def test_quant_job_detects_fabricated_pipeline_result_before_success():
         assert await recent_quant_evidence(engine) == []
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_durable_quant_result_reaches_finrobot_cycle_without_chatgpt(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from apps.api.app import app_state, finrobot_surface, mcp_surface
+    from apps.api.app.main import app
+    from services.finrobots import FinRobotId, FinRobotOrchestrator, FinRobotRegistry, Stance
+    from services.finrobots.robots import default_robots
+
+    brain, engine = await brain_with_storage()
+    try:
+        monkeypatch.setattr(app_state, "persistence_engine", engine)
+        monkeypatch.setattr(
+            mcp_surface,
+            "settings",
+            mcp_surface.settings.model_copy(update={"mcp_enabled": False}),
+        )
+        assert TestClient(app).post("/mcp", json={}).status_code == 404
+        item = envelope()
+        await enqueue_quant_research(brain, item)
+        completed = await brain.run_once()
+        assert completed.state is JobState.SUCCEEDED
+
+        registry = FinRobotRegistry()
+        for robot in default_robots():
+            registry.bind(robot)
+        orchestrator = FinRobotOrchestrator(
+            registry,
+            snapshot=finrobot_surface.read_snapshot,
+            instruments=lambda: (item.instrument_id,),
+        )
+        cycle = await orchestrator.run_cycle()
+        assert not cycle.errors
+        report = next(r for r in cycle.reports if r.robot_id is FinRobotId.QUANT_RESEARCH)
+        assert report.stance is Stance.ABSTAIN
+        assert report.evidence[0].metrics["evidence_id"] == completed.result["evidence_id"]
+        assert report.evidence[0].provenance.value == "SIMULATED"
+        assert not report.real_money_execution
+    finally:
+        await engine.dispose()
