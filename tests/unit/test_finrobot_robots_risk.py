@@ -11,6 +11,15 @@ from services.finrobots.robots import default_robots  # noqa: E402
 
 def context(controls):
     snapshot = {} if controls is None else {"risk.status": {"controls": controls}}
+    snapshot["_sources"] = {
+        "sources": {
+            "risk.status": {
+                "status": "OK",
+                "provenance": "TESTNET",
+                "read_at": datetime.now(UTC).isoformat(),
+            }
+        }
+    }
     return CycleContext(uuid4(), datetime.now(UTC), ("BINANCE_SPOT:BTCUSDT",), snapshot)
 
 
@@ -33,6 +42,7 @@ async def test_risk_guardian_vetoes_global_kill_without_order_authority():
     assert result.stance is Stance.VETO
     assert result.cycle_id == ctx.cycle_id
     assert result.evidence[0].source == "risk.status"
+    assert result.evidence[0].provenance.value == "TESTNET"
     assert result.financial_connectivity is False
     assert result.real_money_execution is False
 
@@ -74,7 +84,16 @@ async def test_venue_kill_vetoes_only_instruments_in_affected_venue():
                 "controls": {
                     "killed_venues": ["BINANCE_SPOT"],
                 },
-            }
+            },
+            "_sources": {
+                "sources": {
+                    "risk.status": {
+                        "status": "OK",
+                        "provenance": "PAPER",
+                        "read_at": datetime.now(UTC).isoformat(),
+                    }
+                }
+            },
         },
     )
     reports = await guardian().analyze(ctx)
@@ -82,3 +101,10 @@ async def test_venue_kill_vetoes_only_instruments_in_affected_venue():
     assert reports[0].instrument_id == "BINANCE_SPOT:BTCUSDT"
     assert reports[0].stance is Stance.VETO
     assert reports[0].evidence[0].provenance.value == "PAPER"
+
+
+@pytest.mark.asyncio
+async def test_risk_guardian_abstains_if_provenance_is_unknown():
+    ctx = context({"global_kill": True})
+    ctx.snapshot["_sources"]["sources"]["risk.status"]["provenance"] = "UNAVAILABLE"
+    assert (await guardian().analyze(ctx)).stance is Stance.ABSTAIN

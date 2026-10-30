@@ -10,7 +10,24 @@ from services.finrobots.robots import default_robots  # noqa: E402
 
 
 def context(value):
-    return CycleContext(uuid4(), datetime.now(UTC), (), {"agents.status": value})
+    now = datetime.now(UTC)
+    return CycleContext(
+        uuid4(),
+        now,
+        (),
+        {
+            "agents.status": value,
+            "_sources": {
+                "sources": {
+                    "agents.status": {
+                        "status": "OK",
+                        "provenance": "TESTNET",
+                        "read_at": now.isoformat(),
+                    },
+                }
+            },
+        },
+    )
 
 
 def auditor():
@@ -40,4 +57,14 @@ async def test_auditor_reports_process_local_journal_failure():
     assert report.stance is Stance.CAUTION
     assert report.cycle_id == ctx.cycle_id
     assert report.evidence[0].metrics["journal_failures"] == "2"
+    assert report.evidence[0].provenance.value == "TESTNET"
     assert report.real_money_execution is False
+
+
+@pytest.mark.asyncio
+async def test_auditor_abstains_when_source_is_unavailable():
+    ctx = context({"journal_failures": 2, "stage": "PAPER"})
+    ctx.snapshot["_sources"]["sources"]["agents.status"]["status"] = "UNAVAILABLE"
+    report = await auditor().analyze(ctx)
+    assert report.stance is Stance.ABSTAIN
+    assert not report.evidence

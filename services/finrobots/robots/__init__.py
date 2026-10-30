@@ -15,6 +15,26 @@ from services.finrobots.contracts import (
 from services.finrobots.registry import CycleContext, FinRobot
 
 
+def _source_evidence(context: CycleContext, key: str) -> tuple[DataProvenance, datetime] | None:
+    metadata = context.snapshot.get("_sources")
+    sources = metadata.get("sources") if isinstance(metadata, Mapping) else None
+    source = sources.get(key) if isinstance(sources, Mapping) else None
+    if not isinstance(source, Mapping) or source.get("status") != "OK":
+        return None
+    provenance, timestamp = source.get("provenance"), source.get("read_at")
+    if provenance not in ("PAPER", "TESTNET") or not isinstance(timestamp, str):
+        return None
+    try:
+        observed = datetime.fromisoformat(timestamp)
+        if observed.tzinfo is None or observed.utcoffset() is None:
+            return None
+        if not timedelta(0) <= datetime.now(UTC) - observed <= timedelta(minutes=10):
+            return None
+    except (ValueError, OverflowError):
+        return None
+    return DataProvenance(provenance), observed
+
+
 class RiskGuardian:
     robot_id = FinRobotId.RISK_GUARDIAN
     implementation = "risk-guardian@1.0.0"
@@ -22,10 +42,16 @@ class RiskGuardian:
     async def analyze(self, context: CycleContext) -> FinRobotReport | list[FinRobotReport]:
         status = context.snapshot.get("risk.status")
         controls = status.get("controls") if isinstance(status, Mapping) else None
-        source = status.get("account_source") if isinstance(status, Mapping) else None
-        provenance = (
-            DataProvenance(source) if source in ("PAPER", "TESTNET") else DataProvenance.LIVE
-        )
+        source = _source_evidence(context, "risk.status")
+        if source is None:
+            return FinRobotReport(
+                robot_id=self.robot_id,
+                implementation=self.implementation,
+                cycle_id=context.cycle_id,
+                stance=Stance.ABSTAIN,
+                headline="Risk controls unavailable or provenance unknown",
+            )
+        provenance, observed_at = source
         active = False
         if isinstance(controls, Mapping):
             global_kill = controls.get("global_kill")
@@ -41,7 +67,7 @@ class RiskGuardian:
                 Evidence(
                     source="risk.status",
                     provenance=provenance,
-                    observed_at=context.started_at,
+                    observed_at=observed_at,
                     summary="Global runtime kill switch or lockdown is active; not a market quote.",
                 ),
             )
@@ -64,7 +90,7 @@ class RiskGuardian:
                             Evidence(
                                 source="risk.status",
                                 provenance=provenance,
-                                observed_at=context.started_at,
+                                observed_at=observed_at,
                                 summary="The instrument's venue has an active kill switch.",
                             ),
                         ),
@@ -315,13 +341,14 @@ class AuditRecovery:
     async def analyze(self, context: CycleContext) -> FinRobotReport:
         status = context.snapshot.get("agents.status")
         failures = status.get("journal_failures") if isinstance(status, Mapping) else None
-        alert = type(failures) is int and failures > 0 and status.get("stage") == "PAPER"
+        source = _source_evidence(context, "agents.status")
+        alert = type(failures) is int and failures > 0 and source is not None
         evidence = (
             (
                 Evidence(
                     source="agents.status",
-                    provenance=DataProvenance.PAPER,
-                    observed_at=context.started_at,
+                    provenance=source[0],
+                    observed_at=source[1],
                     summary="Agent decision journal failures recorded in this process since reset.",
                     metrics={"journal_failures": str(failures)},
                 ),

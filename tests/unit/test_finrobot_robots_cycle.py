@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 
 pytest.importorskip("services.finrobots.contracts", reason="requires FinRobots PR #360")
@@ -9,9 +11,16 @@ from services.finrobots.robots import default_robots  # noqa: E402
 @pytest.mark.asyncio
 async def test_real_specialists_run_through_council_without_chatgpt():
     async def snapshot():
+        now = datetime.now(UTC).isoformat()
         return {
             "risk.status": {"controls": {"global_kill": True}},
             "agents.status": {"journal_failures": 1, "stage": "PAPER"},
+            "_sources": {
+                "sources": {
+                    "risk.status": {"status": "OK", "provenance": "PAPER", "read_at": now},
+                    "agents.status": {"status": "OK", "provenance": "PAPER", "read_at": now},
+                }
+            },
         }
 
     registry = FinRobotRegistry()
