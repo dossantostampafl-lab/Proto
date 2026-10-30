@@ -29,10 +29,17 @@ for (const [pattern, why] of [
   [/window\.fetch\s*=/, "no global fetch monkey-patching"],
   [/document\.createElement/, "no imperative DOM outside React"],
 ]) assert.doesNotMatch(code, pattern, why);
-// localStorage holds one thing only: the viewer's floor view choice, in floorViewPref.ts, guarded by try/catch.
+// localStorage holds two things only: the viewer's floor view choice (floorViewPref.ts) and, at the
+// operator's request, the operator token remembered on this device (operatorTokenStore.ts).
 for (const [p, s] of files) {
-  if (p.endsWith("floorViewPref.ts") || p.endsWith(".css")) continue;
-  assert.doesNotMatch(s, /localStorage/, `${p}: operator token must not outlive the browser session (only floorViewPref.ts may use localStorage)`);
+  if (p.endsWith("floorViewPref.ts") || p.endsWith("operatorTokenStore.ts") || p.endsWith(".css")) continue;
+  assert.doesNotMatch(s, /localStorage/, `${p}: only floorViewPref.ts and operatorTokenStore.ts may use localStorage`);
+}
+const tokenStore = files.find(([p]) => p.endsWith("operatorTokenStore.ts"))?.[1] ?? "";
+assert.match(tokenStore, /const KEY = "proto\.operatorToken";/, "the operator token has its own storage key");
+assert.equal((tokenStore.match(/Storage\.\w+\(KEY/g) ?? []).length, (tokenStore.match(/Storage\.\w+\(/g) ?? []).length, "operatorTokenStore.ts touches no key but its own");
+for (const line of tokenStore.split("\n").filter(l => /window\.(local|session)Storage/.test(l))) {
+  assert.match(line, /^\s*try \{/, "every token storage access is wrapped in try/catch");
 }
 const viewPref = files.find(([p]) => p.endsWith("floorViewPref.ts"))?.[1] ?? "";
 assert.match(viewPref, /const KEY = "proto\.floor\.view";/, "the floor view choice has its own storage key");
@@ -75,7 +82,7 @@ for (const endpoint of [
 assert.match(code, /AbortController/, "network reads must be bounded");
 assert.match(code, /cache: "no-store"/, "operational reads must bypass browser cache");
 assert.match(code, /X-Proto-Operator-Token/, "operator commands must carry the operator token header");
-assert.match(code, /sessionStorage/, "operator token is session-scoped");
+assert.match(code, /sessionStorage/, "the operator token can still be kept for the session only");
 assert.match(code, /onclose/, "WebSocket loss must be handled with reconnect");
 
 // Motion is optional.

@@ -87,7 +87,8 @@ uvicorn apps.executor.main:app --port 8100   # executor (needs EXECUTOR_* and PR
   `FloorControl-*` (≤ 120 KB, no WebGL): the approved mockup picture `public/floorcontrol/room-photo.webp`
   (≤ 700 KB per file, ≤ 1.4 MB together, never preloaded) with live panels and agent tags drawn exactly
   over its sample ones, at its own pixel coordinates; its totals come from `GET /v1/floor/summary`.
-  `localStorage` is allowed only in `src/views/floorViewPref.ts`, for that view choice.
+  `localStorage` is allowed only in `src/views/floorViewPref.ts`, for that view choice, and in
+  `src/operatorTokenStore.ts`, for the operator token remembered on the operator's own device.
 
 ## PRAGMA-CORE 2.0
 
