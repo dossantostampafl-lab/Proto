@@ -225,3 +225,23 @@ async def test_evidence_only_enqueuer_fails_closed_on_mislabeled_data():
         assert await recent_quant_evidence(engine) == []
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_quant_job_detects_fabricated_pipeline_result_before_success():
+    brain, engine = await brain_with_storage()
+    try:
+        payload = envelope().model_dump(mode="json")
+        payload["result"]["net_edge"] = "0.999999"
+        await brain.enqueue(
+            "quant-research",
+            idempotency_key="fabricated-result",
+            mode="SIMULATION",
+            payload={"evidence": payload},
+        )
+        failed = await brain.run_once()
+        assert failed.state is JobState.RETRY_WAIT
+        assert "pipeline result" in failed.last_error
+        assert await recent_quant_evidence(engine) == []
+    finally:
+        await engine.dispose()
