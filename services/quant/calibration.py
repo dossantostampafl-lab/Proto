@@ -31,9 +31,9 @@ def _validated_samples(samples: Iterable[tuple[float, int | bool]]) -> list[tupl
         probability = float(probability)
         if not 0.0 <= probability <= 1.0:
             raise ValueError("probability must be between 0 and 1")
-        outcome_value = int(outcome)
-        if outcome_value not in (0, 1):
+        if not isinstance(outcome, (int, bool)) or outcome not in (0, 1):
             raise ValueError("outcome must be binary")
+        outcome_value = int(outcome)
         result.append((probability, outcome_value))
     if not result:
         raise ValueError("at least one calibration sample is required")
