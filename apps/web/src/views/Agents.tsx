@@ -4,6 +4,8 @@ import { Empty, Panel, Stat } from "../ui";
 import { bool, finiteDecimal, fmt2, isRecord, num, orDash, parseDecisions, rec, short, str, strs } from "./deskData";
 import "./agents.css";
 import { AgentConversation } from "./AgentConversation";
+import { FinRobots } from "./FinRobots";
+import { McpConnector } from "./McpConnector";
 
 // Agents dashboard: the trader roster, each agent's virtual book, the agents' latest decisions on
 // its instrument and the orchestration contracts. Read only: no prompts, credentials, job submission
@@ -102,6 +104,8 @@ export function Agents() {
       </div>}
     </Panel>
 
+    <FinRobots />
+
     <Panel title="Roster" className="agent-span">
       {view && !agents.length && <Empty>No registered agents.</Empty>}
       {agents.length > 0 && <div className="table-wrap"><table className="agent-table">
@@ -187,14 +191,17 @@ export function Agents() {
       <small className="agent-src">Source: /orchestration/status. A contract is not an agent or a successful run.</small>
     </Panel>
 
+    <McpConnector />
+
     <Panel title="Conversation & research readiness">
       <span className="tag research">CAPABILITY INVENTORY · READ ONLY</span>
       <dl className="agent-dl">
         <dt>Agent conversation</dt><dd>Explanation only, opt-in: works on a private loopback host with the operator token (public hosts connect through an SSH tunnel). Selecting an agent does not run it.</dd>
         <dt>ChatGPT sign-in</dt><dd>Opt-in private local OAuth and account-owned history; disabled by default. No paid API fallback is used.</dd>
-        <dt>FinRobot research</dt><dd>Original opt-in worker only (research, earnings, DCF, comps, IC memo, LBO). Not launched from the dashboard.</dd>
+        <dt>FinRobot specialists</dt><dd>Eight advisory specialists and a decision council (panels above). Opt-in (FINROBOTS_ENABLED); they never hold order authority.</dd>
+        <dt>ChatGPT connector (MCP)</dt><dd>Read-only MCP server at /mcp for ChatGPT developer-mode connectors, opt-in (MCP_ENABLED); ChatGPT signs in with OAuth after the operator approves with MCP_API_TOKEN. ChatGPT runs on the operator's plan; no paid API key. No tool can trade.</dd>
       </dl>
-      <small className="agent-src">Gates: docs/research/CHATGPT_CONVERSATION_AUDIT.md · <a href="https://developers.openai.com/siwc/token-sharing-open-source" target="_blank" rel="noopener noreferrer">ChatGPT plan integration requirements</a></small>
+      <small className="agent-src">Gates: docs/research/CHATGPT_CONVERSATION_AUDIT.md · docs/finrobots/chatgpt-mcp.md · <a href="https://developers.openai.com/siwc/token-sharing-open-source" target="_blank" rel="noopener noreferrer">ChatGPT plan integration requirements</a></small>
     </Panel>
   </div>;
 }

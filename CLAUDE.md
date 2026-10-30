@@ -40,7 +40,7 @@ OMS ─> paper venue | isolated executor (Binance testnet) ─> ledger ─> reco
 
 | Path | What |
 |---|---|
-| `apps/api/app/` | FastAPI app (`main:app`). Phase surfaces: `signal_surface`, `agent_surface`, `risk_surface`, `oms_surface`, `floor_surface`, `executor_client` |
+| `apps/api/app/` | FastAPI app (`main:app`). Phase surfaces: `signal_surface`, `agent_surface`, `risk_surface`, `oms_surface`, `floor_surface`, `executor_client`; `finrobot_surface` and the read-only ChatGPT MCP server `mcp_surface` (`docs/finrobots/chatgpt-mcp.md`) |
 | `apps/executor/` | Isolated executor (testnet only): OMS + ledger + one venue adapter (Binance testnet, XP demo or Alpaca paper) behind a private bearer-token API |
 | `apps/mt5_bridge/` | XP/B3 MT5 bridge (Windows, demo account only), reached only by the XP executor |
 | `apps/web/` | React + Vite dashboard. `src/views/Floor.tsx` + `floorScene.tsx` is the live trading floor |
@@ -49,6 +49,7 @@ OMS ─> paper venue | isolated executor (Binance testnet) ─> ledger ─> reco
 | `services/risk/` | Risk Engine, governor (kill switches, lockdowns), permits |
 | `services/oms/` | Order manager, transactional ledger, reconciliation, durable store |
 | `services/venues/` | Binance Spot, XP/MT5 and Alpaca **paper** (`alpaca.py`, host pinned to `paper-api.alpaca.markets`) adapters and credential loading (executor only). Alpaca: `docs/venues/alpaca-paper.md` |
+| `services/finrobots/` | FinRobot contracts (`finrobots/v1`), registry of the 8 specialists, advisory council, cycle orchestrator. Spec: `docs/finrobots/contract.md`; engines bind via `services/finrobots/robots` |
 | `services/promotion/` | Promotion gates per scope, canary policy, automatic demotion |
 | `services/watchdog/`, `apps/watchdog/` | Independent watchdog: probes API and executor, halt-only tokens, never releases |
 | `services/drills/` | Adversarial, recovery and rollback drills with reproducible digests (`python -m services.drills`) |

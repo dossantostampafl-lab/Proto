@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, b3_quotes, control_state, us_quotes
+from . import __version__, b3_quotes, control_state, finrobot_surface, mcp_oauth, us_quotes
 from .agent_surface import router as agent_router
 from .app_state import control_engine, orchestration_engine, persistence_engine
 from .conversation_surface import router as conversation_router
@@ -33,6 +33,8 @@ from .event_surface import router as event_router
 from .floor_surface import router as floor_router
 from .live_routes import router as live_router
 from .live_websockets import router as live_websocket_router
+from .mcp_surface import MCP_PATH
+from .mcp_surface import router as mcp_router
 from .observability import access_log
 from .oms_surface import router as oms_router
 from .orchestration_surface import router as orchestration_router
@@ -69,9 +71,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await control_state.current().start()
     await restore_controls()
     await restore_watchdog()
+    await mcp_oauth.restore_oauth()
     b3_feed = await b3_quotes.start_if_enabled()
     us_feed = await us_quotes.start_if_enabled()
+    await finrobot_surface.start_if_enabled()
     yield
+    await finrobot_surface.stop()
     await us_quotes.stop(us_feed)
     await b3_quotes.stop(b3_feed)
     if persistence_engine is not None:
@@ -115,6 +120,9 @@ for router in (
     signal_router,
     agent_router,
     roster_router,
+    finrobot_surface.router,
+    mcp_router,
+    mcp_oauth.router,
     risk_router,
     oms_router,
     b3_quotes.router,
@@ -199,6 +207,14 @@ _CONTENT_SECURITY_POLICY = "; ".join(
     )
 )
 
+# The OAuth consent form redirects to ChatGPT's callback after it is submitted; browsers apply
+# form-action to that redirect, so only this page also allows ChatGPT's hosts.
+_OAUTH_AUTHORIZE_POLICY = _CONTENT_SECURITY_POLICY.replace(
+    "form-action 'self'",
+    "form-action 'self' "
+    + " ".join(f"https://{host}" for host in sorted(mcp_oauth.ALLOWED_REDIRECT_HOSTS)),
+)
+
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _CREATION_PREFIX = "/creation/"
 
@@ -245,6 +261,10 @@ async def operator_authentication_policy(request: Request, call_next) -> Respons
         and request.url.path != TRADINGVIEW_WEBHOOK_PATH
         # The watchdog authenticates with its own halt-only token (watchdog_surface).
         and not request.url.path.startswith(WATCHDOG_PREFIX)
+        # The read-only MCP server authenticates with its own bearer token (mcp_surface), and
+        # its OAuth endpoints with PKCE and the operator typing MCP_API_TOKEN (mcp_oauth).
+        and request.url.path != MCP_PATH
+        and not request.url.path.startswith(mcp_oauth.OAUTH_PREFIX)
     )
     if authentication_required and mutating_operator_route:
         if expected is None:
@@ -303,7 +323,9 @@ async def dashboard_http_policy(request: Request, call_next) -> Response:
     elif path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
 
-    response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
+    response.headers["Content-Security-Policy"] = (
+        _OAUTH_AUTHORIZE_POLICY if path == mcp_oauth.AUTHORIZE_PATH else _CONTENT_SECURITY_POLICY
+    )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
