@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import hmac
 import html
@@ -94,9 +95,22 @@ OAUTH_STATE_KEY = "mcp_oauth"
 _persist_lock = asyncio.Lock()
 
 
+_FINGERPRINT_SALT = b"proto-mcp-oauth-fingerprint/1"
+_FINGERPRINT_ITERATIONS = 200_000
+
+
+@functools.lru_cache(maxsize=4)
+def _derive_fingerprint(secret: str) -> str:
+    # A slow key derivation, not a plain hash: the value is stored, and must not be a cheap way
+    # to test guesses of MCP_API_TOKEN.
+    return hashlib.pbkdf2_hmac(
+        "sha256", secret.encode(), _FINGERPRINT_SALT, _FINGERPRINT_ITERATIONS
+    ).hex()
+
+
 def _token_fingerprint() -> str:
     # Persisted grants belong to one MCP_API_TOKEN: rotating it signs every connector out.
-    return _digest(f"proto-mcp-oauth:{settings.mcp_api_token or ''}")
+    return _derive_fingerprint(settings.mcp_api_token or "")
 
 
 def _document() -> dict[str, Any]:

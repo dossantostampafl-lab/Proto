@@ -283,16 +283,37 @@ def test_static_token_still_works(client):
 
 
 @pytest.fixture
-def durable_store(tmp_path):
+async def durable_store(tmp_path):
+    """A control store on a file. configure_control_store also repoints the operational
+    journal, so everything it touches is put back (other tests must not inherit a file
+    journal in an UNVERIFIED state)."""
+
     from sqlalchemy.ext.asyncio import create_async_engine
 
     from apps.api.app import control_state
+    from services.events import EventJournal
 
-    original = control_state.control_store
+    saved = (
+        control_state.control_store,
+        operational_journal.store,
+        operational_journal.journal,
+        operational_journal.integrity,
+        operational_journal.corruption,
+    )
+    operational_journal.journal = EventJournal()  # configure_control_store resets it in place
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'control.db'}")
     store = control_state.configure_control_store(engine)
-    yield store
-    control_state.control_store = original
+    try:
+        yield store
+    finally:
+        (
+            control_state.control_store,
+            operational_journal.store,
+            operational_journal.journal,
+            operational_journal.integrity,
+            operational_journal.corruption,
+        ) = saved
+        await engine.dispose()
 
 
 async def _restart() -> None:
