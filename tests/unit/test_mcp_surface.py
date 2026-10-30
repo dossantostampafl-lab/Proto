@@ -440,3 +440,51 @@ async def test_sources_not_ready_do_not_log_tracebacks(caplog):
         snapshot = await finrobot_surface.read_snapshot()
     assert snapshot["_sources"]["sources"]["oms.orders"]["error"] == "SourceNotReady"
     assert not [r for r in caplog.records if r.exc_info]
+
+
+async def test_council_brief_is_scoped_to_the_instrument_and_system(monkeypatch):
+    # Bind only the fixture robot, whatever engines the engines' branch installs.
+    monkeypatch.setattr(finrobot_surface, "_ROBOTS_MODULE", "services.finrobots.no_such_robots")
+    from services.finrobots import FinRobotId, Stance
+    from tests.unit.test_finrobots import report
+
+    assert finrobot_surface.council_brief("BINANCE_SPOT:BTCUSDT")["available"] is False
+
+    class Robot:
+        robot_id = FinRobotId.RISK_GUARDIAN
+        implementation = "risk-guardian@fixture"
+
+        async def analyze(self, context):
+            return [
+                report(
+                    self.robot_id,
+                    Stance.VETO,
+                    cycle=context.cycle_id,
+                    instrument="BINANCE_SPOT:BTCUSDT",
+                    at=context.started_at,
+                ),
+                report(
+                    self.robot_id,
+                    Stance.CAUTION,
+                    cycle=context.cycle_id,
+                    instrument="BINANCE_SPOT:ETHUSDT",
+                    at=context.started_at,
+                ),
+                report(
+                    self.robot_id,
+                    Stance.CAUTION,
+                    cycle=context.cycle_id,
+                    instrument=None,
+                    at=context.started_at,
+                ),
+            ]
+
+    orch = finrobot_surface.orchestrator()
+    orch.registry.bind(Robot())
+    await orch.run_cycle()
+    brief = finrobot_surface.council_brief("BINANCE_SPOT:BTCUSDT")
+    assert brief["available"] is True and brief["order_authority"] is False
+    assert {v["scope"] for v in brief["verdicts"]} == {"BINANCE_SPOT:BTCUSDT", "SYSTEM"}
+    assert {r["scope"] for r in brief["reports"]} == {"BINANCE_SPOT:BTCUSDT", "SYSTEM"}
+    btc = next(v for v in brief["verdicts"] if v["scope"] == "BINANCE_SPOT:BTCUSDT")
+    assert btc["verdict"] == "BLOCK_NEW_RISK"

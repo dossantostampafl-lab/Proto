@@ -301,6 +301,43 @@ def council_view() -> dict[str, object]:
     }
 
 
+def council_brief(instrument_id: str, *, max_reports: int = 12) -> dict[str, object]:
+    """A compact, advisory view of the latest cycle for one instrument (and the SYSTEM scope),
+    for the ChatGPT explanation chat. Never an order: it says what the specialists saw."""
+
+    latest = orchestrator().latest()
+    if latest is None:
+        return {"available": False, "reason": "no FinRobot cycle has run", **_BOUNDARY}
+    scopes = {instrument_id, "SYSTEM"}
+    verdicts = [
+        {"scope": v.scope, "verdict": v.verdict.value, "reasons": list(v.reasons[:5])}
+        for v in latest.council.scopes
+        if v.scope in scopes
+    ]
+    reports = [
+        {
+            "robot_id": r.robot_id.value,
+            "scope": r.instrument_id or "SYSTEM",
+            "stance": r.stance.value,
+            "confidence": r.confidence,
+            "headline": r.headline,
+        }
+        for r in latest.reports
+        if (r.instrument_id or "SYSTEM") in scopes
+    ][:max_reports]
+    return {
+        "available": True,
+        "cycle_id": str(latest.cycle_id),
+        "finished_at": latest.finished_at.isoformat(),
+        "data_mode": data_mode(),
+        "verdicts": verdicts,
+        "reports": reports,
+        "advisory_only": True,
+        "order_authority": False,
+        **_BOUNDARY,
+    }
+
+
 @router.get("")
 def finrobots() -> dict[str, object]:
     return registry_view()
