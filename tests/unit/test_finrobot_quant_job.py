@@ -11,7 +11,7 @@ from services.quant.evidence import (
     quant_evidence_metadata,
     recent_quant_evidence,
 )
-from services.quant.job import process_quant_research_job
+from services.quant.job import enqueue_quant_research, process_quant_research_job
 from services.quant.pipeline import QuantPipelineInput, run_quant_pipeline
 
 
@@ -193,6 +193,35 @@ async def test_quant_job_rejects_future_observation_and_extra_payload_fields():
         result = await brain.run_once()
         assert result.state is JobState.RETRY_WAIT
         assert "future" in result.last_error
+        assert await recent_quant_evidence(engine) == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_evidence_only_enqueuer_is_content_idempotent():
+    brain, engine = await brain_with_storage()
+    try:
+        item = envelope()
+        queued = await enqueue_quant_research(brain, item)
+        replay = await enqueue_quant_research(brain, item)
+        assert queued.id == replay.id
+        assert queued.idempotency_key.startswith("quant-evidence:")
+        assert queued.mode == "SIMULATION"
+        result = await brain.run_once()
+        assert result.state is JobState.SUCCEEDED
+        assert len(await recent_quant_evidence(engine)) == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_evidence_only_enqueuer_fails_closed_on_mislabeled_data():
+    brain, engine = await brain_with_storage()
+    try:
+        with pytest.raises(ValueError, match="mode/provenance mismatch"):
+            await enqueue_quant_research(brain, envelope(provenance="PAPER"))
+        assert await brain.run_once() is None
         assert await recent_quant_evidence(engine) == []
     finally:
         await engine.dispose()
