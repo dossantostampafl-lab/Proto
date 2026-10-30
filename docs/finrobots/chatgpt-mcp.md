@@ -72,20 +72,50 @@ ciclo. A supervisão ativa continua no dashboard, com o token de operador.
 - **Credenciais.** `mcp_surface` fica em `apps/api`. Não importa venues nem o executor, e não lê
   credencial de corretora.
 
-## Como ligar (operador)
+## Como ligar na Oracle (operador)
 
-1. Gere um segredo: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-2. Na API, defina `MCP_ENABLED=true`, `MCP_API_TOKEN=<segredo>` e
-   `PUBLIC_ORIGIN=https://<domínio>`. O `PUBLIC_ORIGIN` é o issuer do OAuth. Para ter ciclos
-   contínuos, defina também `FINROBOTS_ENABLED=true`. Depois reinicie.
-3. Nada a mudar no proxy. O Caddy de produção (`infra/oci/deploy/proto-deploy.sh`,
-   `caddy reverse-proxy --to 127.0.0.1:8000`) repassa todos os caminhos e o header
-   `Authorization` para a API. Com `MCP_ENABLED=true`, `https://<domínio>/mcp` já responde. Sem
-   domínio configurado, não há HTTPS público e o ChatGPT não consegue se conectar.
-4. No ChatGPT: Configurações → Apps e conectores → Modo desenvolvedor → Criar conector.
+A imagem de produção (`Dockerfile`) já liga `FINROBOTS_ENABLED` e `MCP_ENABLED`, e o
+`PUBLIC_ORIGIN` vem do domínio do stack: o próprio ou `<ip-com-traços>.sslip.io`. O único item
+manual é o token do conector, `proto-mcp-api-token` no Vault, que você escolhe e guarda.
+Sem ele, a API sobe normalmente e só o `/mcp` fica fechado.
+
+1. **Merge na `main` com CI verde.** A imagem nova é publicada e o servidor a baixa em até
+   5 minutos.
+   - Os FinRobots passam a rodar sozinhos: aba **Agents → FinRobots: RUNNING · 8/8**.
+   - O conector aparece **ENABLED**, ainda sem OAuth, porque falta o token.
+2. **Cloud Shell, uma vez:** rode o setup, que aplica o IAM do segredo novo e reinstala o
+   `proto-deploy` nas instâncias.
+   ```bash
+   bash <(curl -fsSL https://raw.githubusercontent.com/dossantostampafl-lab/Proto/main/infra/oci/deploy/setup.sh)
+   ```
+3. **Crie o token** (32 caracteres ou mais; guarde no seu gerenciador de senhas):
+   ```bash
+   python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+   bash ~/Proto/infra/oci/scripts/create-secrets.sh
+   ```
+   - O script pergunta só o que falta. Cole o token em `proto-mcp-api-token` (não aparece na tela).
+   - Se for menor que 32 caracteres, ele recusa.
+   - Também pode ser criado no console do Vault, como texto simples, com esse nome.
+4. **Recarregue os segredos da API:**
+   ```bash
+   bash ~/Proto/infra/oci/deploy/bastion-run.sh ssh api
+   sudo proto-deploy --force
+   ```
+   - Um token curto ou igual a outro token é ignorado com uma linha `mcp:` no log, e a API não cai.
+5. **Confira** em `https://<domínio>` → aba **Agents** → **ChatGPT connector (MCP)**:
+   **ENABLED** e **OAuth AVAILABLE**.
+6. **No ChatGPT:** Configurações → Apps e conectores → Avançado → ative o **Modo desenvolvedor**
+   → Criar conector.
    - URL: `https://<domínio>/mcp`.
    - Autenticação: **OAuth**.
-   - O ChatGPT abre a página de aprovação do PROTO. Digite o `MCP_API_TOKEN` e toque em Autorizar.
+   - Na página do PROTO que abrir, digite o token e toque em Autorizar.
+   - Para desconectar: botão **Sign out all** no painel. Para invalidar tudo: troque o token
+     (passos 3 e 4).
+
+Fora da Oracle, as mesmas variáveis valem em qualquer ambiente: `MCP_ENABLED=true`,
+`MCP_API_TOKEN=<token>`, `PUBLIC_ORIGIN=https://<domínio>` e `FINROBOTS_ENABLED=true`. O Caddy
+de produção repassa todos os caminhos e o header `Authorization`, então não precisa de mudança no
+proxy.
 
 ## Não verificado (PARTIAL)
 
@@ -98,4 +128,4 @@ ciclo. A supervisão ativa continua no dashboard, com o token de operador.
   - Não abra `/mcp` sem autenticação.
 - **Conexão real.** Nenhuma chamada real do ChatGPT foi feita. Os testes usam o `TestClient` do
   FastAPI com o protocolo MCP implementado à mão (`tests/unit/test_mcp_surface.py`).
-- **Deploy.** Não liguei `MCP_ENABLED`, `MCP_API_TOKEN` nem `FINROBOTS_ENABLED` na Oracle. Pelo script, o proxy não precisa de mudança, mas não verifiquei isso no servidor.
+- **Deploy.** Os passos acima não foram executados na Oracle por mim: não tenho acesso à conta. Pelo script, o proxy não precisa de mudança, mas não verifiquei isso no servidor.

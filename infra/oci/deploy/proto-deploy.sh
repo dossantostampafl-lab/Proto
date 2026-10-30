@@ -117,6 +117,49 @@ alpaca_ready() {  # true once alpaca.conf exists and this role's Alpaca secrets 
     return 1
   fi
 }
+# Optional ChatGPT connector token (docs/finrobots/chatgpt-mcp.md), fetched as role api-mcp.
+# Without it, or with one the API would refuse (shorter than 32 characters, or equal to another
+# token), the API starts exactly as before and only its read-only MCP server stays closed.
+mcp_env="${PROTO_MCP_ENV:-/run/proto/api-mcp.env}"
+mcp_fetch() {  # true once the token is in tmpfs (mcp_env)
+  local vault
+  vault="$(sed -n 's/^ExecStart=.*proto-fetch-secrets [a-z]* //p' \
+    /etc/systemd/system/proto-secrets.service 2>/dev/null | head -n1)"
+  [ -n "$vault" ] && /usr/local/sbin/proto-fetch-secrets api-mcp "$vault" >/dev/null 2>&1
+}
+mcp_token_acceptable() {  # mcp_token_acceptable <mcp env> <role env>: as the API's settings judge it
+  # Values are read from the files by Python and never passed as arguments (no secret in ps).
+  # Like Settings.normalize_optional_secret, every token is stripped before it is compared.
+  python3 - "$1" "$2" <<'PY'
+import sys
+
+def values(path):
+    out = {}
+    for line in open(path, encoding="utf-8"):
+        key, sep, value = line.rstrip("\n").partition("=")
+        if sep:
+            out[key] = value.strip()
+    return out
+
+token = values(sys.argv[1]).get("MCP_API_TOKEN", "")
+others = values(sys.argv[2])
+taken = {others.get(k) for k in ("OPERATOR_API_TOKEN", "EXECUTOR_API_TOKEN", "WATCHDOG_API_TOKEN")}
+sys.exit(0 if len(token) >= 32 and token not in taken else 1)
+PY
+}
+mcp_args() {  # extra podman args for the API, one per line
+  [ "$role" = api ] || return 0
+  if ! mcp_fetch; then
+    log "mcp: proto-mcp-api-token is not readable; the ChatGPT connector stays closed" >&2
+    return 0
+  fi
+  if ! mcp_token_acceptable "$mcp_env" "$secrets"; then
+    log "mcp: proto-mcp-api-token is shorter than 32 characters or reuses another token;" \
+      "the ChatGPT connector stays closed" >&2
+    return 0
+  fi
+  printf '%s\n' --env-file "$mcp_env"
+}
 alpaca_answers() {  # alpaca_answers <port>: its public /health answers from this host
   curl -fsS --max-time 5 "http://${EXECUTOR_IP}:$1/health" >/dev/null 2>&1
 }
@@ -215,10 +258,12 @@ start() {  # start <image id>
     api)
       mapfile -t xp_args < <(xp_env_args)
       mapfile -t alpaca_extra < <(alpaca_args)
+      mapfile -t mcp_extra < <(mcp_args)
       ensure_chatgpt_dir
       podman run -d --name proto-api --restart=always --network host --env-file "$secrets" \
         -v "${chatgpt_dir}:/home/proto/.config/proto/chatgpt:Z" \
         ${xp_args[@]+"${xp_args[@]}"} ${alpaca_extra[@]+"${alpaca_extra[@]}"} \
+        ${mcp_extra[@]+"${mcp_extra[@]}"} \
         -e APP_ENV=production -e OMS_EXECUTION_BACKEND=executor \
         -e "EXECUTOR_URL=http://${EXECUTOR_IP}:8100" \
         ${DOMAIN:+-e "PUBLIC_ORIGIN=https://${DOMAIN}"} \
@@ -255,7 +300,8 @@ for line in sys.stdin:
 ' "$@" || true
 }
 show_logs() {
-  masked_logs "proto-${role}" "$secrets" "/run/proto/${role}-db.env"
+  # Missing files are skipped: the MCP token exists only on an API that has one.
+  masked_logs "proto-${role}" "$secrets" "/run/proto/${role}-db.env" "$mcp_env"
 }
 
 healthy() {

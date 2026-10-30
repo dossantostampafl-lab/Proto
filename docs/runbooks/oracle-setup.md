@@ -281,6 +281,10 @@ accept. No step here enables real money.
 To deploy new secrets without a new image, run `sudo proto-deploy --force` on the instance
 (`bastion-run.sh ssh <role>`).
 
+The ChatGPT connector token (`proto-mcp-api-token`, optional) is typed by the operator with
+`create-secrets.sh`; a missing or invalid one leaves only the MCP server closed. Steps:
+`docs/finrobots/chatgpt-mcp.md` ("Como ligar na Oracle").
+
 ## 7. MT5 on the Windows VM
 
 1. RDP in through the Bastion (step 5).

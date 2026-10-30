@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pull this instance's secrets from OCI Vault into /run/proto/<role>.env (tmpfs, 0600).
 #
-#   fetch-secrets.sh <api|executor|watchdog>[-alpaca] <vault-ocid>
+#   fetch-secrets.sh <api|executor|watchdog>[-alpaca] | api-mcp <vault-ocid>
 #
 # Authenticates as the instance itself (instance principal): no API key on the box. Each role
 # reads only the secret names its IAM policy allows (infra/oci/iam.tf); a missing secret fails
@@ -48,6 +48,10 @@ PROTO_CRED_ALPACA_US_TESTNET_MAIN_API_SECRET=proto-alpaca-paper-secret" ;;
     pairs="ALPACA_EXECUTOR_API_TOKEN=proto-alpaca-executor-token" ;;
   watchdog-alpaca)
     pairs="WATCHDOG_ALPACA_EXECUTOR_TOKEN=proto-watchdog-alpaca-token" ;;
+  # Optional ChatGPT connector token, fetched by proto-deploy only for the API: a missing one
+  # fails only this fetch, so the MCP server stays closed and nothing else stops.
+  api-mcp)
+    pairs="MCP_API_TOKEN=proto-mcp-api-token" ;;
   *) echo "unknown role: $role" >&2; exit 2 ;;
 esac
 

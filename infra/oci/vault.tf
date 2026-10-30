@@ -42,6 +42,10 @@ locals {
       "proto-permit-private-key", # RISK_PERMIT_PRIVATE_KEY (Ed25519 seed)
       "proto-tradingview-secret", # TRADINGVIEW_WEBHOOK_SECRET
       "proto-alpaca-executor-token", # ALPACA_EXECUTOR_API_TOKEN (API -> Alpaca executor)
+      # ChatGPT connector (docs/finrobots/chatgpt-mcp.md): typed by the operator, who types it
+      # again on the OAuth approval page. Fetched as role api-mcp, so a missing one leaves only
+      # the MCP server closed and the API starts as before.
+      "proto-mcp-api-token", # MCP_API_TOKEN
     ]
     executor = [
       "proto-executor-token",          # EXECUTOR_API_TOKEN
