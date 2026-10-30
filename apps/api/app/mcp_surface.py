@@ -32,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from services.finrobots.contracts import clean_text
 
-from . import __version__, finrobot_surface
+from . import __version__, finrobot_surface, mcp_oauth
 from .agent_surface import agent_status, recent_decisions
 from .event_state import JournalUnavailable, record_operational_event
 from .risk_surface import risk_status
@@ -236,12 +236,28 @@ def _rpc_error(request_id: Any, code: int, message: str, status: int = 200) -> J
 
 
 def _authorized(request: Request) -> bool:
-    expected = settings.mcp_api_token
-    if expected is None:
-        return False
     header = request.headers.get("Authorization", "")
     scheme, _, supplied = header.partition(" ")
-    return scheme.lower() == "bearer" and hmac.compare_digest(supplied.strip(), expected)
+    supplied = supplied.strip()
+    if scheme.lower() != "bearer" or not supplied:
+        return False
+    expected = settings.mcp_api_token
+    if expected is not None and hmac.compare_digest(supplied, expected):
+        return True
+    # An access token from the connector's OAuth sign-in (mcp_oauth): same read-only tools.
+    return mcp_oauth.valid_access_token(supplied)
+
+
+def _unauthorized() -> JSONResponse:
+    challenge = 'Bearer realm="proto-mcp"'
+    if mcp_oauth.available():
+        # Where an MCP client (ChatGPT) discovers how to sign in.
+        challenge += f', resource_metadata="{mcp_oauth.resource_metadata_url()}"'
+    return JSONResponse(
+        {"detail": "MCP bearer token was not verified"},
+        status_code=401,
+        headers={"WWW-Authenticate": challenge},
+    )
 
 
 async def _journal_call(tool: str, ok: bool, client: str) -> None:
@@ -337,11 +353,7 @@ async def mcp_endpoint(request: Request) -> Response:
     if not rate_limiter.allow(f"mcp:{client}"):
         return JSONResponse({"detail": "Too many requests"}, status_code=429)
     if not _authorized(request):
-        return JSONResponse(
-            {"detail": "MCP bearer token was not verified"},
-            status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="proto-mcp"'},
-        )
+        return _unauthorized()
     version = request.headers.get("MCP-Protocol-Version")
     if version is not None and version not in SUPPORTED_PROTOCOL_VERSIONS:
         return _rpc_error(None, -32600, "Unsupported MCP-Protocol-Version", status=400)
