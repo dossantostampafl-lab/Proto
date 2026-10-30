@@ -40,7 +40,7 @@ class CycleContext:
     snapshot: Mapping[str, Any]   # chaves: tabela "Snapshot" abaixo
 ```
 
-### Snapshot `finrobots-snapshot/1.2`
+### Snapshot `finrobots-snapshot/1.3` (1.2 + `oms.balances`)
 
 Cada chave é a resposta de uma rota GET do próprio PROTO, **verificada como sem efeito**: não
 grava checkpoint, journal, métrica, esquema, nem inicia o OMS. Cada chave é lida uma vez por
@@ -62,6 +62,7 @@ ciclo.
 | `risk.status` | `GET /v1/risk/status` | PAPER/TESTNET | Risk Guardian |
 | `market.quotes` | `agent_surface.live_quote` por instrumento ativo (`bid`, `ask`, `observed_at`, `age_seconds`; `null` sem cotação) | LIVE (pública); `UNAVAILABLE` se nenhuma | Market Intelligence |
 | `oms.orders` | `GET /v1/oms/orders?limit=50` (só `BINANCE_SPOT`). No modo paper, `UNAVAILABLE` (`SourceNotReady`) enquanto o OMS não tiver sido iniciado por outra via | PAPER/TESTNET | Execution Supervisor |
+| `oms.balances` | `oms_surface.pure_balances()`: `{accounts: {<venue>: {account_id, mode, balances: {<asset>: {total, reserved, available, opening}}, venue_halted?, unavailable?}}, mode}`. Lê só `ledger.balances()` (paper) ou `GET /v1/ledger` de cada executor; não calcula account state nem grava checkpoint. No modo paper, `UNAVAILABLE` (`SourceNotReady`) até o OMS ser iniciado por outra via | PAPER/TESTNET | Portfolio Intelligence |
 | `oms.executor` | `GET /v1/oms/executor/status` | PAPER/TESTNET | Execution Supervisor |
 | `watchdog.status` | `GET /v1/watchdog/status` | PAPER/TESTNET | Audit & Recovery |
 
@@ -74,7 +75,7 @@ tem efeitos:
 - O registry de promoção cria a sua tabela na primeira leitura.
 - O roster sincroniza fills.
 
-Portfolio Intelligence fica sem fonte de ledger até existir uma leitura pura de saldos. Se uma
+Portfolio Intelligence usa `oms.balances` (saldos apenas: sem marcação, equity ou exposição; não deduza exposição a partir dele). Se uma
 rota devolver `gross_exposure=Infinity`, isso significa apenas exposição desconhecida (sem
 marcação, executor ou ordens indisponíveis) e deve ser relatado assim.
 

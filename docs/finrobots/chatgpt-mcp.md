@@ -53,8 +53,10 @@ ciclo. A supervisão ativa continua no dashboard, com o token de operador.
 1. Gere um segredo: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 2. Na API, defina `MCP_ENABLED=true` e `MCP_API_TOKEN=<segredo>`. Para ter ciclos contínuos, defina
    também `FINROBOTS_ENABLED=true`. Depois reinicie.
-3. Exponha `/mcp` por HTTPS no proxy público (hoje ele não está roteado). Garanta que o proxy
-   repasse o header `Authorization`.
+3. Nada a mudar no proxy. O Caddy de produção (`infra/oci/deploy/proto-deploy.sh`,
+   `caddy reverse-proxy --to 127.0.0.1:8000`) repassa todos os caminhos e o header
+   `Authorization` para a API. Com `MCP_ENABLED=true`, `https://<domínio>/mcp` já responde. Sem
+   domínio configurado, não há HTTPS público e o ChatGPT não consegue se conectar.
 4. No ChatGPT: Configurações → Apps e conectores → Modo desenvolvedor → Criar conector. Use a URL
    `https://<host>/mcp` e configure a autenticação com o bearer token.
 
@@ -68,4 +70,4 @@ ciclo. A supervisão ativa continua no dashboard, com o token de operador.
   - Não abra `/mcp` sem autenticação.
 - **Conexão real.** Nenhuma chamada real do ChatGPT foi feita. Os testes usam o `TestClient` do
   FastAPI com o protocolo MCP implementado à mão (`tests/unit/test_mcp_surface.py`).
-- **Proxy e deploy.** A rota no proxy e o deploy na Oracle não foram aplicados.
+- **Deploy.** Não liguei `MCP_ENABLED`, `MCP_API_TOKEN` nem `FINROBOTS_ENABLED` na Oracle. Pelo script, o proxy não precisa de mudança, mas não verifiquei isso no servidor.

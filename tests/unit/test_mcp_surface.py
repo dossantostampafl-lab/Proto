@@ -275,6 +275,8 @@ async def test_snapshot_changes_nothing_and_never_starts_the_paper_oms():
         assert not oms_surface.paper_oms_started()
         assert sources["oms.orders"]["status"] == "UNAVAILABLE"
         assert sources["oms.orders"]["error"] == "SourceNotReady"
+        assert sources["oms.balances"]["status"] == "UNAVAILABLE"
+        assert sources["oms.balances"]["error"] == "SourceNotReady"
         assert not {"oms.ledger", "reconciliation.status", "promotion.scopes"} & set(sources)
         assert dict(metrics.counters) == before
         # Once something else has started the OMS, its orders are read (and nothing else is).
@@ -282,5 +284,93 @@ async def test_snapshot_changes_nothing_and_never_starts_the_paper_oms():
         started = await finrobot_surface.read_snapshot()
         assert started["_sources"]["sources"]["oms.orders"]["status"] == "OK"
         assert started["oms.orders"]["execution_backend"] == "paper"
+        balances = started["oms.balances"]
+        assert balances["mode"] == "PAPER" and balances["real_money_execution"] is False
+        assert "BINANCE_SPOT" in balances["accounts"]
+        assert dict(metrics.counters) == before
     finally:
         oms_surface.reset_oms_state()
+
+
+async def test_pure_balances_read_executor_ledgers_without_account_state(monkeypatch):
+    from apps.api.app import oms_surface
+
+    calls = []
+
+    class Client:
+        def __init__(self, venue):
+            self.venue = venue
+
+        async def ledger(self):
+            calls.append(self.venue)
+            if self.venue.value == "XP_B3":
+                raise oms_surface.ExecutorUnavailable("down")
+            return {"account_id": "acc", "balances": {"USDT": {"total": "10"}}}
+
+    async def no_account_state(*_a, **_k):
+        raise AssertionError("account_state must not run")
+
+    monkeypatch.setattr(oms_surface, "executor_mode", lambda: True)
+    monkeypatch.setattr(oms_surface, "xp_enabled", lambda: True)
+    monkeypatch.setattr(oms_surface, "alpaca_enabled", lambda: False)
+    monkeypatch.setattr(oms_surface, "executor_client", Client)
+    monkeypatch.setattr(oms_surface, "account_state", no_account_state)
+    result = await oms_surface.pure_balances()
+    assert result["mode"] == "TESTNET"
+    assert result["accounts"]["BINANCE_SPOT"]["balances"] == {"USDT": {"total": "10"}}
+    assert result["accounts"]["XP_B3"] == {
+        "account_id": "executor-xp-b3",
+        "mode": "TESTNET",
+        "unavailable": True,
+    }
+    assert len(calls) == 2
+
+
+def _cycle_path_chatgpt_imports() -> list[str]:
+    """Imports of ChatGPT, the conversation surface or the MCP server on the cycle path."""
+
+    import ast
+    from pathlib import Path
+
+    forbidden = ("services.chatgpt", "apps.api.app.conversation_surface", "apps.api.app.mcp")
+    files = [*Path("services/finrobots").rglob("*.py"), Path("apps/api/app/finrobot_surface.py")]
+    found = []
+    for path in files:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = "apps.api.app." if node.level == 1 else ""
+                names = [f"{base}{node.module or ''}"] + [f"{base}{a.name}" for a in node.names]
+            found += [f"{path}:{n}" for n in names if n.startswith(forbidden)]
+    return found
+
+
+async def test_finrobots_keep_running_with_chatgpt_unavailable(client, configured, monkeypatch):
+    """ChatGPT is only a reader: with the connector closed and no ChatGPT code reachable, the
+    autonomous cycles still run on PROTO's own schedule and record their verdicts."""
+
+    from datetime import timedelta
+
+    assert _cycle_path_chatgpt_imports() == []
+
+    # Connector off (ChatGPT cannot reach PROTO) and no ChatGPT sign-in configured.
+    closed = configured.model_copy(update={"mcp_enabled": False, "chatgpt_local_enabled": False})
+    monkeypatch.setattr(mcp_surface, "settings", closed)
+    assert rpc(client, "tools/list").status_code == 404
+
+    orch = finrobot_surface.orchestrator()
+    orch.start(timedelta(seconds=5))
+    try:
+        import asyncio
+
+        for _ in range(200):
+            if orch.history:
+                break
+            await asyncio.sleep(0.01)
+        assert orch.history, "the scheduled cycle must run without ChatGPT"
+        latest = orch.latest()
+        assert latest.snapshot_sources and latest.errors == {}
+    finally:
+        await orch.stop()

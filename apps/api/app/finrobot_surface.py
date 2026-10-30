@@ -42,7 +42,7 @@ _orchestrator: FinRobotOrchestrator | None = None
 journal_failures = 0
 
 
-SNAPSHOT_VERSION = "finrobots-snapshot/1.2"
+SNAPSHOT_VERSION = "finrobots-snapshot/1.3"
 _SOURCE_TIMEOUT_SECONDS = 3.0
 
 
@@ -78,12 +78,20 @@ async def _orders() -> dict[str, Any]:
     return await oms_surface.list_orders(limit=50)
 
 
+async def _balances() -> dict[str, Any]:
+    try:
+        return await oms_surface.pure_balances()
+    except LookupError as exc:
+        raise SourceNotReady(str(exc)) from exc
+
+
 def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
     """Snapshot keys -> (read-only reader, provenance of its data). Every reader is one of
-    PROTO's own GET routes, verified to change nothing: no checkpoint, journal, metric, schema
-    or OMS start-up. Routes that do (``/v1/oms/ledger`` writes equity checkpoints,
-    reconciliation counts metrics, the promotion registry creates its table on first read, the
-    roster syncs fills) stay out until a pure read exists.
+    PROTO's own GET routes (or a pure read beside one), verified to change nothing: no
+    checkpoint, journal, metric, schema or OMS start-up. Routes that do stay out until a pure
+    read exists: ``/v1/oms/ledger`` writes equity checkpoints (``oms.balances`` reads the same
+    balances without it), reconciliation counts metrics, the promotion registry creates its
+    table on first read and the roster syncs fills.
 
     Readers in ``IN_MEMORY_SOURCES`` are synchronous reads of process state (no I/O) and run on
     the event loop without a timeout: moving them to a thread would race with the state the loop
@@ -98,6 +106,7 @@ def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
         "risk.status": (risk_status, mode),
         "market.quotes": (_quotes, "LIVE"),
         "oms.orders": (_orders, mode),
+        "oms.balances": (_balances, mode),
         "oms.executor": (oms_surface.executor_status, mode),
         "watchdog.status": (watchdog_status, mode),
     }

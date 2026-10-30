@@ -242,6 +242,47 @@ def paper_oms_started() -> bool:
     return _oms is not None and _oms_settings_id == id(settings)
 
 
+async def pure_balances() -> dict[str, object]:
+    """Balances per venue account, read without side effects: unlike ``GET /v1/oms/ledger`` it
+    computes no account state (so writes no equity checkpoint) and never starts the paper OMS.
+    In paper mode it raises ``LookupError`` until something else has started the OMS."""
+
+    if not executor_mode():
+        if not paper_oms_started() or _ledger is None:
+            raise LookupError("paper OMS not started")
+        balances = await _ledger.balances()
+        accounts = {
+            VENUE.value: {
+                "account_id": ACCOUNT_ID,
+                "mode": "PAPER",
+                "balances": {a: b.to_dict() for a, b in balances.items()},
+            }
+        }
+        return {"accounts": accounts, "mode": "PAPER", **_BOUNDARY}
+
+    venues = [(VENUE, EXECUTOR_ACCOUNT_ID)]
+    if xp_enabled():
+        venues.append((XP_VENUE, XP_ACCOUNT_ID))
+    if alpaca_enabled():
+        venues.append((ALPACA_VENUE, ALPACA_ACCOUNT_ID))
+
+    async def one(venue: VenueId, account_id: str) -> dict[str, object]:
+        try:
+            body = await executor_client(venue).ledger()
+        except (ExecutorUnavailable, ExecutorRefused):
+            return {"account_id": account_id, "mode": "TESTNET", "unavailable": True}
+        return {
+            "account_id": body.get("account_id", account_id),
+            "mode": "TESTNET",
+            "balances": dict(body.get("balances") or {}),
+            "venue_halted": body.get("venue_halted"),
+        }
+
+    parts = await asyncio.gather(*(one(v, a) for v, a in venues))
+    accounts = {v.value: part for (v, _), part in zip(venues, parts, strict=True)}
+    return {"accounts": accounts, "mode": "TESTNET", **_BOUNDARY}
+
+
 def reset_oms_state() -> None:
     global _oms, _ledger, _adapter, _oms_settings_id, _executor_settings_id
     _last_openings.clear()
