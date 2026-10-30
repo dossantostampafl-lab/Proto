@@ -5,6 +5,7 @@ import { bool, finiteDecimal, fmt2, isRecord, num, orDash, parseDecisions, rec, 
 import "./agents.css";
 import { AgentConversation } from "./AgentConversation";
 import { FinRobots } from "./FinRobots";
+import { McpConnector } from "./McpConnector";
 
 // Agents dashboard: the trader roster, each agent's virtual book, the agents' latest decisions on
 // its instrument and the orchestration contracts. Read only: no prompts, credentials, job submission
@@ -189,6 +190,8 @@ export function Agents() {
       </table></div>}
       <small className="agent-src">Source: /orchestration/status. A contract is not an agent or a successful run.</small>
     </Panel>
+
+    <McpConnector />
 
     <Panel title="Conversation & research readiness">
       <span className="tag research">CAPABILITY INVENTORY · READ ONLY</span>

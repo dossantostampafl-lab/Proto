@@ -11,7 +11,8 @@ type Robot = { id: string; title: string; mandate: string; status: string; veto:
 type Evidence = { source: string; provenance: string; summary: string; at: string | null };
 type Report = { id: string; robot: string; instrument: string | null; stance: string; confidence: number | null; headline: string; rationale: string[]; evidence: Evidence[] };
 type Scope = { scope: string; verdict: string; reasons: string[]; votes: [string, string][]; evidence: Evidence[] };
-type Registry = { robots: Robot[]; enabled: boolean | null; running: boolean | null; bound: number | null; cycles: number | null; interval: number | null; lastAt: string | null; errors: [string, string][] };
+type Registry = { robots: Robot[]; enabled: boolean | null; running: boolean | null; bound: number | null; cycles: number | null; interval: number | null; lastAt: string | null; errors: [string, string][]; sources: Source[] };
+type Source = { name: string; status: string; provenance: string; error: string | null };
 
 const when = (iso: string | null) => (iso ? iso.replace("T", " ").slice(0, 19) : "—");
 const VERDICT_TONE: Record<string, string> = { BLOCK_NEW_RISK: "down", REDUCE_RISK: "warn", CONSISTENT: "up", NO_CONSENSUS: "muted" };
@@ -33,6 +34,9 @@ function parseRegistry(raw: unknown): Registry | null {
       : [])),
     enabled: bool(raw.enabled), running: bool(raw.running), bound: num(raw.bound), cycles: num(raw.cycles), interval: num(raw.interval_seconds),
     lastAt: str(last.finished_at), errors: Object.entries(rec(last.errors)).flatMap(([k, v]) => (typeof v === "string" ? [[k, v] as [string, string]] : [])),
+    sources: Object.entries(rec(last.sources)).flatMap(([name, v]) => (isRecord(v)
+      ? [{ name, status: str(v.status) ?? "UNAVAILABLE", provenance: str(v.provenance) ?? "UNAVAILABLE", error: str(v.error) }]
+      : [])),
   };
 }
 
@@ -101,6 +105,12 @@ export function FinRobots() {
           </tr>)}</tbody>
         </table></div>
         {view.errors.length > 0 && <p className="agent-note warn">Last cycle errors: {view.errors.map(([k, v]) => `${k} (${v})`).join(" · ")}</p>}
+        {view.sources.length > 0 && <details className="agent-sources">
+          <summary>Evidence sources of the last cycle · {view.sources.filter(s => s.status === "OK" && s.provenance !== "UNAVAILABLE").length}/{view.sources.length} with data</summary>
+          <ul className="agent-evidence">{view.sources.map(s => <li key={s.name}>
+            <span className="tag research">{s.provenance}</span> <b>{s.name}</b> · <span className={s.status !== "OK" ? "warn" : s.provenance === "UNAVAILABLE" ? "muted" : "up"}>{s.status === "OK" && s.provenance === "UNAVAILABLE" ? "OK · no data" : s.status}</span>{s.error ? ` · ${s.error}` : ""}
+          </li>)}</ul>
+        </details>}
       </>}
       <small className="agent-src">Source: /v1/finrobots · an UNBOUND specialist has no engine yet and reports nothing.</small>
     </Panel>

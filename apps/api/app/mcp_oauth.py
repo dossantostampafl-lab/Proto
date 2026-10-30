@@ -494,6 +494,8 @@ async def revoke_all() -> dict[str, object]:
 def oauth_status() -> dict[str, object]:
     _prune()
     return {
+        "mcp_enabled": settings.mcp_enabled,
+        "static_token_configured": settings.mcp_api_token is not None,
         "available": available(),
         "issuer": issuer(),
         "clients": len(_clients),

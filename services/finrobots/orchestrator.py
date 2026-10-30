@@ -14,7 +14,7 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -43,6 +43,8 @@ class CycleRecord:
     errors: dict[str, str]
     council: CouncilResult
     snapshot_sources: tuple[str, ...]
+    # Per-source status, read time and provenance, as the snapshot's ``_sources`` reported them.
+    sources: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def summary(self) -> dict[str, object]:
         return {
@@ -54,6 +56,7 @@ class CycleRecord:
             "errors": dict(self.errors),
             "verdicts": {s.scope: s.verdict.value for s in self.council.scopes},
             "snapshot_sources": list(self.snapshot_sources),
+            "sources": {k: dict(v) for k, v in self.sources.items()},
         }
 
     def to_dict(self) -> dict[str, object]:
@@ -71,6 +74,19 @@ def _restrictiveness(item: object) -> int:
     if isinstance(item, FinRobotReport):
         return _STANCE_ORDER[item.stance]
     return len(_STANCE_ORDER)  # unvalidated items go last
+
+
+def _source_meta(snapshot: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    meta = snapshot.get("_sources")
+    sources = meta.get("sources") if isinstance(meta, Mapping) else None
+    if not isinstance(sources, Mapping):
+        return {}
+    keep = ("status", "read_at", "provenance", "error")
+    return {
+        str(name): {k: value.get(k) for k in keep}
+        for name, value in sources.items()
+        if isinstance(value, Mapping)
+    }
 
 
 def _as_reports(raw: object) -> list[object]:
@@ -182,6 +198,7 @@ class FinRobotOrchestrator:
                 errors=errors,
                 council=decide(reports, now=finished),
                 snapshot_sources=tuple(sorted(k for k in snapshot if not k.startswith("_"))),
+                sources=_source_meta(snapshot),
             )
             self._history.append(record)
         if self._on_cycle is not None:

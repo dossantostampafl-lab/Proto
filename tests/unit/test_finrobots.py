@@ -349,3 +349,36 @@ async def test_a_flooding_robot_is_capped_keeping_its_vetoes():
     assert len(record.reports) == 16
     assert sum(r.stance is Stance.VETO for r in record.reports) == 2
     assert record.errors == {"risk-guardian": "26 report(s) over the limit of 16 dropped"}
+
+
+async def test_cycle_keeps_the_snapshot_source_labels():
+    registry = FinRobotRegistry()
+
+    async def read():
+        return {
+            "risk.status": {},
+            "_sources": {
+                "version": "x",
+                "sources": {
+                    "risk.status": {
+                        "status": "OK",
+                        "provenance": "PAPER",
+                        "read_at": "t",
+                        "error": None,
+                        "extra": "dropped",
+                    },
+                    "oms.orders": {
+                        "status": "UNAVAILABLE",
+                        "provenance": "UNAVAILABLE",
+                        "read_at": "t",
+                        "error": "SourceNotReady",
+                    },
+                },
+            },
+        }
+
+    orch = FinRobotOrchestrator(registry, snapshot=read, instruments=lambda: ())
+    record = await orch.run_cycle()
+    assert record.snapshot_sources == ("risk.status",)
+    assert record.summary()["sources"]["oms.orders"]["error"] == "SourceNotReady"
+    assert "extra" not in record.summary()["sources"]["risk.status"]
