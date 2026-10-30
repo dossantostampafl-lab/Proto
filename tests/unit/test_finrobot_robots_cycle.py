@@ -20,6 +20,6 @@ async def test_real_specialists_run_through_council_without_chatgpt():
     brain = FinRobotOrchestrator(registry, snapshot=snapshot, instruments=lambda: ("BTC",))
     cycle = await brain.run_cycle()
     assert not cycle.errors
-    assert len(cycle.reports) == 2
+    assert len(cycle.reports) == 4
     assert any(scope.verdict.value == "BLOCK_NEW_RISK" for scope in cycle.council.scopes)
     assert all(not report.real_money_execution for report in cycle.reports)
