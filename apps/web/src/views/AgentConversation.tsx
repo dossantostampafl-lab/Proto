@@ -1,39 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { post } from "../api";
+import { MIC_ERRORS, newRecognition, recognitionAvailable, speak, stopSpeaking, unlockSpeech } from "./voice";
 
 type Entry = { role: string; text: string; origin?: string; evidence?: unknown };
 type History = { id: string; agent_id: string; version: number; messages: Entry[] };
 type Connection = { connected: boolean; state: string; configured_model: string | null; mode?: string; authorization_command?: string };
-
-// Browser speech (no service, no key): Chrome/Android's SpeechRecognition and speechSynthesis.
-type Recognition = { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: ((e: { error?: string }) => void) | null; start: () => void };
-function recognition(): Recognition | null {
-  const w = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
-  const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
-  return Ctor ? new Ctor() : null;
-}
-function speak(text: string) {
-  if (!("speechSynthesis" in window)) return;
-  const u = new SpeechSynthesisUtterance(text.slice(0, 1200));
-  u.lang = "pt-BR";
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
-}
-// Chrome on Android speaks only after a user gesture. The answer arrives seconds after the tap,
-// when that gesture has expired, so the tap itself speaks a silent utterance to unlock speech.
-function unlockSpeech() {
-  if (!("speechSynthesis" in window)) return;
-  const u = new SpeechSynthesisUtterance(" ");
-  u.volume = 0;
-  window.speechSynthesis.speak(u);
-}
-const MIC_ERRORS: Record<string, string> = {
-  "not-allowed": "O navegador bloqueou o microfone. Permita o microfone para este site nas configurações do Chrome.",
-  "service-not-allowed": "O navegador bloqueou o microfone. Permita o microfone para este site nas configurações do Chrome.",
-  "no-speech": "Não ouvi nada. Toque em Falar e fale logo em seguida.",
-  "audio-capture": "Nenhum microfone encontrado.",
-  network: "O reconhecimento de voz do Chrome precisa de internet. Tente de novo.",
-};
 
 export function AgentConversation({ agentId }: { agentId: string }) {
   const [history, setHistory] = useState<History | null>(null);
@@ -50,11 +21,18 @@ export function AgentConversation({ agentId }: { agentId: string }) {
   const [listening, setListening] = useState(false);
   const publicMode = connection?.mode === "PUBLIC_OPERATOR";
   const reachable = privateHost || publicMode;
+  const historyRef = useRef<History | null>(null);
+  const modelRef = useRef("");
+  const keepHistory = (h: History | null) => { historyRef.current = h; setHistory(h); };
+  const keepModel = (m: string) => { modelRef.current = m; setModel(m); };
 
-  async function verify() {
-    setBusy(true); setModels([]); setModel(""); setConnection(null);
+  async function verify(): Promise<boolean> {
+    setBusy(true); setModels([]); keepModel(""); setConnection(null);
     const result = await post<Connection>("/conversation/status");
-    if (!result.ok) { setStatus(`Unavailable: ${result.error}`); setBusy(false); return; }
+    if (!result.ok) {
+      setStatus(result.status === 401 ? "Token de operador ausente ou errado: entre com ele na aba SYSTEM." : `Unavailable: ${result.error}`);
+      setBusy(false); return false;
+    }
     setConnection(result.data);
     if (!result.data.connected) {
       setSetup(true); setStatus(result.data.mode === "PUBLIC_OPERATOR"
@@ -66,60 +44,81 @@ export function AgentConversation({ agentId }: { agentId: string }) {
       if (catalog.ok) {
         setModels(catalog.data.models);
         const configured = result.data.configured_model;
-        setModel(configured && catalog.data.models.includes(configured) ? configured : catalog.data.models[0] ?? "");
+        keepModel(configured && catalog.data.models.includes(configured) ? configured : catalog.data.models[0] ?? "");
         setStatus(catalog.data.models.length ? "OpenAI account access verified. Choose an available model." : "OpenAI returned no available models. Conversation unavailable.");
       } else setStatus(`Credentials present; account access NOT verified: ${catalog.error}`);
     }
     setBusy(false);
+    return Boolean(modelRef.current);
   }
   async function disconnect() {
     setBusy(true);
     const result = await post<{ remote_revocation_confirmed: boolean }>("/conversation/disconnect");
     if (result.ok) {
-      setConnection(null); setModels([]); setModel(""); setHistory(null); setText("");
+      setConnection(null); setModels([]); keepModel(""); keepHistory(null); setText("");
       setStatus(result.data.remote_revocation_confirmed ? "Disconnected. Remote revocation confirmed." : "Local credentials cleared. Remote revocation unconfirmed; also disconnect PROTO in ChatGPT settings.");
     } else setStatus(`Disconnect failed: ${result.error}`);
     setBusy(false);
   }
-  async function start() {
+  async function start(): Promise<boolean> {
     setBusy(true);
     const result = await post<{ id: string }>("/conversation/new", { agent_id: agentId });
-    if (result.ok) { setHistory({ id: result.data.id, agent_id: agentId, version: 0, messages: [] }); setStatus("Ready · ChatGPT explanation only"); }
+    if (result.ok) { keepHistory({ id: result.data.id, agent_id: agentId, version: 0, messages: [] }); setStatus("Ready · ChatGPT explanation only"); }
     else setStatus(`Unavailable: ${result.error}`);
     setBusy(false);
+    return result.ok;
   }
   async function resume() {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resumeId)) { setStatus("Enter a valid conversation ID."); return; }
     setBusy(true);
     const result = await post<History>(`/conversation/${resumeId}/history`);
-    if (result.ok && result.data.agent_id === agentId) { setHistory(result.data); setStatus("History restored"); }
-    else if (result.ok) { setHistory(null); setStatus(`This conversation belongs to agent ${result.data.agent_id}. Select that agent first.`); }
+    if (result.ok && result.data.agent_id === agentId) { keepHistory(result.data); setStatus("History restored"); }
+    else if (result.ok) { keepHistory(null); setStatus(`This conversation belongs to agent ${result.data.agent_id}. Select that agent first.`); }
     else setStatus(`Unavailable: ${result.error}`);
     setBusy(false);
   }
-  async function send(spoken?: string) {
+  async function send(spoken?: string): Promise<void> {
     const question = (spoken ?? text).trim();
-    if (!history || !question || !model) return;
+    const current = historyRef.current, chosen = modelRef.current;
+    if (!current || !question || !chosen) return;
     setBusy(true); setStatus(spoken ? `Você disse: “${question}”. Perguntando ao ChatGPT…` : "Perguntando ao ChatGPT…");
-    const result = await post<History>(`/conversation/${history.id}/messages`, { text: question, version: history.version, model });
-    if (result.ok) {
-      setHistory(result.data); setText(""); setStatus("Resposta recebida.");
-      const last = result.data.messages[result.data.messages.length - 1];
-      if (voice && last?.origin === "CHATGPT_EXPLANATION") speak(last.text);
+    let result = await post<History>(`/conversation/${current.id}/messages`, { text: question, version: current.version, model: chosen });
+    if (!result.ok && result.status === 409 && /full|budget|changed/i.test(result.error) && await start()) {
+      // A full or stale conversation: start a fresh one for this agent and ask once more.
+      const fresh = historyRef.current!;
+      setBusy(true);
+      result = await post<History>(`/conversation/${fresh.id}/messages`, { text: question, version: fresh.version, model: chosen });
     }
-    else setStatus(`O ChatGPT não respondeu: ${result.error}. Se demorou demais, toque em Load history antes de perguntar de novo.`);
+    if (result.ok) {
+      keepHistory(result.data); setText("");
+      const last = result.data.messages[result.data.messages.length - 1];
+      const spokenAnswer = voice && last?.origin === "CHATGPT_EXPLANATION" && speak(last.text, () => setStatus("Pronto. Toque em Falar para outra pergunta."));
+      setStatus(spokenAnswer ? "Respondendo em voz…" : "Resposta recebida.");
+    }
+    else setStatus(result.status === 401 ? "Token de operador ausente ou errado: entre com ele na aba SYSTEM." : `O ChatGPT não respondeu: ${result.error}.`);
     setBusy(false);
   }
-  function listen() {
-    const rec = recognition();
-    if (!rec) { setStatus("Este navegador não tem reconhecimento de voz. Use o Chrome."); return; }
+  /** One tap: unlock speech and start listening at once (both need the tap's user gesture), then
+   *  connect, pick a model and open a conversation while the operator is still speaking. */
+  function talk() {
+    if (!recognitionAvailable()) {
+      setStatus("Este navegador não tem reconhecimento de voz (o navegador da Samsung não tem). Abra o painel no Google Chrome. Você ainda pode escrever a pergunta abaixo.");
+      return;
+    }
+    stopSpeaking();
     if (voice) unlockSpeech();
-    let heard = "";
-    let failed = false;
-    rec.lang = "pt-BR"; rec.interimResults = false;
-    rec.onresult = e => { heard = e.results[0]?.[0]?.transcript ?? ""; if (heard) { setText(heard); void send(heard); } };
+    const rec = newRecognition()!;
+    let heard = "", failed = false;
+    const ready = (async () => (modelRef.current || await verify()) && (historyRef.current !== null || await start()))();
+    rec.onresult = e => { heard = e.results[0]?.[0]?.transcript?.trim() ?? ""; };
     rec.onerror = e => { failed = true; setListening(false); setStatus(MIC_ERRORS[e.error ?? ""] ?? `Erro no microfone (${e.error ?? "desconhecido"}). Toque em Falar de novo.`); };
-    rec.onend = () => { setListening(false); if (!heard && !failed) setStatus("Não ouvi nada. Toque em Falar e fale logo em seguida."); };
+    rec.onend = () => {
+      setListening(false);
+      if (failed) return;
+      if (!heard) { setStatus("Não ouvi nada. Toque em Falar e fale logo em seguida."); return; }
+      setText(heard);
+      void ready.then(ok => (ok ? send(heard) : undefined));
+    };
     setListening(true); setStatus("Ouvindo… fale agora.");
     try { rec.start(); } catch { setListening(false); setStatus("Não consegui abrir o microfone. Toque em Falar de novo."); }
   }
@@ -146,22 +145,24 @@ export function AgentConversation({ agentId }: { agentId: string }) {
       <li>Transfer only this PROTO session over SSH, then import it with <code>python -m services.chatgpt.vm import --source /private/path/credentials.json</code>. The VM keeps its own host identity. Remove transfer copies and let only the VM refresh.</li>
       <li>Open the private dashboard, authenticate with the existing operator token in System, and verify access below. <a href="https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms" target="_blank" rel="noreferrer">Official OpenAI VM procedure</a>.</li>
     </ol>}
-    <button type="button" className="btn primary" disabled={busy} onClick={() => void verify()}>Verify OpenAI connection</button>
+    <button type="button" className="btn primary" disabled={busy} onClick={() => { void verify(); }}>Verify OpenAI connection</button>
     <button type="button" className="btn" disabled={busy || !connection?.connected} onClick={() => void disconnect()}>Disconnect ChatGPT</button>
-    {models.length > 0 && <label className="field"><span>ChatGPT model</span><select value={model} disabled={busy} onChange={e => setModel(e.target.value)}>{models.map(value => <option key={value}>{value}</option>)}</select></label>}
+    {models.length > 0 && <label className="field"><span>ChatGPT model</span><select value={model} disabled={busy} onChange={e => keepModel(e.target.value)}>{models.map(value => <option key={value}>{value}</option>)}</select></label>}
     <p>Ask ChatGPT to explain recorded evidence. This does not execute the trader or FinRobot. Never enter passwords or tokens.</p>
-    <button type="button" className="btn" disabled={busy || !model} onClick={() => void start()}>New explanation conversation</button>
+    <button type="button" className="btn" disabled={busy || !model} onClick={() => { void start(); }}>New explanation conversation</button>
     <label className="field"><span>Resume conversation ID</span><input value={resumeId} autoComplete="off" spellCheck={false} placeholder="00000000-0000-0000-0000-000000000000" onChange={e => setResumeId(e.target.value.trim())} /></label>
     <button type="button" className="btn" disabled={busy || !resumeId || !reachable} onClick={() => void resume()}>Load history</button>
+    <div className="agent-voice">
+      <button type="button" className="btn primary" disabled={busy || listening} aria-pressed={listening} onClick={talk}>{listening ? "Ouvindo… fale agora" : "🎤 Falar com o ChatGPT"}</button>
+      <button type="button" className="btn" disabled={!lastAnswer} onClick={() => { speak(lastAnswer); }}>🔊 Repetir resposta</button>
+      <label className="field"><span>Responder em voz</span><input type="checkbox" checked={voice} onChange={e => { setVoice(e.target.checked); if (!e.target.checked) stopSpeaking(); }} /></label>
+    </div>
     <p role="status" aria-live="polite" className="agent-note">{status}</p>
     {history && <>
       <p>Conversation ID (save to resume): <code>{history.id}</code></p>
       {history.messages.map((m, i) => <article key={i}><b>{m.origin === "CHATGPT_EXPLANATION" ? "ChatGPT explanation" : "You"}</b><p style={{ whiteSpace: "pre-wrap" }}>{m.text}</p>{m.evidence != null && <details><summary>Evidence snapshot</summary><pre>{JSON.stringify(m.evidence, null, 2)}</pre></details>}</article>)}
       <label className="field"><span>Question</span><textarea maxLength={4000} value={text} onChange={e => setText(e.target.value)} disabled={busy} /></label>
       <button type="button" className="btn primary" disabled={busy || !text.trim() || !model} onClick={() => { if (voice) unlockSpeech(); void send(); }}>Ask about evidence</button>
-      <button type="button" className="btn" disabled={busy || listening || !model} aria-pressed={listening} onClick={listen}>{listening ? "Ouvindo…" : "🎤 Falar"}</button>
-      <button type="button" className="btn" disabled={!lastAnswer} onClick={() => speak(lastAnswer)}>🔊 Repetir resposta</button>
-      <label className="field"><span>Responder em voz</span><input type="checkbox" checked={voice} onChange={e => { setVoice(e.target.checked); if (!e.target.checked && "speechSynthesis" in window) window.speechSynthesis.cancel(); }} /></label>
     </>}
   </section>;
 }

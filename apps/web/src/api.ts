@@ -1,3 +1,4 @@
+import { readOperatorToken, writeOperatorToken } from "./operatorTokenStore";
 // Typed client for the Proto API. Same-origin by default; VITE_API_BASE_URL overrides for local dev.
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin;
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
@@ -30,17 +31,13 @@ export type Deployment = { release: string; ui_release: string; git_commit_sha: 
 
 export type Result<T> = { ok: true; status: number; data: T } | { ok: false; status: number; error: string };
 
-const TOKEN_KEY = "proto.operatorToken";
-
 export function operatorToken(): string {
-  try { return sessionStorage.getItem(TOKEN_KEY) ?? ""; } catch { return ""; }
+  return readOperatorToken();
 }
 
-export function setOperatorToken(token: string): void {
-  try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token);
-    else sessionStorage.removeItem(TOKEN_KEY);
-  } catch { /* storage blocked: token simply is not remembered */ }
+/** Remembered on this device unless ``remember`` is false (then for this browser session only). */
+export function setOperatorToken(token: string, remember = true): void {
+  writeOperatorToken(token, remember);
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<Result<T>> {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type Creation, type Deployment, type Health, type Memory, type Orchestration, operatorToken, setOperatorToken, type Shadow, type Universe } from "../api";
+import { rememberedOnDevice } from "../operatorTokenStore";
 import { usePoll } from "../hooks";
 import { Button, Dot, Empty, Panel, Stat, useCommand } from "../ui";
 
@@ -18,8 +19,9 @@ export function System({ health }: { health: Health | null }) {
   const { log } = useCommand();
   const [token, setToken] = useState(operatorToken);
   const [saved, setSaved] = useState(Boolean(operatorToken()));
+  const [remember, setRemember] = useState(rememberedOnDevice() || !operatorToken());
 
-  const save = (value: string) => { setOperatorToken(value.trim()); setSaved(Boolean(value.trim())); };
+  const save = (value: string) => { setOperatorToken(value.trim(), remember); setSaved(Boolean(value.trim())); };
 
   return (
     <div className="system">
@@ -40,7 +42,10 @@ export function System({ health }: { health: Health | null }) {
           <button type="submit" className="btn primary">Save</button>
           <button type="button" className="btn" onClick={() => { setToken(""); save(""); }}>Clear</button>
         </form>
-        <p className="hint"><Dot on={saved} />{saved ? "Token stored for this browser session only." : "No token stored. Read-only views still work."}</p>
+        <label className="field"><span>Lembrar neste aparelho</span><input type="checkbox" checked={remember} onChange={e => { setRemember(e.target.checked); if (saved) setOperatorToken(token.trim(), e.target.checked); }} /></label>
+        <p className="hint"><Dot on={saved} />{saved
+          ? (remember ? "Token guardado neste aparelho: não precisa colar de novo. Use Clear num aparelho que não é seu." : "Token stored for this browser session only.")
+          : "No token stored. Read-only views still work."}</p>
       </Panel>
 
       <Panel title="Autonomy">
