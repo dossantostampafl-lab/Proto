@@ -24,15 +24,28 @@ async def _lineage_complete(
     correlation_id: str,
     rows: list[tuple[str, str, dict[str, object]]],
 ) -> bool:
+    mismatch = False
     async with engine.connect() as connection:
-        for table_name, suffix, _ in rows:
+        for table_name, suffix, payload in rows:
             table = CANONICAL_TABLES[table_name]
             record_id = _record_id(correlation_id, suffix)
             existing = await connection.execute(
-                select(table.c.id).where(table.c.id == record_id)
+                select(table.c.correlation_id, table.c.payload).where(table.c.id == record_id)
             )
-            if existing.scalar_one_or_none() is None:
+            row = existing.one_or_none()
+            if row is None:
                 return False
+            if row.correlation_id != correlation_id or row.payload != payload:
+                mismatch = True
+        if not any(table_name == "calibration_metrics" for table_name, _, _ in rows):
+            table = CANONICAL_TABLES["calibration_metrics"]
+            existing = await connection.execute(
+                select(table.c.id).where(table.c.id == _record_id(correlation_id, "calibration"))
+            )
+            if existing.scalar_one_or_none() is not None:
+                mismatch = True
+    if mismatch:
+        raise RuntimeError("quant lineage identity collision: persisted payload differs")
     return True
 
 
