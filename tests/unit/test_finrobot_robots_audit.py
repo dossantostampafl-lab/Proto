@@ -67,6 +67,19 @@ async def test_inactive_watchdog_without_trusted_source_does_not_claim_status():
     report = await auditor().analyze(ctx)
     assert report.stance is Stance.ABSTAIN
     assert not report.evidence
+
+
+@pytest.mark.asyncio
+async def test_auditor_retains_journal_and_watchdog_evidence():
+    ctx = context({"journal_failures": 2})
+    ctx.snapshot["watchdog.status"] = {"active": False}
+    ctx.snapshot["_sources"]["sources"]["watchdog.status"] = {
+        "status": "OK",
+        "provenance": "PAPER",
+        "read_at": datetime.now(UTC).isoformat(),
+    }
+    report = await auditor().analyze(ctx)
+    assert {item.source for item in report.evidence} == {"agents.status", "watchdog.status"}
     assert report.real_money_execution is False
 
 
