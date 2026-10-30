@@ -235,6 +235,13 @@ async def components() -> tuple[OrderManager, InMemoryLedger | SqlLedger, PaperV
         return oms, ledger, adapter
 
 
+def paper_oms_started() -> bool:
+    """Whether the in-process paper OMS already exists, so a pure reader can skip it instead of
+    starting it (start-up posts opening balances and recovers open orders)."""
+
+    return _oms is not None and _oms_settings_id == id(settings)
+
+
 def reset_oms_state() -> None:
     global _oms, _ledger, _adapter, _oms_settings_id, _executor_settings_id
     _last_openings.clear()

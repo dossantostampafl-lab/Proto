@@ -40,33 +40,43 @@ class CycleContext:
     snapshot: Mapping[str, Any]   # chaves: tabela "Snapshot" abaixo
 ```
 
-### Snapshot `finrobots-snapshot/1.1` (aditivo sobre 1.0, mesmas chaves antigas)
+### Snapshot `finrobots-snapshot/1.2`
 
-Cada chave é a resposta de uma rota GET do próprio PROTO (ou leitura pura), lida uma vez por
+Cada chave é a resposta de uma rota GET do próprio PROTO, **verificada como sem efeito**: não
+grava checkpoint, journal, métrica, esquema, nem inicia o OMS. Cada chave é lida uma vez por
 ciclo.
 
-- **Timeout de 3 s:** vale para as fontes assíncronas (`oms.*`, `reconciliation.status`,
-  `promotion.scopes`), que podem falar com o executor por HTTP.
+- **Timeout de 3 s:** vale para as fontes assíncronas (`oms.*`), que podem falar com o executor por
+  HTTP.
 - **Fontes síncronas** (`IN_MEMORY_SOURCES`: `agents.*`, `risk.status`, `market.quotes`,
   `watchdog.status`): leem estado do processo, sem I/O. Rodam no event loop **sem** timeout.
   Movê-las para uma thread criaria corrida com o estado alterado no loop, e um timeout de thread
-  não interromperia o trabalho. Um teste impõe essa divisão. `snapshot["_sources"]` traz, por chave, `status` (`OK`, `UNAVAILABLE`,
-`TIMEOUT`), `read_at`, `provenance` e `error`. Uma fonte que falhou **não aparece** no snapshot.
-Fontes que sincronizam ou gravam ficam fora, por exemplo `GET /v1/agents/roster`, que sincroniza
-fills.
+  não interromperia o trabalho. Um teste impõe essa divisão.
+- **Metadados:** `snapshot["_sources"]` traz, por chave, `status` (`OK`, `UNAVAILABLE`, `TIMEOUT`),
+  `read_at`, `provenance` e `error`. Uma fonte que falhou **não aparece** no snapshot.
 
 | Chave | Origem (rota) | Proveniência | Especialista natural |
 |---|---|---|---|
-| `agents.status` | `GET /v1/agents/status` | PAPER/TESTNET | Strategy Research |
+| `agents.status` | `GET /v1/agents/status` | PAPER/TESTNET | Strategy Research, Audit & Recovery |
 | `agents.decisions_recent` | `GET /v1/agents/decisions/recent?limit=50` | PAPER/TESTNET | Strategy Research, Model Validator |
 | `risk.status` | `GET /v1/risk/status` | PAPER/TESTNET | Risk Guardian |
 | `market.quotes` | `agent_surface.live_quote` por instrumento ativo (`bid`, `ask`, `observed_at`, `age_seconds`; `null` sem cotação) | LIVE (pública); `UNAVAILABLE` se nenhuma | Market Intelligence |
-| `oms.orders` | `GET /v1/oms/orders?limit=50` (só a venue padrão `BINANCE_SPOT`; ordens XP/Alpaca ainda não entram) | PAPER/TESTNET | Execution Supervisor |
-| `oms.ledger` | `GET /v1/oms/ledger` | PAPER/TESTNET | Portfolio Intelligence |
+| `oms.orders` | `GET /v1/oms/orders?limit=50` (só `BINANCE_SPOT`). No modo paper, `UNAVAILABLE` (`SourceNotReady`) enquanto o OMS não tiver sido iniciado por outra via | PAPER/TESTNET | Execution Supervisor |
 | `oms.executor` | `GET /v1/oms/executor/status` | PAPER/TESTNET | Execution Supervisor |
-| `reconciliation.status` | `reconciliation_service.reconciliation_status()` | PAPER/TESTNET | Audit & Recovery |
 | `watchdog.status` | `GET /v1/watchdog/status` | PAPER/TESTNET | Audit & Recovery |
-| `promotion.scopes` | `GET /v1/promotion/scopes` | PAPER/TESTNET | Execution Supervisor, Model Validator |
+
+**Removidas na 1.2:** `oms.ledger`, `reconciliation.status` e `promotion.scopes`, porque cada uma
+tem efeitos:
+
+- `GET /v1/oms/ledger` chama `account_state()`, que grava checkpoints de equity/pico; no modo paper
+  ainda pode iniciar o OMS (saldos de abertura, `recover()`).
+- `reconciliation_status()` incrementa métricas.
+- O registry de promoção cria a sua tabela na primeira leitura.
+- O roster sincroniza fills.
+
+Portfolio Intelligence fica sem fonte de ledger até existir uma leitura pura de saldos. Se uma
+rota devolver `gross_exposure=Infinity`, isso significa apenas exposição desconhecida (sem
+marcação, executor ou ordens indisponíveis) e deve ser relatado assim.
 
 **Lacuna confirmada:** não existe hoje uma leitura persistida de resultados quantitativos, backtests
 ou validação de modelos. As rotas `validation_*`, `data-snooping` e `research/quant/*` calculam sob

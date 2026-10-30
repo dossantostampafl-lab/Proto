@@ -261,3 +261,26 @@ def test_only_in_memory_sources_are_synchronous():
             # Anything else must be a coroutine, so the 3 s timeout bounds it.
             assert inspect.isawaitable(value), name
             value.close()
+
+
+async def test_snapshot_changes_nothing_and_never_starts_the_paper_oms():
+    from apps.api.app import oms_surface
+    from apps.api.app.metrics_state import metrics
+
+    oms_surface.reset_oms_state()
+    try:
+        before = dict(metrics.counters)
+        snapshot = await finrobot_surface.read_snapshot()
+        sources = snapshot["_sources"]["sources"]
+        assert not oms_surface.paper_oms_started()
+        assert sources["oms.orders"]["status"] == "UNAVAILABLE"
+        assert sources["oms.orders"]["error"] == "SourceNotReady"
+        assert not {"oms.ledger", "reconciliation.status", "promotion.scopes"} & set(sources)
+        assert dict(metrics.counters) == before
+        # Once something else has started the OMS, its orders are read (and nothing else is).
+        await oms_surface.components()
+        started = await finrobot_surface.read_snapshot()
+        assert started["_sources"]["sources"]["oms.orders"]["status"] == "OK"
+        assert started["oms.orders"]["execution_backend"] == "paper"
+    finally:
+        oms_surface.reset_oms_state()

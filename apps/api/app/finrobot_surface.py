@@ -23,12 +23,10 @@ from fastapi import APIRouter, HTTPException
 
 from services.finrobots import CONTRACT_VERSION, CycleRecord, FinRobotOrchestrator, FinRobotRegistry
 
+from . import oms_surface
 from .agent_surface import agent_status, live_quote, recent_decisions
 from .event_state import JournalUnavailable, record_operational_event
 from .instrument_registry import active_instruments
-from .oms_surface import executor_status, ledger_view, list_orders
-from .promotion_surface import scopes as promotion_scopes
-from .reconciliation_service import reconciliation_status
 from .risk_surface import risk_status
 from .settings import settings
 from .watchdog_surface import watchdog_status
@@ -44,7 +42,7 @@ _orchestrator: FinRobotOrchestrator | None = None
 journal_failures = 0
 
 
-SNAPSHOT_VERSION = "finrobots-snapshot/1.1"
+SNAPSHOT_VERSION = "finrobots-snapshot/1.2"
 _SOURCE_TIMEOUT_SECONDS = 3.0
 
 
@@ -68,9 +66,24 @@ def _quotes() -> dict[str, Any]:
     return out
 
 
+class SourceNotReady(RuntimeError):
+    """A source that could only be read by starting or changing something."""
+
+
+async def _orders() -> dict[str, Any]:
+    # In paper mode the OMS starts lazily (opening balances, order recovery); a FinRobot cycle
+    # must not be what starts it, so an OMS that is not up yet is simply unavailable.
+    if not oms_surface.executor_mode() and not oms_surface.paper_oms_started():
+        raise SourceNotReady("paper OMS not started")
+    return await oms_surface.list_orders(limit=50)
+
+
 def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
     """Snapshot keys -> (read-only reader, provenance of its data). Every reader is one of
-    PROTO's own GET routes or a pure read; none syncs, writes or reaches an order path.
+    PROTO's own GET routes, verified to change nothing: no checkpoint, journal, metric, schema
+    or OMS start-up. Routes that do (``/v1/oms/ledger`` writes equity checkpoints,
+    reconciliation counts metrics, the promotion registry creates its table on first read, the
+    roster syncs fills) stay out until a pure read exists.
 
     Readers in ``IN_MEMORY_SOURCES`` are synchronous reads of process state (no I/O) and run on
     the event loop without a timeout: moving them to a thread would race with the state the loop
@@ -84,12 +97,9 @@ def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
         "agents.decisions_recent": (lambda: recent_decisions(limit=50), mode),
         "risk.status": (risk_status, mode),
         "market.quotes": (_quotes, "LIVE"),
-        "oms.orders": (lambda: list_orders(limit=50), mode),
-        "oms.ledger": (ledger_view, mode),
-        "oms.executor": (executor_status, mode),
-        "reconciliation.status": (reconciliation_status, mode),
+        "oms.orders": (_orders, mode),
+        "oms.executor": (oms_surface.executor_status, mode),
         "watchdog.status": (watchdog_status, mode),
-        "promotion.scopes": (promotion_scopes, mode),
     }
 
 
