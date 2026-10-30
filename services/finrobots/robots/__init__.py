@@ -24,13 +24,11 @@ class RiskGuardian:
             global_kill = controls.get("global_kill")
             runtime_kill = controls.get("runtime_kill_switch")
             lockdown = controls.get("lockdown")
-            complete = (
-                type(global_kill) is bool
-                and runtime_kill in ("ARMED", "TRIGGERED")
-                and "lockdown" in controls
-                and (lockdown is None or isinstance(lockdown, str) and bool(lockdown))
+            active = (
+                global_kill is True
+                or runtime_kill == "TRIGGERED"
+                or (isinstance(lockdown, str) and bool(lockdown))
             )
-            active = bool(complete and (global_kill or runtime_kill == "TRIGGERED" or lockdown))
         evidence = (
             Evidence(
                 source="risk.status",
@@ -51,5 +49,36 @@ class RiskGuardian:
         )
 
 
+class AuditRecovery:
+    robot_id = FinRobotId.AUDIT_RECOVERY
+    implementation = "audit-recovery@1.0.0"
+
+    async def analyze(self, context: CycleContext) -> FinRobotReport:
+        status = context.snapshot.get("agents.status")
+        failures = status.get("journal_failures") if isinstance(status, Mapping) else None
+        alert = (
+            type(failures) is int
+            and failures > 0
+            and status.get("stage") == "PAPER"
+        )
+        evidence = (
+            Evidence(
+                source="agents.status",
+                provenance=DataProvenance.PAPER,
+                observed_at=context.started_at,
+                summary="Agent decision journal failures recorded in this process since reset.",
+                metrics={"journal_failures": str(failures)},
+            ),
+        ) if alert else ()
+        return FinRobotReport(
+            robot_id=self.robot_id,
+            implementation=self.implementation,
+            cycle_id=context.cycle_id,
+            stance=Stance.CAUTION if alert else Stance.ABSTAIN,
+            headline="Agent journal failures observed" if alert else "Insufficient audit evidence",
+            evidence=evidence,
+        )
+
+
 def default_robots() -> list[FinRobot]:
-    return [RiskGuardian()]
+    return [RiskGuardian(), AuditRecovery()]

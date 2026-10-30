@@ -54,3 +54,9 @@ async def test_risk_guardian_does_not_approve_risk_when_controls_are_clear():
 )
 async def test_risk_guardian_detects_other_global_controls(controls):
     assert (await guardian().analyze(context(controls))).stance is Stance.VETO
+
+
+@pytest.mark.asyncio
+async def test_risk_guardian_does_not_ignore_known_kill_when_other_fields_are_missing():
+    result = await guardian().analyze(context({"global_kill": True}))
+    assert result.stance is Stance.VETO
