@@ -8,7 +8,13 @@ from decimal import Decimal
 
 from pydantic import ValidationError
 
-from services.finrobots.contracts import DataProvenance, Evidence, FinRobotId, FinRobotReport, Stance
+from services.finrobots.contracts import (
+    DataProvenance,
+    Evidence,
+    FinRobotId,
+    FinRobotReport,
+    Stance,
+)
 from services.finrobots.registry import CycleContext
 from services.quant.evidence import QuantEvidence, _payload
 
@@ -84,7 +90,10 @@ def _evidence(envelope: QuantEvidence, identity: str) -> Evidence:
         source=_SOURCE,
         provenance=DataProvenance(envelope.input_provenance),
         observed_at=envelope.observed_at,
-        summary="Hash-verified persisted quantitative pipeline result; not an execution authorization.",
+        summary=(
+            "Hash-verified persisted quantitative pipeline result; "
+            "not an execution authorization."
+        ),
         metrics={
             "evidence_id": identity,
             "mode": envelope.mode,
@@ -158,7 +167,10 @@ class QuantResearch(_QuantAdvisory):
                 cycle_id=context.cycle_id,
                 instrument_id=envelope.instrument_id,
                 stance=Stance.CAUTION,
-                headline="Recorded paper quant estimate has non-positive net edge or risk-adjusted EV",
+                headline=(
+                    "Recorded paper quant estimate has non-positive "
+                    "net edge or risk-adjusted EV"
+                ),
                 evidence=(item,),
             )
         return self._abstain(
