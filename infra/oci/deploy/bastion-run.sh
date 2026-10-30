@@ -14,7 +14,7 @@
 # then SSHes through it with ~/.ssh/proto. Reads ~/proto-vars.json and ~/proto.tfstate.
 set -euo pipefail
 
-action="${1:?bootstrap|status|ssh|diag}" role="${2:?api|executor|watchdog}" domain="${3:-}"
+action="${1:?bootstrap|status|ssh|diag|chatgpt-login}" role="${2:?api|executor|watchdog}" domain="${3:-}"
 vars="${PROTO_VARS:-$HOME/proto-vars.json}"
 state="${PROTO_TFSTATE:-$HOME/proto.tfstate}"
 key="$HOME/.ssh/proto"
@@ -76,6 +76,16 @@ case "$action" in
       sudo journalctl -u proto-deploy --no-pager -n 15 -o cat" ;;
   ssh)
     ssh_to ;;
+  chatgpt-login)
+    # Sign the API in to ChatGPT ("Sign in with ChatGPT", no API key). The login runs inside the
+    # API container, so the session is created and kept on the API instance only (its private
+    # /var/lib/proto/chatgpt); this terminal shows the sign-in link and reads back the address the
+    # browser ends on. No token is printed.
+    [ "$role" = api ] || { echo "chatgpt-login is for the api" >&2; exit 2; }
+    # shellcheck disable=SC2086
+    ssh -t $opts -o ProxyCommand="$proxy" "opc@$ip" \
+      "sudo podman exec -it proto-api python -m services.chatgpt.chatgpt_connect \
+        --profile default --paste --no-browser" ;;
   diag)
     [ "$role" = executor ] || { echo "diag is for the executor" >&2; exit 2; }
     # The Vault's pair as Cloud Shell reads it, as fingerprints only.

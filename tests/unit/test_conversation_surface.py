@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import httpx
+import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -24,6 +25,8 @@ async def client(monkeypatch, tmp_path):
             chatgpt_profile="default",
             chatgpt_model="fixture-model",
             operator_api_token="operator",
+            chatgpt_public_access=False,
+            public_origin=None,
         ),
     )
     monkeypatch.setattr(surface, "store", lambda: ConversationStore(engine))
@@ -40,8 +43,8 @@ async def client(monkeypatch, tmp_path):
     async def ready():
         return SimpleNamespace(get=lambda identifier: agent if identifier == "AG-1" else None)
 
-    async def evidence(**kwargs):
-        return {"configured": True, "decisions": [], "instrument_id": kwargs["instrument_id"]}
+    def evidence(**kwargs):
+        return {"decisions": [], "instrument_id": kwargs["instrument_id"]}
 
     async def journal(**kwargs):
         assert "text" not in kwargs["payload"]
@@ -202,3 +205,53 @@ async def test_selected_model_is_used_without_changing_server_configuration(clie
     assert response.json()["agent_id"] == "AG-1"
     assert seen == ["fixture-other"]
     assert surface.settings.chatgpt_model == "fixture-model"
+
+
+def test_public_access_needs_the_operator_token_and_the_public_origin(monkeypatch) -> None:
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from apps.api.app import conversation_surface as surface
+
+    def request(headers: dict[str, str]) -> Request:
+        raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+        return Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/conversation/status",
+                "headers": raw,
+                "client": ("203.0.113.9", 4000),
+                "server": ("155-181-40-136.sslip.io", 443),
+                "scheme": "https",
+                "query_string": b"",
+            }
+        )
+
+    configured = SimpleNamespace(
+        chatgpt_local_enabled=True,
+        chatgpt_public_access=True,
+        public_origin="https://155-181-40-136.sslip.io",
+        operator_api_token="operator",
+    )
+    monkeypatch.setattr(surface, "settings", configured)
+    good = {"origin": "https://155-181-40-136.sslip.io", "x-forwarded-for": "203.0.113.9"}
+    surface.authorize_operator(request({**good, "X-Proto-Operator-Token": "operator"}))
+    for headers, code in (
+        (good, 401),
+        ({**good, "X-Proto-Operator-Token": "wrong"}, 401),
+        ({"origin": "https://evil.example", "X-Proto-Operator-Token": "operator"}, 403),
+    ):
+        with pytest.raises(HTTPException) as refused:
+            surface.authorize_operator(request(headers))
+        assert refused.value.status_code == code
+    configured.public_origin = None
+    with pytest.raises(HTTPException) as unset:
+        surface.authorize_operator(request({**good, "X-Proto-Operator-Token": "operator"}))
+    assert unset.value.status_code == 503
+    # Off (the default): a public client is refused even with the token.
+    configured.chatgpt_public_access = False
+    configured.public_origin = "https://155-181-40-136.sslip.io"
+    with pytest.raises(HTTPException) as loopback:
+        surface.authorize_operator(request({**good, "X-Proto-Operator-Token": "operator"}))
+    assert loopback.value.status_code == 403

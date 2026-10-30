@@ -10,6 +10,7 @@ import tempfile
 import threading
 import uuid
 import webbrowser
+from collections.abc import Callable
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -235,6 +236,70 @@ def _save(path: Path, document: dict[str, object]) -> None:
     save_private(path, {**document, "application": "proto"})
 
 
+def _listen_for_callback(
+    url: str, state: str, port: int, no_browser: bool, contains_id_token_hint: bool
+) -> dict[str, str]:
+    # Per-listener state avoids cross-profile callback races in the same process.
+    handler = type(
+        "ProtoCallback",
+        (_CallbackHandler,),
+        {
+            "result": None,
+            "event": threading.Event(),
+            "expected_state": state,
+            "result_lock": threading.Lock(),
+        },
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        if contains_id_token_hint:
+            print(
+                "Opening ChatGPT authorization in the browser. "
+                "The authorization URL is intentionally not printed because it "
+                "contains an ID-token hint."
+            )
+        else:
+            print("Open this URL in the browser to connect ChatGPT:")
+            print(url)
+        if not no_browser:
+            webbrowser.open(url)
+        if not handler.event.wait(timeout=600):
+            raise RuntimeError("Timed out waiting for the ChatGPT authorization callback")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    return handler.result or {}
+
+
+def _pasted_callback(url: str, state: str, read: Callable[[str], str] = input) -> dict[str, str]:
+    """For a host without a browser (the Oracle VM, reached from a tablet through Cloud Shell):
+    the operator opens the URL on any device, signs in, and pastes back the address the browser
+    ends on (http://127.0.0.1:1455/auth/callback?code=...; that page itself does not load).
+    The code is useless without this process's PKCE verifier, so it never leaves this host."""
+
+    print("Open this URL on any device and sign in to ChatGPT:")
+    print(url)
+    print(
+        "The browser then ends on a page that does not load (http://127.0.0.1:1455/...). "
+        "Copy that page's full address and paste it here."
+    )
+    pasted = read("Address: ").strip()
+    parsed = urlparse(pasted)
+    if parsed.path != "/auth/callback" or parsed.hostname not in {"127.0.0.1", "localhost"}:
+        raise RuntimeError("That is not the ChatGPT sign-in callback address")
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if any(len(values) != 1 for values in query.values()):
+        raise RuntimeError("The callback address repeats a parameter")
+    callback = {key: values[0] for key, values in query.items()}
+    if not secrets.compare_digest(callback.get("state", ""), state):
+        raise RuntimeError("OAuth state did not match")
+    return callback
+
+
 def _connect(
     *,
     output: Path,
@@ -243,6 +308,7 @@ def _connect(
     force_new: bool,
     enable_plan: bool = False,
     host_id_override: str | None = None,
+    paste: bool = False,
 ) -> None:
     if not output.is_relative_to(_config_root().resolve()):
         raise RuntimeError("Credentials must be in PROTO's private profile directory")
@@ -300,7 +366,7 @@ def _connect(
         # Returning authorization stays bound to the selected saved registration.
         # id_token_hint is credential-bearing, so only place it in a URL opened
         # directly by this process; never print that URL to a terminal.
-        if retained_id_token and not no_browser:
+        if retained_id_token and not no_browser and not paste:
             params["id_token_hint"] = retained_id_token
             contains_id_token_hint = True
         if email:
@@ -312,40 +378,10 @@ def _connect(
 
     url = AUTHORIZE_URL + "?" + urlencode(params)
 
-    # Per-listener state avoids cross-profile callback races in the same process.
-    handler = type(
-        "ProtoCallback",
-        (_CallbackHandler,),
-        {
-            "result": None,
-            "event": threading.Event(),
-            "expected_state": state,
-            "result_lock": threading.Lock(),
-        },
-    )
-    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        if contains_id_token_hint:
-            print(
-                "Opening ChatGPT authorization in the browser. "
-                "The authorization URL is intentionally not printed because it "
-                "contains an ID-token hint."
-            )
-        else:
-            print("Open this URL in the browser to connect ChatGPT:")
-            print(url)
-        if not no_browser:
-            webbrowser.open(url)
-        if not handler.event.wait(timeout=600):
-            raise RuntimeError("Timed out waiting for the ChatGPT authorization callback")
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-    callback: dict[str, str] = handler.result or {}
+    if paste:
+        callback = _pasted_callback(url, state)
+    else:
+        callback = _listen_for_callback(url, state, port, no_browser, contains_id_token_hint)
     if callback.get("state") != state:
         raise RuntimeError("OAuth state did not match")
     if callback.get("error"):
@@ -493,6 +529,12 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=1455)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument(
+        "--paste",
+        action="store_true",
+        help="No local browser: print the sign-in URL and read back the callback address "
+        "the browser ends on (for the Oracle VM, from Cloud Shell).",
+    )
+    parser.add_argument(
         "--new",
         action="store_true",
         help="Register a new ChatGPT client. Existing profiles are never "
@@ -528,6 +570,7 @@ def main() -> None:
             force_new=args.new,
             enable_plan=args.enable_plan,
             host_id_override=args.host_id,
+            paste=args.paste,
         )
     except Exception:
         raise SystemExit(

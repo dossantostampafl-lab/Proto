@@ -195,6 +195,19 @@ ensure_alpaca_executor() {  # ensure_alpaca_executor <image id>
   masked_logs "$name" /run/proto/executor-alpaca.env
 }
 
+# The ChatGPT session ("Sign in with ChatGPT", no API key): created by bastion-run.sh
+# chatgpt-login inside the API container and kept here, on the API instance only, owned by the
+# container's user and refreshed by the API. Never on the executor or the watchdog.
+chatgpt_dir=/var/lib/proto/chatgpt
+ensure_chatgpt_dir() {
+  install -d -m 0700 -o 10001 -g 10001 "$chatgpt_dir"
+}
+chatgpt_mounted() {  # the running API container has the ChatGPT session directory
+  [ "$role" = api ] || return 0
+  podman container inspect --format '{{range .Mounts}}{{.Destination}} {{end}}' proto-api \
+    2>/dev/null | grep -q '/home/proto/.config/proto/chatgpt'
+}
+
 start() {  # start <image id>
   local image="$1"
   podman rm -f "proto-${role}" >/dev/null 2>&1 || true
@@ -202,7 +215,9 @@ start() {  # start <image id>
     api)
       mapfile -t xp_args < <(xp_env_args)
       mapfile -t alpaca_extra < <(alpaca_args)
+      ensure_chatgpt_dir
       podman run -d --name proto-api --restart=always --network host --env-file "$secrets" \
+        -v "${chatgpt_dir}:/home/proto/.config/proto/chatgpt:Z" \
         ${xp_args[@]+"${xp_args[@]}"} ${alpaca_extra[@]+"${alpaca_extra[@]}"} \
         -e APP_ENV=production -e OMS_EXECUTION_BACKEND=executor \
         -e "EXECUTOR_URL=http://${EXECUTOR_IP}:8100" \
@@ -280,7 +295,8 @@ case "$role" in
   executor) ensure_db EXECUTOR_DATABASE_URL ;;
 esac
 
-if [ "$new" = "$current" ] && [ "$running" = true ] && ! $force; then
+# An API container from before the ChatGPT mount is restarted once to gain it.
+if [ "$new" = "$current" ] && [ "$running" = true ] && ! $force && chatgpt_mounted; then
   ensure_caddy
   ensure_alpaca_executor "$new"
   exit 0
