@@ -86,6 +86,7 @@ class JobRun:
 
 
 Handler = Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]]
+ContextualHandler = Callable[[dict[str, Any], JobRun], Awaitable[dict[str, Any] | None]]
 RiskGate = Callable[[JobRun], Awaitable[bool]]
 
 
@@ -95,6 +96,7 @@ class ProtoBrain:
     worker_id: str
     specs: dict[str, JobSpec] = field(default_factory=dict)
     handlers: dict[str, Handler] = field(default_factory=dict)
+    contextual_handlers: dict[str, ContextualHandler] = field(default_factory=dict)
     risk_gate: RiskGate | None = None
 
     def register(self, spec: JobSpec, handler: Handler) -> None:
@@ -102,6 +104,17 @@ class ProtoBrain:
             raise ValueError(f"job already registered: {spec.name}")
         self.specs[spec.name] = spec
         self.handlers[spec.name] = handler
+
+    def register_contextual(self, spec: JobSpec, handler: ContextualHandler) -> None:
+        """Register a handler requiring trusted job metadata (e.g. the queued mode).
+
+        The JobRun comes from the durable store and never from user payload fields.
+        Existing one-argument handlers retain their original behavior.
+        """
+        if spec.name in self.specs:
+            raise ValueError(f"job already registered: {spec.name}")
+        self.specs[spec.name] = spec
+        self.contextual_handlers[spec.name] = handler
 
     async def enqueue(
         self,
@@ -132,7 +145,8 @@ class ProtoBrain:
 
         spec = self.specs.get(run.job_name)
         handler = self.handlers.get(run.job_name)
-        if spec is None or handler is None:
+        contextual_handler = self.contextual_handlers.get(run.job_name)
+        if spec is None or (handler is None and contextual_handler is None):
             return await self.store.dead_letter(
                 run.id,
                 owner=self.worker_id,
@@ -158,7 +172,11 @@ class ProtoBrain:
                 )
 
         try:
-            result = await handler(dict(run.payload))
+            if contextual_handler is not None:
+                result = await contextual_handler(dict(run.payload), run)
+            else:
+                assert handler is not None
+                result = await handler(dict(run.payload))
         except Exception as exc:
             return await self.store.fail(
                 run.id,

@@ -25,6 +25,7 @@ from services.events import journal_metadata
 from services.oms import ledger_metadata
 from services.orchestration import DecisionMemoryBase, OrchestrationBase
 from services.promotion import promotion_metadata
+from services.quant.evidence import quant_evidence_metadata
 from services.risk import control_metadata
 
 from .models import Fill, SimulationOrder
@@ -101,6 +102,7 @@ async def init_database(engine: AsyncEngine) -> None:
         await connection.run_sync(conversation_metadata.create_all)
         await connection.run_sync(Base.metadata.create_all)
         await connection.run_sync(canonical_metadata.create_all)
+        await connection.run_sync(quant_evidence_metadata.create_all)
         await connection.run_sync(OrchestrationBase.metadata.create_all)
         await connection.run_sync(DecisionMemoryBase.metadata.create_all)
         await connection.run_sync(journal_metadata.create_all)
