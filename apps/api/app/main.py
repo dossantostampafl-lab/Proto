@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, b3_quotes, control_state, us_quotes
+from . import __version__, b3_quotes, control_state, finrobot_surface, us_quotes
 from .agent_surface import router as agent_router
 from .app_state import control_engine, orchestration_engine, persistence_engine
 from .conversation_surface import router as conversation_router
@@ -33,6 +33,8 @@ from .event_surface import router as event_router
 from .floor_surface import router as floor_router
 from .live_routes import router as live_router
 from .live_websockets import router as live_websocket_router
+from .mcp_surface import MCP_PATH
+from .mcp_surface import router as mcp_router
 from .observability import access_log
 from .oms_surface import router as oms_router
 from .orchestration_surface import router as orchestration_router
@@ -71,7 +73,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await restore_watchdog()
     b3_feed = await b3_quotes.start_if_enabled()
     us_feed = await us_quotes.start_if_enabled()
+    await finrobot_surface.start_if_enabled()
     yield
+    await finrobot_surface.stop()
     await us_quotes.stop(us_feed)
     await b3_quotes.stop(b3_feed)
     if persistence_engine is not None:
@@ -115,6 +119,8 @@ for router in (
     signal_router,
     agent_router,
     roster_router,
+    finrobot_surface.router,
+    mcp_router,
     risk_router,
     oms_router,
     b3_quotes.router,
@@ -245,6 +251,8 @@ async def operator_authentication_policy(request: Request, call_next) -> Respons
         and request.url.path != TRADINGVIEW_WEBHOOK_PATH
         # The watchdog authenticates with its own halt-only token (watchdog_surface).
         and not request.url.path.startswith(WATCHDOG_PREFIX)
+        # The read-only MCP server authenticates with its own bearer token (mcp_surface).
+        and request.url.path != MCP_PATH
     )
     if authentication_required and mutating_operator_route:
         if expected is None:
