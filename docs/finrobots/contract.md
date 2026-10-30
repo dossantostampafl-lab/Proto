@@ -40,14 +40,14 @@ class CycleContext:
     snapshot: Mapping[str, Any]   # chaves: tabela "Snapshot" abaixo
 ```
 
-### Snapshot `finrobots-snapshot/1.3` (1.2 + `oms.balances`)
+### Snapshot `finrobots-snapshot/1.4` (1.2 + `oms.balances` + `quant.evidence`)
 
 Cada chave é a resposta de uma rota GET do próprio PROTO, **verificada como sem efeito**: não
 grava checkpoint, journal, métrica, esquema, nem inicia o OMS. Cada chave é lida uma vez por
 ciclo.
 
-- **Timeout de 3 s:** vale para as fontes assíncronas (`oms.*`), que podem falar com o executor por
-  HTTP.
+- **Timeout de 3 s:** vale para as fontes assíncronas (`oms.*`, `quant.evidence`), que fazem I/O
+  (executor por HTTP, banco de pesquisa).
 - **Fontes síncronas** (`IN_MEMORY_SOURCES`: `agents.*`, `risk.status`, `market.quotes`,
   `watchdog.status`): leem estado do processo, sem I/O. Rodam no event loop **sem** timeout.
   Movê-las para uma thread criaria corrida com o estado alterado no loop, e um timeout de thread
@@ -65,6 +65,7 @@ ciclo.
 | `oms.balances` | `oms_surface.pure_balances()`: `{accounts: {<venue>: {account_id, mode, balances: {<asset>: {total, reserved, available, opening}}, venue_halted?, unavailable?}}, mode}`. Lê só `ledger.balances()` (paper) ou `GET /v1/ledger` de cada executor; não calcula account state nem grava checkpoint. No modo paper, `UNAVAILABLE` (`SourceNotReady`) até o OMS ser iniciado por outra via | PAPER/TESTNET | Portfolio Intelligence |
 | `oms.executor` | `GET /v1/oms/executor/status` | PAPER/TESTNET | Execution Supervisor |
 | `watchdog.status` | `GET /v1/watchdog/status` | PAPER/TESTNET | Audit & Recovery |
+| `quant.evidence` | `services.quant.evidence.recent_quant_evidence(persistence_engine, limit=20)`: `{records: [{evidence_id, ...quant-evidence/1}], contract_version}`; só SELECT, cada linha revalidada por hash. `SourceNotReady` sem o módulo ou sem o store de pesquisa (a API de produção em LIVE_MONITORING não tem) | a dos registros (`input_provenance`: SIMULATED, REPLAY ou PAPER; `MIXED` se variar; nunca LIVE) | Quant Research, Strategy Research, Model Validator |
 
 **Removidas na 1.2:** `oms.ledger`, `reconciliation.status` e `promotion.scopes`, porque cada uma
 tem efeitos:
@@ -86,12 +87,12 @@ ficar em `ABSTAIN` para essas dimensões até uma rota de leitura com proveniên
 A proposta `docs/research/FINROBOTS-QUANT-CONTRACT-PROPOSAL.md` (#359) é o ponto de partida.
 Nenhum especialista deve chamar essas rotas POST.
 
-**Acordado, ainda não implementado: `quant-evidence/1`** (#360, comentário de 2026-10-30).
+**`quant-evidence/1`: implementado** (Codex `beec583`; leitura no snapshot 1.4) (#360, comentário de 2026-10-30).
 
 | Dono | Parte |
 |---|---|
 | Codex | Registro por envelope completo (`evidence_id` = SHA-256 do JSON canônico; instrumento canônico, modo, `observed_at` com fuso, custos com fonte e timestamp, amostras estritamente anteriores, versões, resultado em texto exato). Persistência idempotente: conteúdo diferente com o mesmo id é conflito (409), sem sobrescrita. Tabela só por migração Alembic + `init_database`. Leitura pura `services/quant/evidence.py::recent_quant_evidence(engine, *, limit=20, instrument_id=None)`: só SELECT, limite 100, `LookupError` sem engine. |
-| Claude Code | Chave `quant.evidence` (snapshot 1.4), com proveniência = `mode` do registro (nunca LIVE), timeout de 3 s e teste de ausência de efeito. |
+| Claude Code | Chave `quant.evidence` (snapshot 1.4), com proveniência = `input_provenance` dos registros (nunca LIVE), timeout de 3 s e teste de ausência de efeito. Implementado. |
 
 `FinRobotReport` (pydantic, `extra="forbid"`, congelado): `robot_id`, `implementation`,
 `cycle_id`, `instrument_id | None` (None = escopo SYSTEM), `stance`

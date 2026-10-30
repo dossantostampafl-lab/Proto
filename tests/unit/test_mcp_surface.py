@@ -374,3 +374,69 @@ async def test_finrobots_keep_running_with_chatgpt_unavailable(client, configure
         assert latest.snapshot_sources and latest.errors == {}
     finally:
         await orch.stop()
+
+
+async def test_quant_evidence_source(monkeypatch):
+    import sys
+    import types
+
+    snapshot = await finrobot_surface.read_snapshot()
+    source = snapshot["_sources"]["sources"]["quant.evidence"]
+    if "services.quant.evidence" not in sys.modules:
+        try:
+            import services.quant.evidence  # noqa: F401
+        except ModuleNotFoundError:
+            # This branch alone: the engines' branch has not installed the contract yet.
+            assert source["status"] == "UNAVAILABLE" and source["error"] == "SourceNotReady"
+
+    seen = {}
+
+    async def recent(engine, *, limit=20, instrument_id=None):
+        seen["limit"] = limit
+        return [
+            {"evidence_id": "a", "input_provenance": "REPLAY", "mode": "HISTORICAL_REPLAY"},
+            {"evidence_id": "b", "input_provenance": "REPLAY", "mode": "HISTORICAL_REPLAY"},
+        ]
+
+    fake = types.ModuleType("services.quant.evidence")
+    fake.recent_quant_evidence = recent
+    monkeypatch.setitem(sys.modules, "services.quant.evidence", fake)
+    read = await finrobot_surface.read_snapshot()
+    meta = read["_sources"]["sources"]["quant.evidence"]
+    assert meta["status"] == "OK" and meta["provenance"] == "REPLAY" and seen["limit"] == 20
+    assert [r["evidence_id"] for r in read["quant.evidence"]["records"]] == ["a", "b"]
+
+    async def mixed(engine, **_):
+        return [{"input_provenance": "PAPER"}, {"input_provenance": "SIMULATED"}]
+
+    fake.recent_quant_evidence = mixed
+    meta = (await finrobot_surface.read_snapshot())["_sources"]["sources"]["quant.evidence"]
+    assert meta["provenance"] == "MIXED"
+
+    async def live(engine, **_):
+        return [{"input_provenance": "LIVE"}]
+
+    fake.recent_quant_evidence = live
+    meta = (await finrobot_surface.read_snapshot())["_sources"]["sources"]["quant.evidence"]
+    assert meta["provenance"] == "UNAVAILABLE"  # never relabeled as live
+
+    async def none(engine, **_):
+        raise LookupError("quant evidence storage unavailable")
+
+    fake.recent_quant_evidence = none
+    read = await finrobot_surface.read_snapshot()
+    meta = read["_sources"]["sources"]["quant.evidence"]
+    assert meta["status"] == "UNAVAILABLE" and meta["error"] == "SourceNotReady"
+    assert "quant.evidence" not in read
+
+
+async def test_sources_not_ready_do_not_log_tracebacks(caplog):
+    import logging
+
+    from apps.api.app import oms_surface
+
+    oms_surface.reset_oms_state()
+    with caplog.at_level(logging.WARNING, logger="proto.finrobots"):
+        snapshot = await finrobot_surface.read_snapshot()
+    assert snapshot["_sources"]["sources"]["oms.orders"]["error"] == "SourceNotReady"
+    assert not [r for r in caplog.records if r.exc_info]

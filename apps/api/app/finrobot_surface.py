@@ -42,7 +42,7 @@ _orchestrator: FinRobotOrchestrator | None = None
 journal_failures = 0
 
 
-SNAPSHOT_VERSION = "finrobots-snapshot/1.3"
+SNAPSHOT_VERSION = "finrobots-snapshot/1.4"
 _SOURCE_TIMEOUT_SECONDS = 3.0
 
 
@@ -85,6 +85,43 @@ async def _balances() -> dict[str, Any]:
         raise SourceNotReady(str(exc)) from exc
 
 
+_QUANT_EVIDENCE_MODULE = "services.quant.evidence"
+
+
+async def _quant_evidence() -> dict[str, Any]:
+    """Recent ``quant-evidence/1`` records (docs/finrobots/contract.md): a pure SELECT on the
+    research store. Unavailable when that contract is not installed or there is no store (the
+    production LIVE_MONITORING API has none: research data never goes to the control plane)."""
+
+    try:
+        module = importlib.import_module(_QUANT_EVIDENCE_MODULE)
+    except ModuleNotFoundError as exc:
+        if exc.name != _QUANT_EVIDENCE_MODULE:
+            raise
+        raise SourceNotReady("quant-evidence/1 is not installed") from exc
+    from .app_state import persistence_engine
+
+    try:
+        records = await module.recent_quant_evidence(persistence_engine, limit=20)
+    except LookupError as exc:
+        raise SourceNotReady(str(exc)) from exc
+    return {"records": records, "contract_version": "quant-evidence/1"}
+
+
+_QUANT_PROVENANCE = {"SIMULATED", "REPLAY", "PAPER"}
+
+
+def _quant_provenance(value: Mapping[str, Any]) -> str:
+    """The records' own input provenance; never LIVE, and UNAVAILABLE with no record."""
+
+    kinds = {r.get("input_provenance") for r in value.get("records", ()) if isinstance(r, Mapping)}
+    if not kinds:
+        return "UNAVAILABLE"
+    if len(kinds) == 1 and kinds <= _QUANT_PROVENANCE:
+        return str(next(iter(kinds)))
+    return "MIXED" if kinds <= _QUANT_PROVENANCE else "UNAVAILABLE"
+
+
 def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
     """Snapshot keys -> (read-only reader, provenance of its data). Every reader is one of
     PROTO's own GET routes (or a pure read beside one), verified to change nothing: no
@@ -109,6 +146,8 @@ def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
         "oms.balances": (_balances, mode),
         "oms.executor": (oms_surface.executor_status, mode),
         "watchdog.status": (watchdog_status, mode),
+        # Provenance is replaced by the records' own (see read_snapshot).
+        "quant.evidence": (_quant_evidence, "UNAVAILABLE"),
     }
 
 
@@ -141,12 +180,18 @@ async def read_snapshot() -> Mapping[str, Any]:
             status, error = "OK", None
         except TimeoutError:
             status, error = "TIMEOUT", None
+        except SourceNotReady as exc:
+            # An expected state (OMS not started, store absent): no traceback every cycle.
+            logger.debug("finrobot snapshot source %s not ready: %s", name, exc)
+            status, error = "UNAVAILABLE", "SourceNotReady"
         except Exception as exc:
             logger.warning("finrobot snapshot source %s unavailable", name, exc_info=True)
             status, error = "UNAVAILABLE", type(exc).__name__
         if status != "OK" or (name == "market.quotes" and not any(snapshot[name].values())):
             # Read but empty (no live quote at all) is not live data.
             provenance = "UNAVAILABLE"
+        elif name == "quant.evidence":
+            provenance = _quant_provenance(snapshot[name])
         sources[name] = {
             "status": status,
             "read_at": read_at,
