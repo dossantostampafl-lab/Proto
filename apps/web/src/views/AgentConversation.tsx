@@ -98,6 +98,17 @@ export function AgentConversation({ agentId }: { agentId: string }) {
     else setStatus(result.status === 401 ? "Token de operador ausente ou errado: entre com ele na aba SYSTEM." : `O ChatGPT não respondeu: ${result.error}.`);
     setBusy(false);
   }
+  async function toolProbe() {
+    setBusy(true); setStatus("Testando se o seu ChatGPT usa ferramentas do PROTO (preço do BTC)…");
+    type Attempt = { shape: string; tool_called?: boolean; answer?: string; error?: string };
+    const result = await post<{ model: string; tools_supported: boolean; working_shape: string | null; attempts: Attempt[] }>("/conversation/tool-probe", modelRef.current ? { model: modelRef.current } : {});
+    if (!result.ok) setStatus(result.status === 401 ? "Token de operador ausente ou errado: entre com ele na aba SYSTEM." : `Teste falhou: ${result.error}`);
+    else if (result.data.tools_supported) {
+      const ok = result.data.attempts.find(a => a.tool_called);
+      setStatus(`✅ Funciona: o ChatGPT (${result.data.model}) usou a ferramenta de preço (formato ${result.data.working_shape}). Resposta: ${ok?.answer ?? "—"}`);
+    } else setStatus(`❌ O ChatGPT (${result.data.model}) não usou a ferramenta. ${result.data.attempts.map(a => `${a.shape}: ${a.error ?? (a.tool_called ? "chamou" : `não chamou — ${a.answer ?? ""}`)}`).join(" · ")}`);
+    setBusy(false);
+  }
   /** One tap: unlock speech and start listening at once (both need the tap's user gesture), then
    *  connect, pick a model and open a conversation while the operator is still speaking. */
   function talk() {
@@ -147,6 +158,7 @@ export function AgentConversation({ agentId }: { agentId: string }) {
     </ol>}
     <button type="button" className="btn primary" disabled={busy} onClick={() => { void verify(); }}>Verify OpenAI connection</button>
     <button type="button" className="btn" disabled={busy || !connection?.connected} onClick={() => void disconnect()}>Disconnect ChatGPT</button>
+    <button type="button" className="btn" disabled={busy} onClick={() => void toolProbe()}>🧪 Testar ferramentas do ChatGPT</button>
     {models.length > 0 && <label className="field"><span>ChatGPT model</span><select value={model} disabled={busy} onChange={e => keepModel(e.target.value)}>{models.map(value => <option key={value}>{value}</option>)}</select></label>}
     <p>Ask ChatGPT to explain recorded evidence. This does not execute the trader or FinRobot. Never enter passwords or tokens.</p>
     <button type="button" className="btn" disabled={busy || !model} onClick={() => { void start(); }}>New explanation conversation</button>
