@@ -89,13 +89,16 @@ print(f"postgresql+asyncpg://{u}:{secrets.token_hex(24)}@127.0.0.1:5432/{u}", en
 ensure proto-api-database-url db_url proto
 ensure proto-executor-database-url db_url executor
 
-# Typed by the operator: the Binance testnet key pair and the Alpaca PAPER key pair (optional:
-# without it only the Alpaca executor waits, docs/venues/alpaca-paper.md).
+# Typed by the operator: the Binance testnet key pair, the Alpaca PAPER key pair (optional:
+# without it only the Alpaca executor waits, docs/venues/alpaca-paper.md) and the ChatGPT
+# connector token (optional: without it only the MCP server stays closed,
+# docs/finrobots/chatgpt-mcp.md). The operator types that one again on the OAuth approval page.
 for name in proto-binance-testnet-key proto-binance-testnet-secret \
-            proto-alpaca-paper-key proto-alpaca-paper-secret; do
+            proto-alpaca-paper-key proto-alpaca-paper-secret proto-mcp-api-token; do
   if exists "$name"; then echo "exists  $name"; continue; fi
   case "$name" in
     proto-alpaca-*) where="app.alpaca.markets, Paper account" section="Alpaca paper key" ;;
+    proto-mcp-*) where="a secret of 32+ characters you choose and keep" section="ChatGPT connector" ;;
     *) where="testnet.binance.vision" section="Binance testnet key" ;;
   esac
   # The prompt reads the terminal, so it works even when this script is run from setup.sh.
@@ -105,6 +108,10 @@ for name in proto-binance-testnet-key proto-binance-testnet-secret \
   read -rsp "$name ($where; Enter to skip for now): " value <&3; echo
   exec 3<&-
   if [ -z "$value" ]; then echo "skipped $name: run this script again once you have it"; continue; fi
+  if [ "$name" = proto-mcp-api-token ] && [ "${#value}" -lt 32 ]; then
+    # The production API refuses a shorter MCP_API_TOKEN; proto-deploy would leave MCP closed.
+    unset value; echo "skipped $name: it needs at least 32 characters"; continue
+  fi
   printf '%s' "$value" | put "$name"
   unset value
 done

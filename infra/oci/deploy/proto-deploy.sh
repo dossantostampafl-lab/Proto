@@ -117,6 +117,34 @@ alpaca_ready() {  # true once alpaca.conf exists and this role's Alpaca secrets 
     return 1
   fi
 }
+# Optional ChatGPT connector token (docs/finrobots/chatgpt-mcp.md), fetched as role api-mcp.
+# Without it, or with one the API would refuse (shorter than 32 characters, or equal to another
+# token), the API starts exactly as before and only its read-only MCP server stays closed.
+mcp_env="${PROTO_MCP_ENV:-/run/proto/api-mcp.env}"
+mcp_fetch() {  # true once the token is in tmpfs (mcp_env)
+  local vault
+  vault="$(sed -n 's/^ExecStart=.*proto-fetch-secrets [a-z]* //p' \
+    /etc/systemd/system/proto-secrets.service 2>/dev/null | head -n1)"
+  [ -n "$vault" ] && /usr/local/sbin/proto-fetch-secrets api-mcp "$vault" >/dev/null 2>&1
+}
+mcp_args() {  # extra podman args for the API, one per line
+  [ "$role" = api ] || return 0
+  local token
+  if ! mcp_fetch; then
+    log "mcp: proto-mcp-api-token is not readable; the ChatGPT connector stays closed" >&2
+    return 0
+  fi
+  token="$(sed -n 's/^MCP_API_TOKEN=//p' "$mcp_env" | head -n1)"
+  if [ "${#token}" -lt 32 ] || grep -qxF -e "OPERATOR_API_TOKEN=$token" \
+      -e "EXECUTOR_API_TOKEN=$token" -e "WATCHDOG_API_TOKEN=$token" "$secrets"; then
+    unset token
+    log "mcp: proto-mcp-api-token is shorter than 32 characters or reuses another token;" \
+      "the ChatGPT connector stays closed" >&2
+    return 0
+  fi
+  unset token
+  printf '%s\n' --env-file "$mcp_env"
+}
 alpaca_answers() {  # alpaca_answers <port>: its public /health answers from this host
   curl -fsS --max-time 5 "http://${EXECUTOR_IP}:$1/health" >/dev/null 2>&1
 }
@@ -215,10 +243,12 @@ start() {  # start <image id>
     api)
       mapfile -t xp_args < <(xp_env_args)
       mapfile -t alpaca_extra < <(alpaca_args)
+      mapfile -t mcp_extra < <(mcp_args)
       ensure_chatgpt_dir
       podman run -d --name proto-api --restart=always --network host --env-file "$secrets" \
         -v "${chatgpt_dir}:/home/proto/.config/proto/chatgpt:Z" \
         ${xp_args[@]+"${xp_args[@]}"} ${alpaca_extra[@]+"${alpaca_extra[@]}"} \
+        ${mcp_extra[@]+"${mcp_extra[@]}"} \
         -e APP_ENV=production -e OMS_EXECUTION_BACKEND=executor \
         -e "EXECUTOR_URL=http://${EXECUTOR_IP}:8100" \
         ${DOMAIN:+-e "PUBLIC_ORIGIN=https://${DOMAIN}"} \
@@ -255,7 +285,8 @@ for line in sys.stdin:
 ' "$@" || true
 }
 show_logs() {
-  masked_logs "proto-${role}" "$secrets" "/run/proto/${role}-db.env"
+  # Missing files are skipped: the MCP token exists only on an API that has one.
+  masked_logs "proto-${role}" "$secrets" "/run/proto/${role}-db.env" "$mcp_env"
 }
 
 healthy() {
