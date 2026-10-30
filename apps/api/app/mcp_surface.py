@@ -303,11 +303,28 @@ async def _call_tool(request_id: Any, params: dict[str, Any], client: str) -> JS
                 "isError": True,
             },
         )
-    await _journal_call(tool.name, True, client)
     structured = {"notice": _NOTICE, "data": data}
     text = json.dumps(structured, ensure_ascii=False, default=str)
     if len(text) > _MAX_TEXT:
-        text = text[:_MAX_TEXT] + "… [truncated]"
+        # Neither half of the result may exceed the bound: no partial JSON in the text and no
+        # unbounded structuredContent beside it. The client is told to ask for less.
+        await _journal_call(tool.name, False, client)
+        return _rpc_result(
+            request_id,
+            {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Result too large ({len(text)} characters, limit {_MAX_TEXT}); "
+                            "ask for fewer items, for example a smaller limit."
+                        ),
+                    }
+                ],
+                "isError": True,
+            },
+        )
+    await _journal_call(tool.name, True, client)
     return _rpc_result(
         request_id,
         {

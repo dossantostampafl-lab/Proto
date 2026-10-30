@@ -382,3 +382,58 @@ async def test_cycle_keeps_the_snapshot_source_labels():
     assert record.snapshot_sources == ("risk.status",)
     assert record.summary()["sources"]["oms.orders"]["error"] == "SourceNotReady"
     assert "extra" not in record.summary()["sources"]["risk.status"]
+
+
+def test_a_system_veto_survives_the_same_robots_instrument_support():
+    def system_veto():
+        item = report(FinRobotId.RISK_GUARDIAN, Stance.VETO, instrument=None)
+        return item.model_copy(
+            update={
+                "evidence": (
+                    Evidence(
+                        source="risk.status",
+                        provenance=DataProvenance.PAPER,
+                        observed_at=NOW,
+                        summary="global kill switch on",
+                    ),
+                )
+            }
+        )
+
+    result = decide(
+        [
+            system_veto(),
+            report(FinRobotId.RISK_GUARDIAN, Stance.SUPPORT),
+            report(FinRobotId.QUANT_RESEARCH, Stance.SUPPORT),
+        ],
+        now=NOW,
+    )
+    btc = next(s for s in result.scopes if s.scope == BTC)
+    assert btc.verdict is Verdict.BLOCK_NEW_RISK
+    assert btc.votes == {
+        "quant-research": "SUPPORT",
+        "risk-guardian": "SUPPORT",
+        "risk-guardian (SYSTEM)": "VETO",
+    }
+    assert "global kill switch on" in [e.summary for e in btc.evidence]
+
+
+def test_system_caution_beats_instrument_support_and_support_counts_once():
+    result = decide(
+        [
+            report(FinRobotId.MARKET_INTELLIGENCE, Stance.CAUTION, instrument=None),
+            report(FinRobotId.MARKET_INTELLIGENCE, Stance.SUPPORT),
+            report(FinRobotId.QUANT_RESEARCH, Stance.SUPPORT),
+        ],
+        now=NOW,
+    )
+    assert next(s for s in result.scopes if s.scope == BTC).verdict is Verdict.REDUCE_RISK
+    # Two supports from two specialists reach the quorum; a SYSTEM SUPPORT is not a second vote.
+    only_support = decide(
+        [
+            report(FinRobotId.QUANT_RESEARCH, Stance.SUPPORT, instrument=None),
+            report(FinRobotId.QUANT_RESEARCH, Stance.SUPPORT),
+        ],
+        now=NOW,
+    )
+    assert next(s for s in only_support.scopes if s.scope == BTC).verdict is Verdict.NO_CONSENSUS

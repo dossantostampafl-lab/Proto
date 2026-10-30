@@ -488,3 +488,14 @@ async def test_council_brief_is_scoped_to_the_instrument_and_system(monkeypatch)
     assert {r["scope"] for r in brief["reports"]} == {"BINANCE_SPOT:BTCUSDT", "SYSTEM"}
     btc = next(v for v in brief["verdicts"] if v["scope"] == "BINANCE_SPOT:BTCUSDT")
     assert btc["verdict"] == "BLOCK_NEW_RISK"
+
+
+def test_an_oversized_result_is_refused_whole_not_half_sent(client, monkeypatch):
+    monkeypatch.setattr(mcp_surface, "_MAX_TEXT", 200)
+    result = rpc(client, "tools/call", {"name": "finrobots_list"}).json()["result"]
+    assert result["isError"] is True
+    assert "structuredContent" not in result
+    assert "Result too large" in result["content"][0]["text"]
+    assert len(result["content"][0]["text"]) < 200
+    event = operational_journal.journal.recent(1)[0]
+    assert event.event_type == "MCP_TOOL_CALLED" and event.payload["ok"] is False

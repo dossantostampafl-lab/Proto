@@ -109,21 +109,27 @@ def decide(
         votes: dict[str, str] = {}
         reasons: list[str] = []
         vetoed = cautioned = False
-        support = 0
-        for robot, report in sorted({**inherited, **own}.items()):
+        supporters: set[str] = set()
+        # Both views of a robot count: its SYSTEM report is never replaced by its report on
+        # the instrument, so a global veto or caution always reaches every scope.
+        entries = [(robot, report, False) for robot, report in own.items()]
+        entries += [(robot, report, True) for robot, report in inherited.items()]
+        for robot, report, from_system in sorted(entries, key=lambda e: (e[0], e[2])):
+            label = f"{robot} ({SYSTEM_SCOPE})" if from_system else robot
             stance = report.stance
             if stance is Stance.VETO and not SPECS[report.robot_id].may_veto:
-                reasons.append(f"{robot}: veto not in its mandate, counted as caution")
+                reasons.append(f"{label}: veto not in its mandate, counted as caution")
                 stance = Stance.CAUTION
-            votes[robot] = stance.value
+            votes[label] = stance.value
             if stance is Stance.VETO:
                 vetoed = True
-                reasons.append(f"{robot}: {report.headline}")
+                reasons.append(f"{label}: {report.headline}")
             elif stance is Stance.CAUTION:
                 cautioned = True
-                reasons.append(f"{robot}: {report.headline}")
-            elif stance is Stance.SUPPORT and robot in own:
-                support += 1
+                reasons.append(f"{label}: {report.headline}")
+            elif stance is Stance.SUPPORT and not from_system:
+                supporters.add(robot)  # one vote per specialist, only on its own scope
+        support = len(supporters)
         if vetoed:
             verdict = Verdict.BLOCK_NEW_RISK
         elif cautioned:
@@ -140,7 +146,7 @@ def decide(
                 verdict=verdict,
                 reasons=tuple(reasons),
                 votes=votes,
-                evidence=_shared_evidence(own.values()),
+                evidence=_shared_evidence([*own.values(), *inherited.values()]),
             )
         )
     return CouncilResult(decided_at=now, scopes=tuple(verdicts), excluded=tuple(excluded))
