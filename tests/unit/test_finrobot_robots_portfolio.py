@@ -5,26 +5,30 @@ import pytest
 
 pytest.importorskip("services.finrobots.contracts", reason="requires FinRobots PR #360")
 
-from services.finrobots import CycleContext, Stance  # noqa: E402
-from services.finrobots.robots import PortfolioIntelligence  # noqa: E402
+from services.finrobots import CycleContext, FinRobotId, Stance  # noqa: E402
+from services.finrobots.robots import default_robots  # noqa: E402
 
 
-def portfolio():
-    return PortfolioIntelligence()
-
-
-def context(account, *, source_status="OK", read_at=None):
+def context(balances, *, status="OK", read_at=None, unavailable=False):
     now = datetime.now(UTC)
     return CycleContext(
         uuid4(),
         now,
         (),
         {
-            "oms.ledger": {"mode": "PAPER", "accounts": {"USDT": account}},
+            "oms.balances": {
+                "accounts": {
+                    "BINANCE_SPOT": {
+                        "mode": "PAPER",
+                        "balances": balances,
+                        "unavailable": unavailable,
+                    }
+                }
+            },
             "_sources": {
                 "sources": {
-                    "oms.ledger": {
-                        "status": source_status,
+                    "oms.balances": {
+                        "status": status,
                         "read_at": read_at or now.isoformat(),
                         "provenance": "PAPER",
                     }
@@ -34,42 +38,49 @@ def context(account, *, source_status="OK", read_at=None):
     )
 
 
+def portfolio():
+    return next(r for r in default_robots() if r.robot_id == FinRobotId.PORTFOLIO_INTELLIGENCE)
+
+
 @pytest.mark.asyncio
-async def test_portfolio_reports_observed_account_values_without_approval():
-    result = await portfolio().analyze(context({"equity": "10000.01", "gross_exposure": "25.25"}))
+async def test_portfolio_reports_exact_balances_without_inferring_exposure():
+    ctx = context({"USDT": {"total": "10000.01", "reserved": "25.25", "available": "9974.76"}})
+    result = await portfolio().analyze(ctx)
     assert result.stance is Stance.ABSTAIN
-    assert result.evidence[0].metrics["equity"] == "10000.01"
-    assert result.evidence[0].metrics["gross_exposure"] == "25.25"
-    assert not result.real_money_execution
+    assert result.evidence[0].metrics == {
+        "asset": "USDT",
+        "total": "10000.01",
+        "reserved": "25.25",
+        "available": "9974.76",
+    }
+    assert "exposure" not in result.evidence[0].metrics
+    assert result.real_money_execution is False
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "account",
+    "balance",
     [
         None,
         {},
-        {"equity": "NaN", "gross_exposure": "0"},
-        {"equity": "1", "gross_exposure": "-Infinity"},
+        {"total": "NaN", "reserved": "0", "available": "0"},
+        {"total": "1", "reserved": "Infinity", "available": "0"},
     ],
 )
-async def test_portfolio_abstains_without_finite_evidence(account):
-    result = await portfolio().analyze(context(account))
+async def test_portfolio_rejects_incomplete_or_nonfinite_balances(balance):
+    result = await portfolio().analyze(context({"USDT": balance}))
     assert result.stance is Stance.ABSTAIN
     assert not result.evidence
 
 
 @pytest.mark.asyncio
-async def test_portfolio_rejects_old_and_unavailable_sources():
-    account = {"equity": "100", "gross_exposure": "0"}
+async def test_portfolio_abstains_for_old_unavailable_or_missing_sources():
+    balance = {"USDT": {"total": "1", "reserved": "0", "available": "1"}}
     old = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    for ctx in (context(account, source_status="TIMEOUT"), context(account, read_at=old)):
+    for ctx in (
+        context(balance, status="TIMEOUT"),
+        context(balance, read_at=old),
+        context(balance, unavailable=True),
+        context({}),
+    ):
         assert not (await portfolio().analyze(ctx)).evidence
-
-
-@pytest.mark.asyncio
-async def test_unmarked_exposure_is_reported_as_unknown_not_a_number():
-    result = await portfolio().analyze(context({"equity": "100", "gross_exposure": "Infinity"}))
-    assert result.stance is Stance.CAUTION
-    assert "unknown" in result.headline.lower()
-    assert "gross_exposure" not in result.evidence[0].metrics

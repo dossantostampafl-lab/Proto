@@ -255,81 +255,55 @@ class PortfolioIntelligence:
     implementation = "portfolio-intelligence@1.0.0"
 
     async def analyze(self, context: CycleContext) -> FinRobotReport:
-        snapshot = context.snapshot
-        metadata = snapshot.get("_sources")
-        sources = metadata.get("sources") if isinstance(metadata, Mapping) else None
-        source = sources.get("oms.ledger") if isinstance(sources, Mapping) else None
-        ledger = snapshot.get("oms.ledger")
-        accounts = ledger.get("accounts") if isinstance(ledger, Mapping) else None
+        source = _source_evidence(context, "oms.balances")
+        snapshot = context.snapshot.get("oms.balances")
+        accounts = snapshot.get("accounts") if isinstance(snapshot, Mapping) else None
+        account = accounts.get("BINANCE_SPOT") if isinstance(accounts, Mapping) else None
         evidence = []
-        unknown = False
         if (
-            isinstance(source, Mapping)
-            and source.get("status") == "OK"
-            and source.get("provenance") in ("PAPER", "TESTNET")
-            and isinstance(source.get("read_at"), str)
-            and isinstance(ledger, Mapping)
-            and ledger.get("unavailable") is not True
-            and ledger.get("mode") == source.get("provenance")
-            and isinstance(accounts, Mapping)
+            source is not None
+            and isinstance(account, Mapping)
+            and account.get("unavailable") is not True
+            and account.get("mode") == source[0].value
+            and isinstance(account.get("balances"), Mapping)
         ):
-            try:
-                read_at = datetime.fromisoformat(source["read_at"])
-                now = datetime.now(UTC)
-                valid_time = (
-                    read_at.tzinfo is not None
-                    and read_at.utcoffset() is not None
-                    and timedelta(0) <= now - read_at <= timedelta(minutes=10)
+            for asset, balance in account["balances"].items():
+                if not isinstance(asset, str) or not asset.isascii() or not asset.isalnum():
+                    continue
+                if len(asset) > 32 or not isinstance(balance, Mapping):
+                    continue
+                values = {key: balance.get(key) for key in ("total", "reserved", "available")}
+                if any(
+                    not isinstance(value, str)
+                    or len(value) > 64
+                    or not value.isascii()
+                    or any(character.isspace() for character in value)
+                    for value in values.values()
+                ):
+                    continue
+                try:
+                    numbers = [Decimal(value) for value in values.values()]
+                except InvalidOperation:
+                    continue
+                if any(not number.is_finite() or number < 0 for number in numbers):
+                    continue
+                evidence.append(
+                    Evidence(
+                        source="oms.balances",
+                        provenance=source[0],
+                        observed_at=source[1],
+                        summary="Observed Binance balance; no portfolio valuation is inferred.",
+                        metrics={"asset": asset, **values},
+                    )
                 )
-            except (ValueError, OverflowError):
-                valid_time = False
-            if valid_time:
-                for currency, account in accounts.items():
-                    # USDT is the Binance account; other quote currencies may route to
-                    # different venues with different environment labels.
-                    if currency != "USDT":
-                        continue
-                    if not isinstance(account, Mapping):
-                        continue
-                    equity, gross = account.get("equity"), account.get("gross_exposure")
-                    if not isinstance(equity, str) or not isinstance(gross, str):
-                        continue
-                    if len(equity) > 64 or len(gross) > 64:
-                        continue
-                    try:
-                        equity_value, gross_value = Decimal(equity), Decimal(gross)
-                    except InvalidOperation:
-                        continue
-                    if gross_value == Decimal("Infinity"):
-                        unknown = True
-                        evidence.append(
-                            Evidence(
-                                source="oms.ledger",
-                                provenance=DataProvenance(source["provenance"]),
-                                observed_at=read_at,
-                                summary=f"{currency} exposure is unknown in the account snapshot.",
-                            )
-                        )
-                    elif equity_value.is_finite() and gross_value.is_finite() and gross_value >= 0:
-                        evidence.append(
-                            Evidence(
-                                source="oms.ledger",
-                                provenance=DataProvenance(source["provenance"]),
-                                observed_at=read_at,
-                                summary=f"Observed {currency} account values.",
-                                metrics={"equity": equity, "gross_exposure": gross},
-                            )
-                        )
-                    if len(evidence) == 16:
-                        break
+                if len(evidence) == 16:
+                    break
         return FinRobotReport(
             robot_id=self.robot_id,
             implementation=self.implementation,
             cycle_id=context.cycle_id,
-            stance=Stance.CAUTION if unknown else Stance.ABSTAIN,
-            headline="Account exposure is unknown"
-            if unknown
-            else "Portfolio values are informational",
+            stance=Stance.ABSTAIN,
+            headline="Observed balances; portfolio exposure is not assessed",
             evidence=tuple(evidence),
         )
 
@@ -381,6 +355,7 @@ class AuditRecovery:
 def default_robots() -> list[FinRobot]:
     return [
         MarketIntelligence(),
+        PortfolioIntelligence(),
         RiskGuardian(),
         ExecutionSupervisor(),
         AuditRecovery(),
