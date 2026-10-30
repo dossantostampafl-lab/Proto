@@ -171,3 +171,75 @@ def test_cycle_refused_when_disabled(client, configured, monkeypatch):
 def test_mcp_token_must_be_its_own():
     with pytest.raises(ValueError):
         Settings(operator_api_token=OPERATOR, mcp_api_token=OPERATOR)
+
+
+def test_oversized_body_is_refused_before_it_is_read(client):
+    headers = {**AUTH, "Content-Length": str(mcp_surface._MAX_BODY_BYTES + 1)}
+    response = client.post("/mcp", content=b"{}", headers=headers)
+    assert response.status_code == 413
+
+
+async def test_chunked_body_stops_being_read_at_the_limit():
+    from starlette.requests import Request
+
+    chunk = b"x" * 16_384
+    pulled = 0
+
+    async def receive():
+        nonlocal pulled
+        pulled += 1
+        return {"type": "http.request", "body": chunk, "more_body": pulled < 1_000}
+
+    request = Request({"type": "http", "method": "POST", "headers": []}, receive)
+    assert await mcp_surface._bounded_body(request) is None
+    # 64 KiB / 16 KiB: it stopped after the fifth chunk instead of draining all 1,000.
+    assert pulled == 5
+
+
+async def test_snapshot_labels_every_source():
+    import asyncio
+
+    async def hang():
+        await asyncio.sleep(10)
+
+    def boom():
+        raise RuntimeError("down")
+
+    readers = {
+        "ok": (lambda: {"x": 1}, "PAPER"),
+        "async.ok": (lambda: asyncio.sleep(0, result=[1]), "TESTNET"),
+        "broken": (boom, "PAPER"),
+        "slow": (hang, "PAPER"),
+    }
+    original = finrobot_surface._readers
+    finrobot_surface._readers = lambda: readers
+    finrobot_surface._SOURCE_TIMEOUT_SECONDS, saved = 0.05, finrobot_surface._SOURCE_TIMEOUT_SECONDS
+    try:
+        snapshot = await finrobot_surface.read_snapshot()
+    finally:
+        finrobot_surface._readers = original
+        finrobot_surface._SOURCE_TIMEOUT_SECONDS = saved
+    assert snapshot["ok"] == {"x": 1} and snapshot["async.ok"] == [1]
+    assert "broken" not in snapshot and "slow" not in snapshot
+    sources = snapshot["_sources"]["sources"]
+    assert {k: v["status"] for k, v in sources.items()} == {
+        "ok": "OK",
+        "async.ok": "OK",
+        "broken": "UNAVAILABLE",
+        "slow": "TIMEOUT",
+    }
+    assert sources["async.ok"]["provenance"] == "TESTNET"
+    assert sources["broken"]["provenance"] == "UNAVAILABLE"
+    assert sources["broken"]["error"] == "RuntimeError"
+
+
+async def test_real_snapshot_reads_proto_sources():
+    snapshot = await finrobot_surface.read_snapshot()
+    sources = snapshot["_sources"]["sources"]
+    assert set(sources) == set(finrobot_surface._readers())
+    assert sources["risk.status"]["status"] == "OK"
+    assert sources["risk.status"]["provenance"] == "PAPER"
+    assert snapshot["_sources"]["version"] == finrobot_surface.SNAPSHOT_VERSION
+    # No live monitor in tests: every quote is None, so the source is not labeled LIVE.
+    assert all(q is None for q in snapshot["market.quotes"].values())
+    assert sources["market.quotes"]["provenance"] == "UNAVAILABLE"

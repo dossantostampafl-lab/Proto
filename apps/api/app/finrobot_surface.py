@@ -11,21 +11,27 @@ cycle truthfully has no reports.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import inspect
 import logging
-from collections.abc import Mapping
-from datetime import timedelta
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
 from services.finrobots import CONTRACT_VERSION, CycleRecord, FinRobotOrchestrator, FinRobotRegistry
 
-from .agent_surface import agent_status, recent_decisions
+from .agent_surface import agent_status, live_quote, recent_decisions
 from .event_state import JournalUnavailable, record_operational_event
 from .instrument_registry import active_instruments
+from .oms_surface import executor_status, ledger_view, list_orders
+from .promotion_surface import scopes as promotion_scopes
+from .reconciliation_service import reconciliation_status
 from .risk_surface import risk_status
 from .settings import settings
+from .watchdog_surface import watchdog_status
 
 logger = logging.getLogger("proto.finrobots")
 
@@ -38,20 +44,86 @@ _orchestrator: FinRobotOrchestrator | None = None
 journal_failures = 0
 
 
+SNAPSHOT_VERSION = "finrobots-snapshot/1.1"
+_SOURCE_TIMEOUT_SECONDS = 3.0
+
+
+def _quotes() -> dict[str, Any]:
+    """Live public quotes of the active instruments; ``None`` when PROTO has none."""
+
+    now = datetime.now(UTC)
+    out: dict[str, Any] = {}
+    for instrument_id in sorted(active_instruments()):
+        quote = live_quote(instrument_id)
+        if quote is None:
+            out[instrument_id] = None
+            continue
+        observed = quote.observed_at.astimezone(UTC)
+        out[instrument_id] = {
+            "bid": str(quote.bid),
+            "ask": str(quote.ask),
+            "observed_at": observed.isoformat(),
+            "age_seconds": round((now - observed).total_seconds(), 3),
+        }
+    return out
+
+
+def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
+    """Snapshot keys -> (read-only reader, provenance of its data). Every reader is one of
+    PROTO's own GET routes or a pure read; none syncs, writes or reaches an order path."""
+
+    mode = data_mode()
+    return {
+        "agents.status": (agent_status, mode),
+        "agents.decisions_recent": (lambda: recent_decisions(limit=50), mode),
+        "risk.status": (risk_status, mode),
+        "market.quotes": (_quotes, "LIVE"),
+        "oms.orders": (lambda: list_orders(limit=50), mode),
+        "oms.ledger": (ledger_view, mode),
+        "oms.executor": (executor_status, mode),
+        "reconciliation.status": (reconciliation_status, mode),
+        "watchdog.status": (watchdog_status, mode),
+        "promotion.scopes": (promotion_scopes, mode),
+    }
+
+
+async def _read(read: Callable[[], Any]) -> Any:
+    value = read()
+    if inspect.isawaitable(value):
+        value = await asyncio.wait_for(value, timeout=_SOURCE_TIMEOUT_SECONDS)
+    return value
+
+
 async def read_snapshot() -> Mapping[str, Any]:
-    """The cycle's evidence, read once from PROTO's own read-only routes."""
+    """The cycle's evidence, read once from PROTO's own read-only routes.
+
+    ``_sources`` says, per key, whether it was read (``OK``), failed (``UNAVAILABLE``) or timed
+    out (``TIMEOUT``), when, and the provenance of its data. A source that could not be read is
+    absent from the snapshot, never invented.
+    """
 
     snapshot: dict[str, Any] = {}
-    readers = {
-        "agents.status": agent_status,
-        "agents.decisions_recent": lambda: recent_decisions(limit=50),
-        "risk.status": risk_status,
-    }
-    for name, read in readers.items():
+    sources: dict[str, dict[str, Any]] = {}
+    for name, (read, provenance) in _readers().items():
+        read_at = datetime.now(UTC).isoformat()
         try:
-            snapshot[name] = read()
-        except Exception:  # an unavailable source is absent, never invented
+            snapshot[name] = await _read(read)
+            status, error = "OK", None
+        except TimeoutError:
+            status, error = "TIMEOUT", None
+        except Exception as exc:
             logger.warning("finrobot snapshot source %s unavailable", name, exc_info=True)
+            status, error = "UNAVAILABLE", type(exc).__name__
+        if status != "OK" or (name == "market.quotes" and not any(snapshot[name].values())):
+            # Read but empty (no live quote at all) is not live data.
+            provenance = "UNAVAILABLE"
+        sources[name] = {
+            "status": status,
+            "read_at": read_at,
+            "provenance": provenance,
+            "error": error,
+        }
+    snapshot["_sources"] = {"version": SNAPSHOT_VERSION, "sources": sources}
     return snapshot
 
 

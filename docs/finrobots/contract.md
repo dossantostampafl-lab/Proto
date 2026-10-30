@@ -37,8 +37,36 @@ class CycleContext:
     cycle_id: UUID
     started_at: datetime
     instrument_ids: tuple[str, ...]
-    snapshot: Mapping[str, Any]   # chaves: "agents.status", "agents.decisions_recent", "risk.status"
+    snapshot: Mapping[str, Any]   # chaves: tabela "Snapshot" abaixo
 ```
+
+### Snapshot `finrobots-snapshot/1.1` (aditivo sobre 1.0, mesmas chaves antigas)
+
+Cada chave é a resposta de uma rota GET do próprio PROTO (ou leitura pura), lida uma vez por
+ciclo com timeout de 3 s. `snapshot["_sources"]` traz, por chave, `status` (`OK`, `UNAVAILABLE`,
+`TIMEOUT`), `read_at`, `provenance` e `error`. Uma fonte que falhou **não aparece** no snapshot.
+Fontes que sincronizam ou gravam ficam fora, por exemplo `GET /v1/agents/roster`, que sincroniza
+fills.
+
+| Chave | Origem (rota) | Proveniência | Especialista natural |
+|---|---|---|---|
+| `agents.status` | `GET /v1/agents/status` | PAPER/TESTNET | Strategy Research |
+| `agents.decisions_recent` | `GET /v1/agents/decisions/recent?limit=50` | PAPER/TESTNET | Strategy Research, Model Validator |
+| `risk.status` | `GET /v1/risk/status` | PAPER/TESTNET | Risk Guardian |
+| `market.quotes` | `agent_surface.live_quote` por instrumento ativo (`bid`, `ask`, `observed_at`, `age_seconds`; `null` sem cotação) | LIVE (pública); `UNAVAILABLE` se nenhuma | Market Intelligence |
+| `oms.orders` | `GET /v1/oms/orders?limit=50` | PAPER/TESTNET | Execution Supervisor |
+| `oms.ledger` | `GET /v1/oms/ledger` | PAPER/TESTNET | Portfolio Intelligence |
+| `oms.executor` | `GET /v1/oms/executor/status` | PAPER/TESTNET | Execution Supervisor |
+| `reconciliation.status` | `reconciliation_service.reconciliation_status()` | PAPER/TESTNET | Audit & Recovery |
+| `watchdog.status` | `GET /v1/watchdog/status` | PAPER/TESTNET | Audit & Recovery |
+| `promotion.scopes` | `GET /v1/promotion/scopes` | PAPER/TESTNET | Execution Supervisor, Model Validator |
+
+**Lacuna confirmada:** não existe hoje uma leitura persistida de resultados quantitativos, backtests
+ou validação de modelos. As rotas `validation_*`, `data-snooping` e `research/quant/*` calculam sob
+demanda (POST), sem expor histórico. Quant Research, Strategy Research e Model Validator devem
+ficar em `ABSTAIN` para essas dimensões até uma rota de leitura com proveniência ser acordada aqui.
+A proposta `docs/research/FINROBOTS-QUANT-CONTRACT-PROPOSAL.md` (#359) é o ponto de partida.
+Nenhum especialista deve chamar essas rotas POST.
 
 `FinRobotReport` (pydantic, `extra="forbid"`, congelado): `robot_id`, `implementation`,
 `cycle_id`, `instrument_id | None` (None = escopo SYSTEM), `stance`

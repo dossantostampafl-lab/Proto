@@ -302,6 +302,27 @@ async def _call_tool(request_id: Any, params: dict[str, Any], client: str) -> JS
     )
 
 
+async def _bounded_body(request: Request) -> bytes | None:
+    """The request body, or ``None`` once it exceeds the limit: a declared length over it is
+    refused before reading, and a chunked body stops being read at the limit."""
+
+    declared = request.headers.get("Content-Length")
+    if declared is not None:
+        try:
+            if int(declared) > _MAX_BODY_BYTES:
+                return None
+        except ValueError:
+            return None
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > _MAX_BODY_BYTES:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.post(MCP_PATH)
 async def mcp_endpoint(request: Request) -> Response:
     if not settings.mcp_enabled:
@@ -325,8 +346,8 @@ async def mcp_endpoint(request: Request) -> Response:
     if version is not None and version not in SUPPORTED_PROTOCOL_VERSIONS:
         return _rpc_error(None, -32600, "Unsupported MCP-Protocol-Version", status=400)
 
-    body = await request.body()
-    if len(body) > _MAX_BODY_BYTES:
+    body = await _bounded_body(request)
+    if body is None:
         return _rpc_error(None, -32600, "Request too large", status=413)
     try:
         message = json.loads(body)

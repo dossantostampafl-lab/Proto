@@ -163,7 +163,7 @@ class FinRobotOrchestrator:
                 reports=tuple(reports),
                 errors=errors,
                 council=decide(reports, now=finished),
-                snapshot_sources=tuple(sorted(snapshot)),
+                snapshot_sources=tuple(sorted(k for k in snapshot if not k.startswith("_"))),
             )
             self._history.append(record)
         if self._on_cycle is not None:
