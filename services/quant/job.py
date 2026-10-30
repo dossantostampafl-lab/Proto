@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.orchestration.runtime import JobRun, ProtoBrain
@@ -38,7 +39,12 @@ async def process_quant_research_job(
         raise ValueError("quant-research job identity or mode is invalid")
     if set(payload) != {"evidence"} or not isinstance(payload.get("evidence"), Mapping):
         raise ValueError("quant-research requires exactly one evidence envelope")
-    envelope = QuantEvidence.model_validate(payload["evidence"])
+    try:
+        envelope = QuantEvidence.model_validate(payload["evidence"])
+    except ValidationError as exc:
+        # ProtoBrain records the exception text as a durable error: never place
+        # caller-controlled envelope values into its diagnostic field.
+        raise ValueError("quant evidence envelope failed validation") from exc
     if envelope.mode != run.mode:
         raise ValueError("evidence mode differs from the queued job mode")
     if envelope.input_provenance != _ALLOWED_PROVENANCE[run.mode]:
