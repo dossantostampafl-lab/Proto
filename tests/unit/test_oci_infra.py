@@ -599,3 +599,20 @@ def test_setup_reports_a_refused_binance_pair_without_probing_iam_and_skips_the_
     assert "binance-versions.sh" in refused and "continue" in refused and "all=false" not in refused
     bootstrap = (OCI / "deploy/bootstrap.sh").read_text()
     assert 'check-binance-pair.py" /usr/local/sbin/proto-check-binance-pair' in bootstrap
+
+
+def test_the_chatgpt_session_lives_only_on_the_api_and_signs_in_from_cloud_shell() -> None:
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    api = deploy.split("start() {", 1)[1].split("    api)\n", 1)[1].split(";;", 1)[0]
+    assert '-v "${chatgpt_dir}:/home/proto/.config/proto/chatgpt:Z"' in api
+    assert "ensure_chatgpt_dir" in api
+    for other in ("    executor)\n", "    watchdog)\n"):
+        body = deploy.split("start() {", 1)[1].split(other, 1)[1].split(";;", 1)[0]
+        assert "chatgpt" not in body
+    assert "install -d -m 0700 -o 10001 -g 10001" in deploy
+    # An API container from before the mount is restarted once to gain it.
+    assert "&& chatgpt_mounted; then" in deploy
+    bastion = (OCI / "deploy/bastion-run.sh").read_text()
+    login = bastion.split("  chatgpt-login)\n", 1)[1].split(";;", 1)[0]
+    assert "podman exec -it proto-api" in login and "--paste" in login
+    assert '[ "$role" = api ]' in login

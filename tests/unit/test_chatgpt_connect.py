@@ -147,3 +147,23 @@ def test_id_token_bound_to_another_access_token_is_rejected(monkeypatch) -> None
         _validate_id_token(
             id_token, client_id="oaiapp_test", nonce="nonce-1", access_token="other-access"
         )
+
+
+def test_paste_mode_reads_back_only_the_matching_loopback_callback(capsys) -> None:
+    from services.chatgpt.chatgpt_connect import _pasted_callback
+
+    good = "http://127.0.0.1:1455/auth/callback?code=abc&state=S1&client_id=app_1"
+    assert _pasted_callback("https://auth.example/authorize", "S1", read=lambda _: good) == {
+        "code": "abc",
+        "state": "S1",
+        "client_id": "app_1",
+    }
+    assert "https://auth.example/authorize" in capsys.readouterr().out
+    for bad in (
+        "https://evil.example/auth/callback?code=abc&state=S1",
+        "http://127.0.0.1:1455/other?code=abc&state=S1",
+        "http://127.0.0.1:1455/auth/callback?code=abc&state=OTHER",
+        "http://127.0.0.1:1455/auth/callback?code=a&code=b&state=S1",
+    ):
+        with pytest.raises(RuntimeError):
+            _pasted_callback("https://auth.example/authorize", "S1", read=lambda _, b=bad: b)

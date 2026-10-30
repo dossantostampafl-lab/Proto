@@ -143,6 +143,10 @@ class Settings(BaseSettings):
     chatgpt_local_enabled: bool = False
     chatgpt_profile: str = "default"
     chatgpt_model: str = ""
+    # Reach the ChatGPT explanation through the public dashboard (the operator's tablet) instead
+    # of loopback only: the operator token is still required on every call, and a browser call
+    # must come from PUBLIC_ORIGIN, which this mode requires.
+    chatgpt_public_access: bool = False
     # Phase 6b: the independent watchdog's token. It can only halt and report a heartbeat.
     watchdog_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
