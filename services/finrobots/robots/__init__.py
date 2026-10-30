@@ -14,6 +14,8 @@ from services.finrobots.contracts import (
 )
 from services.finrobots.registry import CycleContext, FinRobot
 
+from .quant import ModelValidator, QuantResearch, StrategyResearch
+
 
 def _source_evidence(context: CycleContext, key: str) -> tuple[DataProvenance, datetime] | None:
     metadata = context.snapshot.get("_sources")
@@ -355,7 +357,10 @@ class AuditRecovery:
 def default_robots() -> list[FinRobot]:
     return [
         MarketIntelligence(),
+        QuantResearch(),
+        StrategyResearch(),
         PortfolioIntelligence(),
+        ModelValidator(),
         RiskGuardian(),
         ExecutionSupervisor(),
         AuditRecovery(),
