@@ -30,10 +30,11 @@ from services.chatgpt.contracts import (
 )
 from services.chatgpt.conversations import ConversationStore
 from services.chatgpt.models import models
+from services.chatgpt.tool_probe import probe
 
 from . import control_state
 from .agent_surface import recent_decisions
-from .event_state import record_operational_event
+from .event_state import JournalUnavailable, record_operational_event
 from .roster_surface import ready
 from .settings import settings
 
@@ -163,6 +164,65 @@ async def account_models(request: Request) -> dict:
         raise HTTPException(
             502, "Account model catalog unavailable; access was not verified"
         ) from None
+
+
+class ToolProbe(BaseModel):
+    model: str | None = Field(
+        default=None, min_length=1, max_length=160, pattern=r"^[a-zA-Z0-9._:/-]+$"
+    )
+
+
+def _live_quote(symbol: str) -> dict | None:
+    """The one tool of the probe: PROTO's live public Binance mid. Reads a price, nothing else."""
+
+    from .market_quotes import live_quote
+
+    if not re.fullmatch(r"[A-Z0-9]{2,20}USDT", symbol):
+        return None
+    quote = live_quote(f"BINANCE_SPOT:{symbol}", market_source=settings.live_market_source)
+    if quote is None:
+        return None
+    return {
+        "symbol": symbol,
+        "bid": str(quote.bid),
+        "ask": str(quote.ask),
+        "mid": str((quote.bid + quote.ask) / 2),
+        "observed_at": quote.observed_at.isoformat(),
+        "source": "Binance public market data",
+    }
+
+
+@router.post("/tool-probe")
+async def tool_probe(body: ToolProbe, request: Request) -> dict:
+    """Whether the operator's ChatGPT plan runs a function tool (one read-only price tool)."""
+
+    _, credentials = identity(request)
+    model = body.model or settings.chatgpt_model
+    if not model:
+        try:
+            available = await models(settings.chatgpt_profile)
+        except (InferenceError, httpx.HTTPError, RuntimeError, ValueError):
+            available = []
+        model = available[0] if available else ""
+    if not model:
+        raise HTTPException(503, "No ChatGPT model available for the probe")
+    if _gate.locked():
+        raise HTTPException(429, "Another ChatGPT request is running; retry after it completes")
+    async with _gate:
+        result = await probe(credentials=credentials, model=model, quote=_live_quote)
+    try:
+        await record_operational_event(
+            event_type="CHATGPT_TOOL_PROBE",
+            source="conversation",
+            payload={
+                "model": model,
+                "tools_supported": result["tools_supported"],
+                "working_shape": result["working_shape"],
+            },
+        )
+    except JournalUnavailable:
+        pass  # the probe answer stands; only its journal line is missing
+    return {"model": model, **result, "execution_authority": False}
 
 
 @router.post("/disconnect")
