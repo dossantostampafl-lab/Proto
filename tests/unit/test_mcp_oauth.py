@@ -280,3 +280,79 @@ def test_duplicated_and_oversized_forms_are_refused(client):
 
 def test_static_token_still_works(client):
     assert mcp_call(client, MCP).status_code == 200
+
+
+@pytest.fixture
+def durable_store(tmp_path):
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from apps.api.app import control_state
+
+    original = control_state.control_store
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'control.db'}")
+    store = control_state.configure_control_store(engine)
+    yield store
+    control_state.control_store = original
+
+
+async def _restart() -> None:
+    """What a deploy does to this process: memory is gone, the control store remains."""
+
+    mcp_oauth.reset_oauth_state()
+    await mcp_oauth.restore_oauth()
+
+
+async def test_a_restart_keeps_chatgpt_signed_in(client, durable_store):
+    assert await durable_store.start() is True
+    client_id = register(client)
+    verifier, challenge = pkce()
+    code = code_from(approve(client, authorize_params(client_id, challenge)))
+    tokens = exchange(client, client_id, code, verifier).json()
+    await _restart()
+    assert mcp_call(client, tokens["access_token"]).status_code == 200
+    refresh = {"grant_type": "refresh_token", "client_id": client_id}
+    renewed = client.post(
+        "/oauth/token", data={**refresh, "refresh_token": tokens["refresh_token"]}
+    )
+    assert renewed.status_code == 200
+    # The rotation is durable too: after another restart the old refresh token stays dead.
+    await _restart()
+    again = client.post("/oauth/token", data={**refresh, "refresh_token": tokens["refresh_token"]})
+    assert again.json()["error"] == "invalid_grant"
+    assert mcp_call(client, renewed.json()["access_token"]).status_code == 200
+
+
+async def test_only_digests_are_stored(client, durable_store):
+    from services.risk import SqlControlState
+
+    assert await durable_store.start() is True
+    client_id = register(client)
+    verifier, challenge = pkce()
+    code = code_from(approve(client, authorize_params(client_id, challenge)))
+    tokens = exchange(client, client_id, code, verifier).json()
+    saved = await SqlControlState(durable_store.engine).get(mcp_oauth.OAUTH_STATE_KEY)
+    text = str(saved)
+    assert tokens["access_token"] not in text and tokens["refresh_token"] not in text
+    assert MCP not in text
+
+
+async def test_rotating_the_mcp_token_or_revoking_signs_out_after_restart(
+    client, configured, durable_store, monkeypatch
+):
+    assert await durable_store.start() is True
+    client_id = register(client)
+    verifier, challenge = pkce()
+    code = code_from(approve(client, authorize_params(client_id, challenge)))
+    access = exchange(client, client_id, code, verifier).json()["access_token"]
+    rotated = configured.model_copy(update={"mcp_api_token": "n" * 32})
+    for module in (mcp_oauth, mcp_surface):
+        monkeypatch.setattr(module, "settings", rotated)
+    await _restart()
+    assert mcp_call(client, access).status_code == 401
+    for module in (mcp_oauth, mcp_surface):
+        monkeypatch.setattr(module, "settings", configured)
+    await _restart()
+    assert mcp_call(client, access).status_code == 200
+    client.post("/v1/mcp/oauth/revoke", headers={"X-Proto-Operator-Token": OPERATOR})
+    await _restart()
+    assert mcp_call(client, access).status_code == 401

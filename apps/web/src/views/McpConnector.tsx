@@ -40,6 +40,6 @@ export function McpConnector() {
         ? `ChatGPT connector URL: ${status.issuer}/mcp · authentication OAuth; approve with MCP_API_TOKEN.`
         : "OAuth needs MCP_ENABLED, MCP_API_TOKEN and an HTTPS PUBLIC_ORIGIN on the API."}</p>
     </>}
-    <small className="agent-src">Source: /v1/mcp/oauth/status · ChatGPT runs on the operator's plan; no paid API key. Tokens live in memory: an API restart signs connectors out.</small>
+    <small className="agent-src">Source: /v1/mcp/oauth/status · ChatGPT runs on the operator's plan; no paid API key. Only token digests are stored; rotating MCP_API_TOKEN signs connectors out.</small>
   </Panel>;
 }

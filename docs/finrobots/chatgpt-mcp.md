@@ -41,7 +41,12 @@ ciclo. A supervisão ativa continua no dashboard, com o token de operador.
       `PUBLIC_ORIGIN/mcp`.
     - O access token vale 1 h. O refresh token vale 30 dias e é trocado a cada uso.
     - O único escopo é `proto.read`.
-    - Os tokens ficam na memória como hash SHA-256: reiniciar a API desconecta o ChatGPT.
+    - Os tokens só existem como hash SHA-256, na memória e no armazenamento do plano de controle
+      (`control_state`, chave `mcp_oauth`), sem tabela nova.
+      - Reiniciar a API (um deploy) mantém o ChatGPT conectado.
+      - Trocar o `MCP_API_TOKEN` desconecta todos.
+      - Se o armazenamento falhar, só se perde a durabilidade: o login continua funcionando e o
+        caminho de risco não é afetado.
     - `POST /v1/mcp/oauth/revoke`, com o token de operador, desconecta todos na hora.
       `GET /v1/mcp/oauth/status` mostra o estado.
   - **Bearer fixo:** `MCP_API_TOKEN` em `Authorization: Bearer …`, para clientes que aceitam.

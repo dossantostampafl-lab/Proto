@@ -71,6 +71,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await control_state.current().start()
     await restore_controls()
     await restore_watchdog()
+    await mcp_oauth.restore_oauth()
     b3_feed = await b3_quotes.start_if_enabled()
     us_feed = await us_quotes.start_if_enabled()
     await finrobot_surface.start_if_enabled()

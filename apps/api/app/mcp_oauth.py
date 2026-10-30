@@ -14,14 +14,16 @@ spec asks for, for one operator:
 - ``/oauth/token``: authorization code (PKCE verified) and rotating refresh tokens.
 
 The only scope is ``proto.read``: a token can call the same read-only tools as the static
-token, nothing else. Tokens are random, stored as SHA-256 hashes in this process (a restart
-signs ChatGPT out) and revocable at once with ``POST /v1/mcp/oauth/revoke`` (operator token).
+token, nothing else. Tokens are random and kept only as SHA-256 digests, also on the
+control-plane store so a restart keeps ChatGPT signed in (rotating MCP_API_TOKEN signs every
+connector out), and are revocable at once with ``POST /v1/mcp/oauth/revoke`` (operator token).
 Everything is closed unless ``MCP_ENABLED``, ``MCP_API_TOKEN`` and an HTTPS ``PUBLIC_ORIGIN``
 are set. Every grant, refusal and revocation is journaled.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -86,6 +88,89 @@ class _Grant:
 _clients: dict[str, _Client] = {}
 _codes: dict[str, _Code] = {}
 _grants: dict[str, _Grant] = {}  # sha256(token) -> grant
+
+
+OAUTH_STATE_KEY = "mcp_oauth"
+_persist_lock = asyncio.Lock()
+
+
+def _token_fingerprint() -> str:
+    # Persisted grants belong to one MCP_API_TOKEN: rotating it signs every connector out.
+    return _digest(f"proto-mcp-oauth:{settings.mcp_api_token or ''}")
+
+
+def _document() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "token_fingerprint": _token_fingerprint(),
+        "clients": [
+            {"client_id": c.client_id, "redirect_uris": list(c.redirect_uris), "name": c.name}
+            for c in _clients.values()
+        ],
+        # Only SHA-256 digests of tokens are stored, never a usable token.
+        "grants": {
+            key: {"client_id": g.client_id, "kind": g.kind, "expires_at": g.expires_at.isoformat()}
+            for key, g in _grants.items()
+        },
+    }
+
+
+async def _persist() -> None:
+    """Save clients and token digests on the control-plane store, so a deploy's restart does not
+    sign ChatGPT out. A store failure only loses that durability: it never blocks sign-in and
+    never touches the risk path (the control store's fail-closed flag is left alone)."""
+
+    from services.risk import SqlControlState
+
+    from . import control_state
+
+    store = control_state.current()
+    if store.engine is None:
+        return
+    _prune()
+    async with _persist_lock:
+        try:
+            await SqlControlState(store.engine).put(OAUTH_STATE_KEY, _document())
+        except Exception:
+            logger.warning("MCP OAuth state was not persisted", exc_info=True)
+
+
+async def restore_oauth() -> None:
+    """Load persisted clients and grants once at start-up (only for the current MCP token)."""
+
+    from services.risk import SqlControlState
+
+    from . import control_state
+
+    store = control_state.current()
+    if store.engine is None or not settings.mcp_enabled:
+        return
+    try:
+        saved = await SqlControlState(store.engine).get(OAUTH_STATE_KEY)
+    except Exception:
+        logger.warning("MCP OAuth state could not be restored", exc_info=True)
+        return
+    if not saved or saved.get("token_fingerprint") != _token_fingerprint():
+        return
+    now = _now()
+    for raw in saved.get("clients") or ():
+        uris = tuple(u for u in raw.get("redirect_uris") or () if isinstance(u, str))
+        if raw.get("client_id") and uris and all(_allowed_redirect(u) for u in uris):
+            client = _Client(str(raw["client_id"]), uris, str(raw.get("name") or "ChatGPT")[:80])
+            _clients.setdefault(client.client_id, client)
+    for key, raw in (saved.get("grants") or {}).items():
+        try:
+            grant = _Grant(
+                str(raw["client_id"]), str(raw["kind"]), datetime.fromisoformat(raw["expires_at"])
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            grant.kind in ("access", "refresh")
+            and grant.client_id in _clients
+            and (grant.expires_at > now)
+        ):
+            _grants.setdefault(str(key), grant)
 
 
 def reset_oauth_state() -> None:
@@ -265,6 +350,7 @@ async def register_client(request: Request) -> Response:
     name = str(body.get("client_name") or "ChatGPT")[:80]
     client = _Client(secrets.token_urlsafe(24), tuple(uris), name)
     _clients[client.client_id] = client
+    await _persist()
     await _journal("MCP_OAUTH_CLIENT_REGISTERED", {"client_id": client.client_id, "name": name})
     return JSONResponse(
         {
@@ -423,6 +509,7 @@ async def _issue(client_id: str) -> JSONResponse:
     now = _now()
     _grants[_digest(access)] = _Grant(client_id, "access", now + ACCESS_TTL)
     _grants[_digest(refresh)] = _Grant(client_id, "refresh", now + REFRESH_TTL)
+    await _persist()
     await _journal("MCP_OAUTH_TOKEN_ISSUED", {"client_id": client_id})
     return JSONResponse(
         {
@@ -486,6 +573,7 @@ async def revoke_all() -> dict[str, object]:
     _clients.clear()
     _codes.clear()
     _grants.clear()
+    await _persist()
     await _journal("MCP_OAUTH_REVOKED", counts)
     return {"revoked": counts, **_BOUNDARY}
 
