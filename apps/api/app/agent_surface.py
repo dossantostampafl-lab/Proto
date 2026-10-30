@@ -386,8 +386,9 @@ def agent_status() -> dict[str, object]:
 
 
 @router.get("/decisions/recent")
-def recent_decisions(limit: int = 20) -> dict[str, object]:
-    selected = list(_decisions)[-max(1, min(limit, _DECISION_CAPACITY)) :]
+def recent_decisions(limit: int = 20, instrument_id: str | None = None) -> dict[str, object]:
+    found = [d for d in _decisions if instrument_id is None or d.instrument_id == instrument_id]
+    selected = found[-max(1, min(limit, _DECISION_CAPACITY)) :]
     return {"decisions": [d.to_dict() for d in reversed(selected)], **_BOUNDARY}
 
 

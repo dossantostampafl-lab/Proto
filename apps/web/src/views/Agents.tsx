@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { usePoll } from "../hooks";
 import { Empty, Panel, Stat } from "../ui";
-import { arr, bool, finiteDecimal, fmt2, isRecord, num, orDash, rec, short, str, strs } from "./deskData";
+import { bool, finiteDecimal, fmt2, isRecord, num, orDash, parseDecisions, rec, short, str, strs } from "./deskData";
 import "./agents.css";
 import { AgentConversation } from "./AgentConversation";
 
-// Agents dashboard: the trader roster, each agent's virtual book, the recorded decision evidence for
+// Agents dashboard: the trader roster, each agent's virtual book, the agents' latest decisions on
 // its instrument and the orchestration contracts. Read only: no prompts, credentials, job submission
 // or financial commands. Every payload is parsed defensively; an odd field becomes "—", an odd
 // payload an UNAVAILABLE panel, and data from a failed read is never shown as current.
@@ -20,12 +20,6 @@ type AgentRow = {
 type Totals = { agents: number | null; active: number | null; eliminated: number | null; allocated: string | null; reference: string | null; unallocated: string | null; equity: string | null };
 type RosterView = { agents: AgentRow[]; totals: Totals; enabled: boolean | null; synced: boolean | null; mode: string };
 type Contract = { name: string; capability: string; owner: string; modes: string[]; riskGate: boolean | null };
-type Decision = {
-  id: string; stage: string; observedAt: string | null; probability: number | null; uncertainty: number | null; edge: number | null;
-  regime: string | null; risk: string | null; proposed: string | null; actual: string | null; explanation: string | null; model: string | null;
-  outcome: string | null; resolvedAt: string | null; outcomePnl: number | null;
-};
-
 function parseAgent(raw: unknown): AgentRow | null {
   if (!isRecord(raw) || !isRecord(raw.slot)) return null;
   const id = str(raw.agent_id), instrument = str(raw.slot.instrument_id), status = str(raw.status);
@@ -63,26 +57,9 @@ function parseContracts(raw: unknown): { contracts: Contract[]; handlers: string
   return { contracts, handlers: strs(supervisor.registered_jobs) ?? [], running: bool(supervisor.running) };
 }
 
-function parseDecisions(raw: unknown): { configured: boolean; decisions: Decision[] } | null {
-  if (!isRecord(raw) || typeof raw.configured !== "boolean") return null;
-  const decisions = arr(raw.decisions).flatMap(row => {
-    const d = rec(rec(row).decision), o = isRecord(rec(row).outcome) ? rec(rec(row).outcome) : null;
-    const id = str(d.decision_id), stage = str(d.stage);
-    if (!id || !stage) return [];
-    return [{
-      id, stage, observedAt: str(d.observed_at), probability: num(d.probability), uncertainty: num(d.uncertainty), edge: num(d.edge),
-      regime: str(d.regime), risk: str(d.risk_decision), proposed: str(d.proposed_action), actual: str(d.actual_action),
-      explanation: str(d.explanation), model: str(d.model_id), outcome: o ? str(o.outcome) : null, resolvedAt: o ? str(o.resolved_at) : null,
-      outcomePnl: o ? num(o.pnl) : null,
-    }];
-  });
-  return { configured: raw.configured, decisions };
-}
-
 const brl = (v: string | null) => (fmt2(v) === "—" ? "R$ —" : `R$ ${fmt2(v)}`);
 const signTone = (v: string | null) => { const d = finiteDecimal(v); return d === null || !/[1-9]/.test(d) ? "" : d.startsWith("-") ? "down" : "up"; };
 const when = (iso: string | null) => (iso ? iso.replace("T", " ").slice(0, 19) : "—");
-const prob = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
 const kindLabel = (kind: string) => (kind === "tradingview" ? "TradingView" : kind === "—" ? kind : `own strategy (${kind})`);
 const modeTag = (mode: string) => (mode === "TESTNET" ? "TESTNET · NO REAL MONEY" : mode === "PAPER" ? "PAPER / SIM" : `${mode} · VIRTUAL CAPITAL`);
 
@@ -104,8 +81,8 @@ export function Agents() {
   const orchestration = catalog.status === 200 ? parseContracts(catalog.data) : null;
 
   const instrument = agent?.instrument ?? null;
-  const memory = usePoll<unknown>(`/orchestration/decision-memory/recent?limit=20${instrument ? `&instrument_id=${encodeURIComponent(instrument)}` : ""}`, 15000);
-  const evidence = memory.status === 200 ? parseDecisions(memory.data) : null;
+  const recent = usePoll<unknown>(`/v1/agents/decisions/recent?limit=20${instrument ? `&instrument_id=${encodeURIComponent(instrument)}` : ""}`, 10000);
+  const decisions = recent.status === 200 ? parseDecisions(recent.data) : null;
   const t = view?.totals;
 
   return <div className="agent-dash">
@@ -168,33 +145,30 @@ export function Agents() {
       </>}
     </Panel>
 
-    <Panel title="Recorded decision evidence">
-      <span className="tag research">RECORDED EVIDENCE · NOT A NEW AGENT RESPONSE</span>
-      <ReadState status={memory.status} what="decision memory" />
+    <Panel title="Agent decisions">
+      <span className="tag research">LATEST DECISIONS · SINCE THE LAST API START</span>
+      <ReadState status={recent.status} what="agent decisions" />
       <p className="agent-note">{instrument
-        ? `Latest 20 records for ${instrument}. Shared by every agent on this instrument; not attributed to ${agent?.id}.`
-        : "Latest 20 records across all instruments. Select an agent to narrow to its instrument."}</p>
-      {memory.status === 200 && !evidence && <Empty>DECISION MEMORY UNAVAILABLE · unexpected payload.</Empty>}
-      {evidence && !evidence.configured && <Empty>Decision memory is NOT CONFIGURED.</Empty>}
-      {evidence?.configured && !evidence.decisions.length && <Empty>No recorded decisions.</Empty>}
-      {evidence?.configured && evidence.decisions.length > 0 && <ul className="agent-decisions">{evidence.decisions.map(d => <li key={d.id}>
+        ? `Latest 20 decisions on ${instrument}. Every decision is also kept in the operational journal.`
+        : "Latest 20 decisions across all instruments. Select an agent to narrow to its instrument."}</p>
+      {recent.status === 200 && !decisions && <Empty>AGENT DECISIONS UNAVAILABLE · unexpected payload.</Empty>}
+      {decisions && !decisions.length && <Empty>No decision yet since the last API start.</Empty>}
+      {decisions && decisions.length > 0 && <ul className="agent-decisions">{decisions.map(d => <li key={d.key}>
         <details>
           <summary>
-            <b>{d.stage}</b><time>{when(d.observedAt)}</time>
-            <span>p {prob(d.probability)} · edge {d.edge === null ? "—" : d.edge.toFixed(4)}</span>
-            <span className={d.outcome ? "" : "muted"}>{d.outcome ?? "unresolved"}</span>
+            <b>{orDash(d.outcome)}</b><time>{when(typeof d.at === "string" ? d.at : null)}</time>
+            <span>{short(d.instrument ?? "—")} · {orDash(d.direction)} · score {d.score === null ? "—" : d.score.toFixed(2)}</span>
+            <span className={d.abstain ? "muted" : ""}>{d.abstain ?? (d.candidate ? `${orDash(d.candidate.side)} ${orDash(d.candidate.quantity)} @ ${orDash(d.candidate.limit)}` : "—")}</span>
           </summary>
           <dl className="agent-dl">
-            <dt>Proposed / actual</dt><dd>{orDash(d.proposed)} / {orDash(d.actual)}</dd>
-            <dt>Risk decision</dt><dd>{orDash(d.risk)}</dd>
-            <dt>Regime · uncertainty</dt><dd>{orDash(d.regime)} · {prob(d.uncertainty)}</dd>
-            <dt>Model</dt><dd>{orDash(d.model)}</dd>
-            {d.resolvedAt && <><dt>Resolved</dt><dd>{when(d.resolvedAt)} · P&amp;L {d.outcomePnl === null ? "—" : d.outcomePnl.toFixed(4)}</dd></>}
-            <dt>Explanation</dt><dd>{d.explanation ?? "none recorded"}</dd>
+            <dt>Fusion</dt><dd>{d.hasFusion ? orDash(d.reason) : "—"}</dd>
+            <dt>Order proposed</dt><dd>{d.candidate ? `${orDash(d.candidate.side)} ${orDash(d.candidate.quantity)} @ ${orDash(d.candidate.limit)}` : "none"}</dd>
+            <dt>Reviewer</dt><dd>{d.review ? `${orDash(d.review.verdict)} · size ×${d.review.sizeFactor ?? "—"} · ${orDash(d.review.rationale)}` : "none"}</dd>
+            <dt>Abstained because</dt><dd>{orDash(d.abstain)}</dd>
           </dl>
         </details>
       </li>)}</ul>}
-      <small className="agent-src">Source: /orchestration/decision-memory/recent</small>
+      <small className="agent-src">Source: /v1/agents/decisions/recent · the Risk Engine and the OMS still decide every order.</small>
     </Panel>
 
     <Panel title="Orchestration contracts">

@@ -1125,3 +1125,58 @@ def test_without_more_pairs_nothing_changes(monkeypatch) -> None:
     assert instrument_registry.active_instruments() is PAPER_INSTRUMENTS
     assert len(live_monitor.configured_public_market_adapter().symbols) == 3
     assert len(roster_surface.roster_slots()) == 6
+
+
+async def test_a_sell_signal_is_not_sent_while_the_ema_agent_holds_nothing(
+    monkeypatch, surfaces
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.api.app import strategy_surface
+
+    configure(monkeypatch)
+    monkeypatch.setattr(strategy_surface, "settings", roster_surface.settings)
+    strategy_surface.reset_strategy_state()
+    roster = await roster_surface.ready()
+    now = datetime.now(UTC)
+    quote = SimpleNamespace(bid=Decimal("1"), ask=Decimal("1"), observed_at=now)
+    monkeypatch.setattr(strategy_surface, "live_quote", lambda i, market_source: quote)
+    monkeypatch.setattr(strategy_surface, "instruments", lambda: (BTC,))
+    monkeypatch.setattr(strategy_surface, "_warm_ema", lambda *_a: _noop())
+    sent = []
+
+    async def accept(signal, *, event_type, source):
+        sent.append(signal.direction)
+        return True
+
+    monkeypatch.setattr(strategy_surface, "accept_internal_signal", accept)
+    chosen = strategy_surface._strategy_for(BTC)
+    short = signal(SignalSource.PROTO_STRATEGY, "proto-ema-cross-1m").model_copy(
+        update={"direction": SignalDirection.SHORT}
+    )
+    monkeypatch.setattr(chosen, "observe", lambda i, mid, at: short)
+    assert roster_surface.ema_flat(BTC)
+    await strategy_surface.tick(now)
+    assert sent == [] and strategy_surface._counters["flat_exits_skipped"] == 1
+
+    agent = roster.active_for(ema_slot())
+    monkeypatch.setattr(agent.book, "quantity", Decimal("0.001"), raising=False)
+    assert not roster_surface.ema_flat(BTC)
+    await strategy_surface.tick(now)
+    assert sent == [SignalDirection.SHORT]
+    strategy_surface.reset_strategy_state()
+
+
+def test_recent_agent_decisions_narrow_to_one_instrument() -> None:
+    from types import SimpleNamespace
+
+    from apps.api.app import agent_surface
+
+    agent_surface._decisions.clear()
+    for instrument in (BTC, "BINANCE_SPOT:ETHUSDT", BTC):
+        agent_surface._decisions.append(
+            SimpleNamespace(instrument_id=instrument, to_dict=lambda i=instrument: {"i": i})
+        )
+    assert len(agent_surface.recent_decisions()["decisions"]) == 3
+    assert agent_surface.recent_decisions(instrument_id=BTC)["decisions"] == [{"i": BTC}] * 2
+    agent_surface._decisions.clear()
