@@ -76,6 +76,15 @@ def _shared_evidence(reports: Iterable[FinRobotReport]) -> tuple[Evidence, ...]:
     return tuple(out[:32])
 
 
+def _effective_stance(report: FinRobotReport) -> Stance:
+    if report.stance is Stance.VETO and not SPECS[report.robot_id].may_veto:
+        return Stance.CAUTION
+    return report.stance
+
+
+_EVIDENCE_PRIORITY = {Stance.VETO: 0, Stance.CAUTION: 1, Stance.SUPPORT: 2, Stance.ABSTAIN: 3}
+
+
 def decide(
     reports: Iterable[FinRobotReport],
     *,
@@ -106,11 +115,25 @@ def decide(
     for scope in sorted(by_scope):
         own = by_scope[scope]
         inherited = {} if scope == SYSTEM_SCOPE else system_reports
+        selected = dict(own)
+        for robot, inherited_report in inherited.items():
+            own_report = selected.get(robot)
+            inherited_stance = _effective_stance(inherited_report)
+            own_stance = _effective_stance(own_report) if own_report is not None else None
+            if (
+                own_report is None
+                or inherited_stance is Stance.VETO
+                or (
+                    inherited_stance is Stance.CAUTION
+                    and own_stance not in (Stance.VETO, Stance.CAUTION)
+                )
+            ):
+                selected[robot] = inherited_report
         votes: dict[str, str] = {}
         reasons: list[str] = []
         vetoed = cautioned = False
         support = 0
-        for robot, report in sorted({**inherited, **own}.items()):
+        for robot, report in sorted(selected.items()):
             stance = report.stance
             if stance is Stance.VETO and not SPECS[report.robot_id].may_veto:
                 reasons.append(f"{robot}: veto not in its mandate, counted as caution")
@@ -122,7 +145,7 @@ def decide(
             elif stance is Stance.CAUTION:
                 cautioned = True
                 reasons.append(f"{robot}: {report.headline}")
-            elif stance is Stance.SUPPORT and robot in own:
+            elif stance is Stance.SUPPORT and own.get(robot) is report:
                 support += 1
         if vetoed:
             verdict = Verdict.BLOCK_NEW_RISK
@@ -140,7 +163,12 @@ def decide(
                 verdict=verdict,
                 reasons=tuple(reasons),
                 votes=votes,
-                evidence=_shared_evidence(own.values()),
+                evidence=_shared_evidence(
+                    sorted(
+                        (*selected.values(), *inherited.values(), *own.values()),
+                        key=lambda item: _EVIDENCE_PRIORITY[_effective_stance(item)],
+                    )
+                ),
             )
         )
     return CouncilResult(decided_at=now, scopes=tuple(verdicts), excluded=tuple(excluded))

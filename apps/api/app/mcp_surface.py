@@ -303,19 +303,25 @@ async def _call_tool(request_id: Any, params: dict[str, Any], client: str) -> JS
                 "isError": True,
             },
         )
-    await _journal_call(tool.name, True, client)
     structured = {"notice": _NOTICE, "data": data}
     text = json.dumps(structured, ensure_ascii=False, default=str)
-    if len(text) > _MAX_TEXT:
-        text = text[:_MAX_TEXT] + "… [truncated]"
-    return _rpc_result(
-        request_id,
-        {
-            "content": [{"type": "text", "text": text}],
-            "structuredContent": structured,
-            "isError": False,
-        },
-    )
+    result = {
+        "content": [{"type": "text", "text": text}],
+        "structuredContent": structured,
+        "isError": False,
+    }
+    encoded = json.dumps(result, ensure_ascii=False, default=str).encode("utf-8")
+    if len(encoded) > _MAX_TEXT:
+        await _journal_call(tool.name, False, client)
+        return _rpc_result(
+            request_id,
+            {
+                "content": [{"type": "text", "text": "Result too large; narrow the query."}],
+                "isError": True,
+            },
+        )
+    await _journal_call(tool.name, True, client)
+    return _rpc_result(request_id, result)
 
 
 async def _bounded_body(request: Request) -> bytes | None:
