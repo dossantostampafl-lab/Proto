@@ -108,6 +108,10 @@ for name in proto-binance-testnet-key proto-binance-testnet-secret \
   read -rsp "$name ($where; Enter to skip for now): " value <&3; echo
   exec 3<&-
   if [ -z "$value" ]; then echo "skipped $name: run this script again once you have it"; continue; fi
+  if [ "$name" = proto-mcp-api-token ]; then
+    # The API strips it before checking its length: store it stripped, never padded to pass.
+    value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  fi
   if [ "$name" = proto-mcp-api-token ] && [ "${#value}" -lt 32 ]; then
     # The production API refuses a shorter MCP_API_TOKEN; proto-deploy would leave MCP closed.
     unset value; echo "skipped $name: it needs at least 32 characters"; continue

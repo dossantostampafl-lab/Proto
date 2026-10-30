@@ -127,22 +127,37 @@ mcp_fetch() {  # true once the token is in tmpfs (mcp_env)
     /etc/systemd/system/proto-secrets.service 2>/dev/null | head -n1)"
   [ -n "$vault" ] && /usr/local/sbin/proto-fetch-secrets api-mcp "$vault" >/dev/null 2>&1
 }
+mcp_token_acceptable() {  # mcp_token_acceptable <mcp env> <role env>: as the API's settings judge it
+  # Values are read from the files by Python and never passed as arguments (no secret in ps).
+  # Like Settings.normalize_optional_secret, every token is stripped before it is compared.
+  python3 - "$1" "$2" <<'PY'
+import sys
+
+def values(path):
+    out = {}
+    for line in open(path, encoding="utf-8"):
+        key, sep, value = line.rstrip("\n").partition("=")
+        if sep:
+            out[key] = value.strip()
+    return out
+
+token = values(sys.argv[1]).get("MCP_API_TOKEN", "")
+others = values(sys.argv[2])
+taken = {others.get(k) for k in ("OPERATOR_API_TOKEN", "EXECUTOR_API_TOKEN", "WATCHDOG_API_TOKEN")}
+sys.exit(0 if len(token) >= 32 and token not in taken else 1)
+PY
+}
 mcp_args() {  # extra podman args for the API, one per line
   [ "$role" = api ] || return 0
-  local token
   if ! mcp_fetch; then
     log "mcp: proto-mcp-api-token is not readable; the ChatGPT connector stays closed" >&2
     return 0
   fi
-  token="$(sed -n 's/^MCP_API_TOKEN=//p' "$mcp_env" | head -n1)"
-  if [ "${#token}" -lt 32 ] || grep -qxF -e "OPERATOR_API_TOKEN=$token" \
-      -e "EXECUTOR_API_TOKEN=$token" -e "WATCHDOG_API_TOKEN=$token" "$secrets"; then
-    unset token
+  if ! mcp_token_acceptable "$mcp_env" "$secrets"; then
     log "mcp: proto-mcp-api-token is shorter than 32 characters or reuses another token;" \
       "the ChatGPT connector stays closed" >&2
     return 0
   fi
-  unset token
   printf '%s\n' --env-file "$mcp_env"
 }
 alpaca_answers() {  # alpaca_answers <port>: its public /health answers from this host

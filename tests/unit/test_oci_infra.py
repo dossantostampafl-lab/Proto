@@ -639,8 +639,11 @@ _MCP_SIM = r"""
 set -euo pipefail
 src="$1"
 fn() { sed -n "/^$1() {/,/^}/p" "$src"; }
+eval "$(fn mcp_token_acceptable)"
 eval "$(fn mcp_args)"
 log() { echo "LOG $*"; }
+# Every python3 call's arguments are recorded: no secret may appear in them.
+python3() { printf '%s\n' "$@" >>"$ARGV_LOG"; command python3 "$@"; }
 role="$2" secrets="$3" mcp_env="$4"
 mcp_fetch() { [ -s "$mcp_env" ]; }
 mcp_args
@@ -654,6 +657,8 @@ def test_the_api_gets_the_mcp_token_only_when_the_api_would_accept_it(tmp_path: 
     operator = "o" * 40
     secrets.write_text(f"OPERATOR_API_TOKEN={operator}\nEXECUTOR_API_TOKEN={'e' * 40}\n")
     env_file = tmp_path / "api-mcp.env"
+    argv_log = tmp_path / "argv.log"
+    argv_log.write_text("")
 
     def sim(token: str | None, role: str = "api") -> str:
         if token is None:
@@ -672,16 +677,28 @@ def test_the_api_gets_the_mcp_token_only_when_the_api_would_accept_it(tmp_path: 
             capture_output=True,
             text=True,
             check=True,
+            env={**os.environ, "ARGV_LOG": str(argv_log)},
         )
         return done.stdout + done.stderr
 
     good = "m" * 40
     assert sim(good).splitlines() == ["--env-file", str(env_file)]
-    for bad in (None, "short-token", operator):
+    # The API strips tokens (Settings.normalize_optional_secret): padding must not let through a
+    # token that is short, or equal to another, once stripped; the API would refuse to start.
+    padded_short = "short-token" + " " * 40
+    padded_operator = f"  {operator}  "
+    for bad in (None, "short-token", operator, padded_short, padded_operator):
         out = sim(bad)
-        assert "--env-file" not in out and "LOG mcp:" in out, bad
+        assert "--env-file" not in out and "LOG mcp:" in out, repr(bad)
         assert good not in out and operator not in out  # never echoes a value
     assert sim(good, role="executor") == ""
+    logged = argv_log.read_text()
+    assert logged  # the check ran through python3
+    assert good not in logged and operator not in logged and "short-token" not in logged
+    deploy = (OCI / "deploy/proto-deploy.sh").read_text()
+    body = deploy.split("mcp_token_acceptable() {", 1)[1].split("\nmcp_args() {", 1)[0]
+    body += deploy.split("\nmcp_args() {", 1)[1].split("\n}\n", 1)[0]
+    assert "grep" not in body and "$token" not in body  # no secret in any argv
 
 
 def test_create_secrets_never_generates_the_mcp_token() -> None:
@@ -690,3 +707,5 @@ def test_create_secrets_never_generates_the_mcp_token() -> None:
     assert "proto-mcp" not in generated
     typed = script.split("for name in proto-binance-testnet-key", 1)[1].split("done", 1)[0]
     assert "proto-mcp-api-token" in typed and '"${#value}" -lt 32' in typed
+    # Stripped before the length check, as the API strips it.
+    assert typed.index("[[:space:]]") < typed.index('"${#value}" -lt 32')
