@@ -6,7 +6,7 @@ type History = { id: string; agent_id: string; version: number; messages: Entry[
 type Connection = { connected: boolean; state: string; configured_model: string | null; mode?: string; authorization_command?: string };
 
 // Browser speech (no service, no key): Chrome/Android's SpeechRecognition and speechSynthesis.
-type Recognition = { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null; start: () => void };
+type Recognition = { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: ((e: { error?: string }) => void) | null; start: () => void };
 function recognition(): Recognition | null {
   const w = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
   const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
@@ -19,6 +19,21 @@ function speak(text: string) {
   window.speechSynthesis.cancel();
   window.speechSynthesis.speak(u);
 }
+// Chrome on Android speaks only after a user gesture. The answer arrives seconds after the tap,
+// when that gesture has expired, so the tap itself speaks a silent utterance to unlock speech.
+function unlockSpeech() {
+  if (!("speechSynthesis" in window)) return;
+  const u = new SpeechSynthesisUtterance(" ");
+  u.volume = 0;
+  window.speechSynthesis.speak(u);
+}
+const MIC_ERRORS: Record<string, string> = {
+  "not-allowed": "O navegador bloqueou o microfone. Permita o microfone para este site nas configurações do Chrome.",
+  "service-not-allowed": "O navegador bloqueou o microfone. Permita o microfone para este site nas configurações do Chrome.",
+  "no-speech": "Não ouvi nada. Toque em Falar e fale logo em seguida.",
+  "audio-capture": "Nenhum microfone encontrado.",
+  network: "O reconhecimento de voz do Chrome precisa de internet. Tente de novo.",
+};
 
 export function AgentConversation({ agentId }: { agentId: string }) {
   const [history, setHistory] = useState<History | null>(null);
@@ -85,25 +100,30 @@ export function AgentConversation({ agentId }: { agentId: string }) {
   async function send(spoken?: string) {
     const question = (spoken ?? text).trim();
     if (!history || !question || !model) return;
-    setBusy(true); setStatus("Processing · no agent execution requested");
+    setBusy(true); setStatus(spoken ? `Você disse: “${question}”. Perguntando ao ChatGPT…` : "Perguntando ao ChatGPT…");
     const result = await post<History>(`/conversation/${history.id}/messages`, { text: question, version: history.version, model });
     if (result.ok) {
-      setHistory(result.data); setText(""); setStatus("ChatGPT explanation saved");
+      setHistory(result.data); setText(""); setStatus("Resposta recebida.");
       const last = result.data.messages[result.data.messages.length - 1];
       if (voice && last?.origin === "CHATGPT_EXPLANATION") speak(last.text);
     }
-    else setStatus(`Failed: ${result.error}. Reload history before retrying after a network timeout.`);
+    else setStatus(`O ChatGPT não respondeu: ${result.error}. Se demorou demais, toque em Load history antes de perguntar de novo.`);
     setBusy(false);
   }
   function listen() {
     const rec = recognition();
     if (!rec) { setStatus("Este navegador não tem reconhecimento de voz. Use o Chrome."); return; }
+    if (voice) unlockSpeech();
+    let heard = "";
+    let failed = false;
     rec.lang = "pt-BR"; rec.interimResults = false;
-    rec.onresult = e => { const heard = e.results[0]?.[0]?.transcript ?? ""; if (heard) { setText(heard); void send(heard); } };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => { setListening(false); setStatus("Não entendi. Toque no microfone e fale de novo."); };
-    setListening(true); rec.start();
+    rec.onresult = e => { heard = e.results[0]?.[0]?.transcript ?? ""; if (heard) { setText(heard); void send(heard); } };
+    rec.onerror = e => { failed = true; setListening(false); setStatus(MIC_ERRORS[e.error ?? ""] ?? `Erro no microfone (${e.error ?? "desconhecido"}). Toque em Falar de novo.`); };
+    rec.onend = () => { setListening(false); if (!heard && !failed) setStatus("Não ouvi nada. Toque em Falar e fale logo em seguida."); };
+    setListening(true); setStatus("Ouvindo… fale agora.");
+    try { rec.start(); } catch { setListening(false); setStatus("Não consegui abrir o microfone. Toque em Falar de novo."); }
   }
+  const lastAnswer = [...(history?.messages ?? [])].reverse().find(m => m.origin === "CHATGPT_EXPLANATION")?.text ?? "";
   return <section className="agent-conversation" aria-label="ChatGPT explanation">
     <h3>ChatGPT connection</h3>
     <ul className="agent-roles" aria-label="What this conversation can and cannot do">
@@ -138,8 +158,9 @@ export function AgentConversation({ agentId }: { agentId: string }) {
       <p>Conversation ID (save to resume): <code>{history.id}</code></p>
       {history.messages.map((m, i) => <article key={i}><b>{m.origin === "CHATGPT_EXPLANATION" ? "ChatGPT explanation" : "You"}</b><p style={{ whiteSpace: "pre-wrap" }}>{m.text}</p>{m.evidence != null && <details><summary>Evidence snapshot</summary><pre>{JSON.stringify(m.evidence, null, 2)}</pre></details>}</article>)}
       <label className="field"><span>Question</span><textarea maxLength={4000} value={text} onChange={e => setText(e.target.value)} disabled={busy} /></label>
-      <button type="button" className="btn primary" disabled={busy || !text.trim() || !model} onClick={() => void send()}>Ask about evidence</button>
+      <button type="button" className="btn primary" disabled={busy || !text.trim() || !model} onClick={() => { if (voice) unlockSpeech(); void send(); }}>Ask about evidence</button>
       <button type="button" className="btn" disabled={busy || listening || !model} aria-pressed={listening} onClick={listen}>{listening ? "Ouvindo…" : "🎤 Falar"}</button>
+      <button type="button" className="btn" disabled={!lastAnswer} onClick={() => speak(lastAnswer)}>🔊 Repetir resposta</button>
       <label className="field"><span>Responder em voz</span><input type="checkbox" checked={voice} onChange={e => { setVoice(e.target.checked); if (!e.target.checked && "speechSynthesis" in window) window.speechSynthesis.cancel(); }} /></label>
     </>}
   </section>;
