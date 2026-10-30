@@ -279,6 +279,24 @@ def test_veto_evidence_survives_when_support_evidence_fills_shared_limit():
     assert any(item.summary == "global kill" for item in scope.evidence)
 
 
+def test_shared_evidence_keeps_distinct_metrics_and_provenance():
+    first = evidence().model_copy(update={"metrics": {"amount": "1"}})
+    second = evidence().model_copy(update={"metrics": {"amount": "2"}})
+    third = evidence(DataProvenance.TESTNET).model_copy(update={"metrics": {"amount": "1"}})
+    reports = [
+        report(FinRobotId.RISK_GUARDIAN, Stance.CAUTION).model_copy(
+            update={"evidence": (first, first)}
+        ),
+        report(FinRobotId.AUDIT_RECOVERY, Stance.CAUTION).model_copy(
+            update={"evidence": (second,)}
+        ),
+        report(FinRobotId.MODEL_VALIDATOR, Stance.CAUTION).model_copy(
+            update={"evidence": (third,)}
+        ),
+    ]
+    assert len(decide(reports, now=NOW).scopes[0].evidence) == 3
+
+
 # -- orchestrator ----------------------------------------------------------------------------
 
 

@@ -65,11 +65,17 @@ class CouncilResult:
 
 
 def _shared_evidence(reports: Iterable[FinRobotReport]) -> tuple[Evidence, ...]:
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, tuple[tuple[str, str], ...]]] = set()
     out: list[Evidence] = []
     for report in reports:
         for item in report.evidence:
-            key = (item.source, item.observed_at.isoformat(), item.summary)
+            key = (
+                item.source,
+                item.provenance.value,
+                item.observed_at.isoformat(),
+                item.summary,
+                tuple(sorted(item.metrics.items())),
+            )
             if key not in seen:
                 seen.add(key)
                 out.append(item)
