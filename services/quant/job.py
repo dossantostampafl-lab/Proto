@@ -11,9 +11,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from services.orchestration.runtime import JobRun
+from services.orchestration.runtime import JobRun, ProtoBrain
 
-from .evidence import QuantEvidence, store_quant_evidence
+from .evidence import QuantEvidence, _payload, store_quant_evidence
 
 _ALLOWED_PROVENANCE = {
     "SIMULATION": "SIMULATED",
@@ -61,3 +61,25 @@ async def process_quant_research_job(
         "financial_connectivity": False,
         "real_money_execution": False,
     }
+
+
+async def enqueue_quant_research(brain: ProtoBrain, envelope: QuantEvidence) -> JobRun:
+    """Submit already sourced research to the existing durable queue exactly once.
+
+    This is an internal integration seam, not an unauthenticated HTTP endpoint or
+    a market-data producer. Callers must supply real, complete, timestamped evidence.
+    """
+    validated = QuantEvidence.model_validate(envelope.model_dump(mode="json"))
+    if validated.mode not in _ALLOWED_PROVENANCE:
+        raise ValueError("unsupported quant job mode")
+    if validated.input_provenance != _ALLOWED_PROVENANCE[validated.mode]:
+        raise ValueError("quant evidence mode/provenance mismatch")
+    if validated.observed_at > datetime.now(UTC):
+        raise ValueError("quant input cannot be observed in the future")
+    evidence_id, payload = _payload(validated)
+    return await brain.enqueue(
+        "quant-research",
+        idempotency_key=f"quant-evidence:{evidence_id}",
+        mode=validated.mode,
+        payload={"evidence": payload},
+    )
