@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from services.orchestration import JOB_CATALOG, JobState, ProtoBrain, SqlJobStore
 from services.quant.evidence import (
     QuantEvidence,
+    _payload,
     quant_evidence_metadata,
     recent_quant_evidence,
 )
@@ -211,6 +212,43 @@ async def test_evidence_only_enqueuer_is_content_idempotent():
         result = await brain.run_once()
         assert result.state is JobState.SUCCEEDED
         assert len(await recent_quant_evidence(engine)) == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_evidence_enqueuer_rejects_preexisting_key_with_different_payload():
+    brain, engine = await brain_with_storage()
+    try:
+        item = envelope()
+        identity, _ = _payload(item)
+        await brain.enqueue(
+            "quant-research",
+            idempotency_key=f"quant-evidence:{identity}",
+            mode=item.mode,
+            payload={"evidence": {"different": True}},
+        )
+        with pytest.raises(ValueError, match="queue identity collision"):
+            await enqueue_quant_research(brain, item)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_evidence_enqueuer_rejects_boolean_substitution_for_numeric_input():
+    brain, engine = await brain_with_storage()
+    try:
+        item = envelope()
+        identity, payload = _payload(item)
+        payload["pipeline_input"]["imbalance"] = False
+        await brain.enqueue(
+            "quant-research",
+            idempotency_key=f"quant-evidence:{identity}",
+            mode=item.mode,
+            payload={"evidence": payload},
+        )
+        with pytest.raises(ValueError, match="queue identity collision"):
+            await enqueue_quant_research(brain, item)
     finally:
         await engine.dispose()
 

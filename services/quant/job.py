@@ -6,6 +6,7 @@ Only an already validated, explicitly sourced quant-evidence/1 envelope is accep
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
@@ -83,9 +84,14 @@ async def enqueue_quant_research(brain: ProtoBrain, envelope: QuantEvidence) -> 
     if validated.observed_at > datetime.now(UTC):
         raise ValueError("quant input cannot be observed in the future")
     evidence_id, payload = _payload(validated)
-    return await brain.enqueue(
+    queued = await brain.enqueue(
         "quant-research",
         idempotency_key=f"quant-evidence:{evidence_id}",
         mode=validated.mode,
         payload={"evidence": payload},
     )
+    requested = json.dumps({"evidence": payload}, sort_keys=True, separators=(",", ":"))
+    existing = json.dumps(queued.payload, sort_keys=True, separators=(",", ":"))
+    if existing != requested:
+        raise ValueError("quant evidence queue identity collision")
+    return queued
