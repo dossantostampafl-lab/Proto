@@ -255,3 +255,37 @@ def test_public_access_needs_the_operator_token_and_the_public_origin(monkeypatc
     with pytest.raises(HTTPException) as loopback:
         surface.authorize_operator(request({**good, "X-Proto-Operator-Token": "operator"}))
     assert loopback.value.status_code == 403
+
+
+async def test_finrobot_view_reaches_chatgpt_as_advisory_data(client, monkeypatch):
+    import json
+
+    brief = {
+        "available": True,
+        "cycle_id": "c-1",
+        "verdicts": [{"scope": "BTCUSDT", "verdict": "BLOCK_NEW_RISK", "reasons": ["kill"]}],
+        "reports": [],
+        "advisory_only": True,
+        "order_authority": False,
+    }
+    seen = {}
+
+    async def generate(_, request):
+        seen["instructions"] = request.messages[0]["content"]
+        seen["context"] = json.loads(request.messages[1]["content"])
+        return SimpleNamespace(content="The council advises no new risk.", model="fixture-model")
+
+    monkeypatch.setattr(surface, "council_brief", lambda instrument_id: brief)
+    monkeypatch.setattr(surface.ChatGPTPlanProvider, "generate", generate)
+    created = await client.post("/conversation/new", json={"agent_id": "AG-1"})
+    path = f"/conversation/{created.json()['id']}/messages"
+    sent = await client.post(path, json={"text": "Why no trade?", "version": 0})
+    assert sent.status_code == 200, sent.text
+    assert seen["context"]["finrobots"] == brief
+    assert "never orders" in seen["instructions"]
+    evidence = sent.json()["messages"][1]["evidence"]["finrobots"]
+    assert evidence == {
+        "source": "/v1/finrobots/council/latest",
+        "cycle_id": "c-1",
+        "available": True,
+    }

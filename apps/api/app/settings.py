@@ -147,6 +147,14 @@ class Settings(BaseSettings):
     # of loopback only: the operator token is still required on every call, and a browser call
     # must come from PUBLIC_ORIGIN, which this mode requires.
     chatgpt_public_access: bool = False
+    # FinRobots (docs/finrobots/contract.md): advisory specialists on PROTO's own schedule.
+    # Off by default; on, a cycle runs every interval whether or not ChatGPT is connected.
+    finrobots_enabled: bool = False
+    finrobots_interval_seconds: float = Field(default=60.0, ge=5.0, le=3_600.0, allow_inf_nan=False)
+    # Read-only MCP server for ChatGPT connectors (docs/finrobots/chatgpt-mcp.md). Closed (404)
+    # unless enabled; every call needs MCP_API_TOKEN as a bearer token. No tool can mutate.
+    mcp_enabled: bool = False
+    mcp_api_token: str | None = None
     # Phase 6b: the independent watchdog's token. It can only halt and report a heartbeat.
     watchdog_api_token: str | None = None
     # Public HTTPS origin of the deployed dashboard (e.g. the Oracle Cloud host).
@@ -356,6 +364,7 @@ class Settings(BaseSettings):
         "alpaca_executor_api_token",
         "risk_permit_private_key",
         "watchdog_api_token",
+        "mcp_api_token",
     )
     @classmethod
     def normalize_optional_secret(cls, value: str | None) -> str | None:
@@ -397,6 +406,11 @@ class Settings(BaseSettings):
             and len(self.watchdog_api_token) < _MIN_PRODUCTION_SECRET_LENGTH
         ):
             raise ValueError("WATCHDOG_API_TOKEN must be at least 32 characters in production")
+        if (
+            self.mcp_api_token is not None
+            and len(self.mcp_api_token) < _MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            raise ValueError("MCP_API_TOKEN must be at least 32 characters in production")
         if not self.tradingview_ip_allowlist_enabled:
             raise ValueError("TRADINGVIEW_IP_ALLOWLIST_ENABLED must stay true in production")
         return self
@@ -408,6 +422,14 @@ class Settings(BaseSettings):
             self.executor_api_token,
         }:
             raise ValueError("WATCHDOG_API_TOKEN must differ from the operator and executor tokens")
+        if self.mcp_api_token is not None and self.mcp_api_token in {
+            self.operator_api_token,
+            self.executor_api_token,
+            self.watchdog_api_token,
+        }:
+            raise ValueError(
+                "MCP_API_TOKEN must differ from the operator, executor and watchdog tokens"
+            )
         return self
 
     @model_validator(mode="after")
