@@ -1,0 +1,34 @@
+from datetime import UTC, datetime
+
+import pytest
+
+pytest.importorskip("services.finrobots.contracts", reason="requires FinRobots PR #360")
+
+from services.finrobots import FinRobotOrchestrator, FinRobotRegistry  # noqa: E402
+from services.finrobots.robots import default_robots  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_real_specialists_run_through_council_without_chatgpt():
+    async def snapshot():
+        now = datetime.now(UTC).isoformat()
+        return {
+            "risk.status": {"controls": {"global_kill": True}},
+            "agents.status": {"journal_failures": 1, "stage": "PAPER"},
+            "_sources": {
+                "sources": {
+                    "risk.status": {"status": "OK", "provenance": "PAPER", "read_at": now},
+                    "agents.status": {"status": "OK", "provenance": "PAPER", "read_at": now},
+                }
+            },
+        }
+
+    registry = FinRobotRegistry()
+    for robot in default_robots():
+        registry.bind(robot)
+    brain = FinRobotOrchestrator(registry, snapshot=snapshot, instruments=lambda: ("BTC",))
+    cycle = await brain.run_cycle()
+    assert not cycle.errors
+    assert len(cycle.reports) == 8
+    assert any(scope.verdict.value == "BLOCK_NEW_RISK" for scope in cycle.council.scopes)
+    assert all(not report.real_money_execution for report in cycle.reports)

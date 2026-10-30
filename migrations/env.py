@@ -10,7 +10,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from apps.api.app import live_persistence as _live_persistence
+from apps.api.app import live_persistence as _live_persistence  # noqa: F401
 from apps.api.app.live_database import LiveBase
 from apps.api.app.persistence import Base
 from apps.api.app.schema_registry import canonical_metadata
@@ -21,6 +21,7 @@ from services.oms import ledger_metadata
 from services.oms.ledger import ExactDecimal
 from services.orchestration import DecisionMemoryBase, OrchestrationBase
 from services.promotion import promotion_metadata
+from services.quant.evidence import quant_evidence_metadata
 from services.risk import control_metadata
 
 config = context.config
@@ -37,6 +38,7 @@ target_metadata = [
     LiveBase.metadata,
     Base.metadata,
     canonical_metadata,
+    quant_evidence_metadata,
     OrchestrationBase.metadata,
     DecisionMemoryBase.metadata,
     journal_metadata,

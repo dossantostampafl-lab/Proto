@@ -10,6 +10,7 @@ from services.quant.calibration import calibration_report
 from services.quant.pipeline import (
     CalibrationSample,
     QuantPipelineInput,
+    QuantPipelineResult,
     run_quant_pipeline,
 )
 
@@ -22,7 +23,7 @@ from .metrics_state import metrics
 from .models import MarketSnapshot
 from .observability import OperationLatencyTimer
 from .replay import HistoricalReplay, ReplayFrame
-from .research_persistence import persist_quant_lineage
+from .research_persistence import QuantLineageCollision, persist_quant_lineage
 from .safety_surface import router as safety_router
 from .surface import router as surface_router
 from .validation_surface import router as validation_router
@@ -36,6 +37,13 @@ router.include_router(circuit_router)
 router.include_router(data_snooping_router)
 router.include_router(markout_router)
 router.include_router(validation_router)
+
+
+async def _persist_quant_result(result: QuantPipelineResult) -> bool:
+    try:
+        return await persist_quant_lineage(persistence_engine, result)
+    except QuantLineageCollision as exc:
+        raise HTTPException(status_code=409, detail="quant lineage identity conflict") from exc
 
 
 class CalibrationPoint(BaseModel):
@@ -65,9 +73,7 @@ class QuantReplayCalibrationObservation(BaseModel):
 
 class QuantReplayRequest(BaseModel):
     frames: list[QuantPipelineInput] = Field(min_length=1)
-    calibration_observations: list[QuantReplayCalibrationObservation] = Field(
-        default_factory=list
-    )
+    calibration_observations: list[QuantReplayCalibrationObservation] = Field(default_factory=list)
 
 
 def _validate_quant_replay_clock(request: QuantReplayRequest) -> None:
@@ -133,7 +139,7 @@ def calibration(request: CalibrationRequest) -> dict[str, object]:
 async def quant_pipeline(request: QuantPipelineInput) -> dict[str, object]:
     with OperationLatencyTimer(metrics, "quant_pipeline"):
         result = run_quant_pipeline(request)
-        persisted = await persist_quant_lineage(persistence_engine, result)
+        persisted = await _persist_quant_result(result)
     metrics.increment("quant_pipeline_requests")
     if persisted:
         metrics.increment("quant_pipeline_persisted")
@@ -162,7 +168,7 @@ async def quant_replay(request: QuantReplayRequest) -> dict[str, object]:
                 }
             )
             result = run_quant_pipeline(replay_input)
-            persisted = await persist_quant_lineage(persistence_engine, result)
+            persisted = await _persist_quant_result(result)
             if persisted:
                 persisted_count += 1
             results.append(
@@ -190,10 +196,7 @@ async def quant_replay(request: QuantReplayRequest) -> dict[str, object]:
 @router.post("/research/replay")
 def replay(request: ReplayRequest) -> dict[str, object]:
     engine = HistoricalReplay(
-        [
-            ReplayFrame(timestamp=item.timestamp, snapshot=item.snapshot)
-            for item in request.frames
-        ]
+        [ReplayFrame(timestamp=item.timestamp, snapshot=item.snapshot) for item in request.frames]
     )
     frames = engine.run_all()
     metrics.increment("historical_replay_requests")
@@ -230,26 +233,20 @@ def _portfolio_gauges() -> dict[str, float]:
     snapshot = portfolio.snapshot()
     execution_costs = snapshot.get("execution_costs", {})
     slippage = (
-        float(execution_costs.get("slippage", 0.0))
-        if isinstance(execution_costs, dict)
-        else 0.0
+        float(execution_costs.get("slippage", 0.0)) if isinstance(execution_costs, dict) else 0.0
     )
     return {
         "portfolio_gross_exposure": float(snapshot.get("gross_exposure", 0.0)),
         "portfolio_net_exposure": float(snapshot.get("net_exposure", 0.0)),
         "portfolio_total_pnl_after_fees": float(snapshot.get("total_pnl_after_fees", 0.0)),
         "portfolio_realized_drawdown": float(snapshot.get("realized_drawdown", 0.0)),
-        "portfolio_max_asset_concentration": float(
-            snapshot.get("max_asset_concentration", 0.0)
-        ),
+        "portfolio_max_asset_concentration": float(snapshot.get("max_asset_concentration", 0.0)),
         "portfolio_turnover_notional": float(snapshot.get("turnover_notional", 0.0)),
         "portfolio_slippage_cost": slippage,
         "portfolio_temporal_exposure_notional_seconds": float(
             snapshot.get("temporal_exposure_notional_seconds", 0.0)
         ),
-        "portfolio_max_position_age_seconds": float(
-            snapshot.get("max_position_age_seconds", 0.0)
-        ),
+        "portfolio_max_position_age_seconds": float(snapshot.get("max_position_age_seconds", 0.0)),
     }
 
 

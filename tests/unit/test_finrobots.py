@@ -202,6 +202,101 @@ def test_system_veto_applies_to_every_instrument():
     assert verdicts == {BTC: Verdict.BLOCK_NEW_RISK, SYSTEM_SCOPE: Verdict.BLOCK_NEW_RISK}
 
 
+def test_system_veto_cannot_be_overridden_by_same_robot_instrument_support():
+    global_report = report(FinRobotId.RISK_GUARDIAN, Stance.VETO, instrument=None).model_copy(
+        update={"evidence": (evidence().model_copy(update={"summary": "global kill"}),)}
+    )
+    result = decide(
+        [
+            global_report,
+            report(FinRobotId.RISK_GUARDIAN, Stance.SUPPORT),
+            report(FinRobotId.MARKET_INTELLIGENCE, Stance.SUPPORT),
+        ],
+        now=NOW,
+    )
+    scope = next(item for item in result.scopes if item.scope == BTC)
+    assert scope.verdict is Verdict.BLOCK_NEW_RISK
+    assert scope.votes["risk-guardian"] == "VETO"
+    assert any(item.summary == "global kill" for item in scope.evidence)
+
+
+def test_system_caution_cannot_be_overridden_by_same_robot_instrument_support():
+    result = decide(
+        [
+            report(FinRobotId.AUDIT_RECOVERY, Stance.CAUTION, instrument=None),
+            report(FinRobotId.AUDIT_RECOVERY, Stance.SUPPORT),
+            report(FinRobotId.MARKET_INTELLIGENCE, Stance.SUPPORT),
+        ],
+        now=NOW,
+    )
+    scope = next(item for item in result.scopes if item.scope == BTC)
+    assert scope.verdict is Verdict.REDUCE_RISK
+    assert scope.votes["audit-recovery"] == "CAUTION"
+
+
+def test_instrument_veto_is_not_weakened_by_system_caution():
+    result = decide(
+        [
+            report(FinRobotId.RISK_GUARDIAN, Stance.CAUTION, instrument=None),
+            report(FinRobotId.RISK_GUARDIAN, Stance.VETO),
+        ],
+        now=NOW,
+    )
+    scope = next(item for item in result.scopes if item.scope == BTC)
+    assert scope.verdict is Verdict.BLOCK_NEW_RISK
+    assert scope.votes["risk-guardian"] == "VETO"
+
+
+def test_system_support_does_not_count_toward_instrument_quorum():
+    result = decide(
+        [
+            report(FinRobotId.QUANT_RESEARCH, Stance.SUPPORT, instrument=None),
+            report(FinRobotId.MARKET_INTELLIGENCE, Stance.SUPPORT),
+        ],
+        now=NOW,
+    )
+    scope = next(item for item in result.scopes if item.scope == BTC)
+    assert scope.verdict is Verdict.NO_CONSENSUS
+
+
+def test_veto_evidence_survives_when_support_evidence_fills_shared_limit():
+    def many(prefix):
+        return tuple(evidence().model_copy(update={"summary": f"{prefix}-{i}"}) for i in range(16))
+
+    market = report(FinRobotId.MARKET_INTELLIGENCE, Stance.SUPPORT).model_copy(
+        update={"evidence": many("market")}
+    )
+    quant = report(FinRobotId.QUANT_RESEARCH, Stance.SUPPORT).model_copy(
+        update={"evidence": many("quant")}
+    )
+    veto = report(FinRobotId.RISK_GUARDIAN, Stance.VETO, instrument=None).model_copy(
+        update={"evidence": (evidence().model_copy(update={"summary": "global kill"}),)}
+    )
+    scope = next(
+        item for item in decide([market, quant, veto], now=NOW).scopes if item.scope == BTC
+    )
+    assert scope.verdict is Verdict.BLOCK_NEW_RISK
+    assert any(item.summary == "global kill" for item in scope.evidence)
+
+
+def test_shared_evidence_keeps_distinct_metrics_and_provenance():
+    first = evidence().model_copy(update={"metrics": {"amount": "1"}})
+    second = evidence().model_copy(update={"metrics": {"amount": "2"}})
+    third = evidence(DataProvenance.TESTNET).model_copy(update={"metrics": {"amount": "1"}})
+    reports = [
+        report(FinRobotId.RISK_GUARDIAN, Stance.CAUTION).model_copy(
+            update={"evidence": (first, first)}
+        ),
+        report(FinRobotId.AUDIT_RECOVERY, Stance.CAUTION).model_copy(
+            update={"evidence": (second,)}
+        ),
+        report(FinRobotId.MODEL_VALIDATOR, Stance.CAUTION).model_copy(
+            update={"evidence": (third,)}
+        ),
+    ]
+    assert len(decide(reports, now=NOW).scopes[0].evidence) == 3
+
+
 # -- orchestrator ----------------------------------------------------------------------------
 
 

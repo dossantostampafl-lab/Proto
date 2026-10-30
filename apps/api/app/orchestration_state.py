@@ -18,9 +18,11 @@ from services.orchestration import (
     EventTriggerRule,
     ProtoBrain,
 )
+from services.orchestration.runtime import JobRun
 from services.orchestration.supervisor import OrchestrationSupervisor, PeriodicJob
+from services.quant.job import process_quant_research_job
 
-from .app_state import decision_memory_store, orchestration_store
+from .app_state import decision_memory_store, orchestration_store, persistence_engine
 from .event_state import event_runtime
 from .live_monitor import live_monitor
 from .models import SimulationRequest
@@ -145,6 +147,12 @@ async def _shadow_decision_job(payload: dict[str, object]) -> dict[str, object]:
     }
 
 
+async def _quant_research_job(
+    payload: dict[str, object], run: JobRun
+) -> dict[str, object]:
+    return await process_quant_research_job(payload, run, persistence_engine)
+
+
 proto_brain: ProtoBrain | None = None
 orchestration_supervisor: OrchestrationSupervisor | None = None
 
@@ -153,6 +161,12 @@ if orchestration_store is not None:
     proto_brain.register(JOB_CATALOG["market-data-health"].spec, _market_data_health_job)
     proto_brain.register(JOB_CATALOG["opportunity-scan"].spec, _opportunity_scan_job)
     proto_brain.register(JOB_CATALOG["shadow-decision"].spec, _shadow_decision_job)
+    # Research jobs must have a durable simulation store. A control-plane-only
+    # LIVE_MONITORING API never registers a handler that cannot persist evidence.
+    if persistence_engine is not None:
+        proto_brain.register_contextual(
+            JOB_CATALOG["quant-research"].spec, _quant_research_job
+        )
     market_event_dispatcher = AutonomousEventDispatcher(
         runtime=event_runtime,
         brain=proto_brain,

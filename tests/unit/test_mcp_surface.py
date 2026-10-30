@@ -109,6 +109,49 @@ def test_tool_call_returns_labeled_data_and_is_journaled(client):
     assert event.payload["tool"] == "finrobots_list" and event.payload["ok"] is True
 
 
+def test_oversized_tool_result_does_not_leak_full_structured_content(client, monkeypatch):
+    monkeypatch.setattr(
+        mcp_surface.TOOLS["finrobots_list"], "run", lambda _: {"rows": ["x" * 4000] * 30}
+    )
+    result = rpc(client, "tools/call", {"name": "finrobots_list", "arguments": {}}).json()["result"]
+    assert result["isError"] is True
+    assert "structuredContent" not in result
+    assert "too large" in result["content"][0]["text"].lower()
+
+
+def test_tool_result_limit_counts_utf8_bytes_and_both_representations(client, monkeypatch):
+    monkeypatch.setattr(
+        mcp_surface.TOOLS["finrobots_list"], "run", lambda _: {"rows": ["💰" * 4000] * 3}
+    )
+    response = rpc(client, "tools/call", {"name": "finrobots_list", "arguments": {}})
+    assert response.json()["result"]["isError"] is True
+    assert len(response.content) < 1024
+
+
+def test_mcp_rejects_oversized_request_id_without_echoing_it(client):
+    response = rpc(client, "tools/list", request_id="x" * 50_000)
+    assert response.status_code == 400
+    assert len(response.content) < 1024
+    assert response.json()["id"] is None
+
+
+def test_mcp_rejects_non_scalar_and_nonfinite_request_ids(client):
+    for request_id in ({"object": 1}, True, float("inf")):
+        # Send raw JSON for the non-finite case; it is not valid JSON-RPC.
+        import json
+
+        body = json.dumps({"jsonrpc": "2.0", "id": request_id, "method": "ping"})
+        response = client.post("/mcp", content=body, headers=AUTH)
+        assert response.status_code == 400
+
+
+def test_response_budget_includes_json_rpc_envelope_and_request_id():
+    response = mcp_surface._rpc_result("x" * 100, {"data": "a" * 59_900})
+    assert len(response.body) < 1024
+    assert b'"isError":true' in response.body
+    assert b'"data"' not in response.body
+
+
 def test_tool_arguments_are_validated(client):
     unknown = rpc(client, "tools/call", {"name": "finrobot_cycles", "arguments": {"limit": 99}})
     assert unknown.json()["result"]["isError"] is True
