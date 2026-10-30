@@ -12,6 +12,10 @@ from services.validation.experiments import stable_fingerprint
 from .schema_registry import CANONICAL_TABLES
 
 
+class QuantLineageCollision(RuntimeError):
+    """An existing lineage identity belongs to different evidence."""
+
+
 def _record_id(correlation_id: str, suffix: str) -> str:
     value = f"{correlation_id}:{suffix}"
     if len(value) <= 64:
@@ -45,7 +49,7 @@ async def _lineage_complete(
             if existing.scalar_one_or_none() is not None:
                 mismatch = True
     if mismatch:
-        raise RuntimeError("quant lineage identity collision: persisted payload differs")
+        raise QuantLineageCollision("quant lineage identity collision: persisted payload differs")
     return True
 
 
@@ -233,9 +237,7 @@ async def persist_research_experiment(
             raise
         if existing_payload == payload:
             return True
-        raise RuntimeError(
-            "experiment identity collision: persisted payload differs"
-        ) from error
+        raise RuntimeError("experiment identity collision: persisted payload differs") from error
     return True
 
 
@@ -284,8 +286,5 @@ async def persist_model_promotion_decision(
             raise
         if existing_payload == payload:
             return promotion_id, True
-        raise RuntimeError(
-            "promotion identity collision: persisted payload differs"
-        ) from error
+        raise RuntimeError("promotion identity collision: persisted payload differs") from error
     return promotion_id, True
-

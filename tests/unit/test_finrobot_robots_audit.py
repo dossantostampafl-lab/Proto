@@ -18,9 +18,17 @@ def auditor():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("value", [None, {}, {"journal_failures": -1},
-                                  {"journal_failures": True}, {"journal_failures": "1"},
-                                  {"journal_failures": 0}])
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        {},
+        {"journal_failures": -1},
+        {"journal_failures": True},
+        {"journal_failures": "1"},
+        {"journal_failures": 0},
+    ],
+)
 async def test_auditor_abstains_without_positive_failure_count(value):
     assert (await auditor().analyze(context(value))).stance is Stance.ABSTAIN
 

@@ -60,3 +60,25 @@ async def test_risk_guardian_detects_other_global_controls(controls):
 async def test_risk_guardian_does_not_ignore_known_kill_when_other_fields_are_missing():
     result = await guardian().analyze(context({"global_kill": True}))
     assert result.stance is Stance.VETO
+
+
+@pytest.mark.asyncio
+async def test_venue_kill_vetoes_only_instruments_in_affected_venue():
+    ctx = CycleContext(
+        uuid4(),
+        datetime.now(UTC),
+        ("BINANCE_SPOT:BTCUSDT", "OTHER:BTC"),
+        {
+            "risk.status": {
+                "account_source": "PAPER",
+                "controls": {
+                    "killed_venues": ["BINANCE_SPOT"],
+                },
+            }
+        },
+    )
+    reports = await guardian().analyze(ctx)
+    assert len(reports) == 1
+    assert reports[0].instrument_id == "BINANCE_SPOT:BTCUSDT"
+    assert reports[0].stance is Stance.VETO
+    assert reports[0].evidence[0].provenance.value == "PAPER"
