@@ -342,27 +342,39 @@ class AuditRecovery:
         status = context.snapshot.get("agents.status")
         failures = status.get("journal_failures") if isinstance(status, Mapping) else None
         source = _source_evidence(context, "agents.status")
-        alert = type(failures) is int and failures > 0 and source is not None
-        evidence = (
-            (
+        evidence = []
+        if type(failures) is int and failures > 0 and source is not None:
+            evidence.append(
                 Evidence(
                     source="agents.status",
                     provenance=source[0],
                     observed_at=source[1],
                     summary="Agent decision journal failures recorded in this process since reset.",
                     metrics={"journal_failures": str(failures)},
-                ),
+                )
             )
-            if alert
-            else ()
-        )
+        watchdog = context.snapshot.get("watchdog.status")
+        watchdog_source = _source_evidence(context, "watchdog.status")
+        if (
+            isinstance(watchdog, Mapping)
+            and watchdog.get("active") is False
+            and watchdog_source is not None
+        ):
+            evidence.append(
+                Evidence(
+                    source="watchdog.status",
+                    provenance=watchdog_source[0],
+                    observed_at=watchdog_source[1],
+                    summary="The watchdog reported no active heartbeat coverage.",
+                )
+            )
         return FinRobotReport(
             robot_id=self.robot_id,
             implementation=self.implementation,
             cycle_id=context.cycle_id,
-            stance=Stance.CAUTION if alert else Stance.ABSTAIN,
-            headline="Agent journal failures observed" if alert else "Insufficient audit evidence",
-            evidence=evidence,
+            stance=Stance.CAUTION if evidence else Stance.ABSTAIN,
+            headline="Audit or watchdog warning" if evidence else "Insufficient audit evidence",
+            evidence=tuple(evidence),
         )
 
 

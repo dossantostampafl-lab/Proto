@@ -58,6 +58,15 @@ async def test_auditor_reports_process_local_journal_failure():
     assert report.cycle_id == ctx.cycle_id
     assert report.evidence[0].metrics["journal_failures"] == "2"
     assert report.evidence[0].provenance.value == "TESTNET"
+
+
+@pytest.mark.asyncio
+async def test_inactive_watchdog_without_trusted_source_does_not_claim_status():
+    ctx = context({"journal_failures": 0})
+    ctx.snapshot["watchdog.status"] = {"active": False}
+    report = await auditor().analyze(ctx)
+    assert report.stance is Stance.ABSTAIN
+    assert not report.evidence
     assert report.real_money_execution is False
 
 
@@ -68,3 +77,18 @@ async def test_auditor_abstains_when_source_is_unavailable():
     report = await auditor().analyze(ctx)
     assert report.stance is Stance.ABSTAIN
     assert not report.evidence
+
+
+@pytest.mark.asyncio
+async def test_auditor_warns_when_watchdog_is_inactive():
+    ctx = context({"journal_failures": 0, "stage": "PAPER"})
+    ctx.snapshot["watchdog.status"] = {"active": False}
+    ctx.snapshot["_sources"]["sources"]["watchdog.status"] = {
+        "status": "OK",
+        "provenance": "TESTNET",
+        "read_at": datetime.now(UTC).isoformat(),
+    }
+    report = await auditor().analyze(ctx)
+    assert report.stance is Stance.CAUTION
+    assert report.evidence[0].source == "watchdog.status"
+    assert report.evidence[0].provenance.value == "TESTNET"
