@@ -243,3 +243,21 @@ async def test_real_snapshot_reads_proto_sources():
     # No live monitor in tests: every quote is None, so the source is not labeled LIVE.
     assert all(q is None for q in snapshot["market.quotes"].values())
     assert sources["market.quotes"]["provenance"] == "UNAVAILABLE"
+
+
+def test_only_in_memory_sources_are_synchronous():
+    import inspect
+    from time import perf_counter
+
+    for name, (read, _) in finrobot_surface._readers().items():
+        started = perf_counter()
+        value = read()
+        elapsed = perf_counter() - started
+        if name in finrobot_surface.IN_MEMORY_SOURCES:
+            # Sync readers run on the loop without a timeout: they must be plain memory reads.
+            assert not inspect.isawaitable(value), name
+            assert elapsed < 0.05, (name, elapsed)
+        else:
+            # Anything else must be a coroutine, so the 3 s timeout bounds it.
+            assert inspect.isawaitable(value), name
+            value.close()

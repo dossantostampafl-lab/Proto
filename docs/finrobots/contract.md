@@ -43,7 +43,14 @@ class CycleContext:
 ### Snapshot `finrobots-snapshot/1.1` (aditivo sobre 1.0, mesmas chaves antigas)
 
 Cada chave é a resposta de uma rota GET do próprio PROTO (ou leitura pura), lida uma vez por
-ciclo com timeout de 3 s. `snapshot["_sources"]` traz, por chave, `status` (`OK`, `UNAVAILABLE`,
+ciclo.
+
+- **Timeout de 3 s:** vale para as fontes assíncronas (`oms.*`, `reconciliation.status`,
+  `promotion.scopes`), que podem falar com o executor por HTTP.
+- **Fontes síncronas** (`IN_MEMORY_SOURCES`: `agents.*`, `risk.status`, `market.quotes`,
+  `watchdog.status`): leem estado do processo, sem I/O. Rodam no event loop **sem** timeout.
+  Movê-las para uma thread criaria corrida com o estado alterado no loop, e um timeout de thread
+  não interromperia o trabalho. Um teste impõe essa divisão. `snapshot["_sources"]` traz, por chave, `status` (`OK`, `UNAVAILABLE`,
 `TIMEOUT`), `read_at`, `provenance` e `error`. Uma fonte que falhou **não aparece** no snapshot.
 Fontes que sincronizam ou gravam ficam fora, por exemplo `GET /v1/agents/roster`, que sincroniza
 fills.

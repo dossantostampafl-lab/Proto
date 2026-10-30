@@ -70,7 +70,13 @@ def _quotes() -> dict[str, Any]:
 
 def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
     """Snapshot keys -> (read-only reader, provenance of its data). Every reader is one of
-    PROTO's own GET routes or a pure read; none syncs, writes or reaches an order path."""
+    PROTO's own GET routes or a pure read; none syncs, writes or reaches an order path.
+
+    Readers in ``IN_MEMORY_SOURCES`` are synchronous reads of process state (no I/O) and run on
+    the event loop without a timeout: moving them to a thread would race with the state the loop
+    mutates, and a thread timeout would not stop the work anyway. Every other reader is a
+    coroutine (it may reach the executor over HTTP) and is bounded by the 3 s timeout.
+    """
 
     mode = data_mode()
     return {
@@ -85,6 +91,11 @@ def _readers() -> dict[str, tuple[Callable[[], Any], str]]:
         "watchdog.status": (watchdog_status, mode),
         "promotion.scopes": (promotion_scopes, mode),
     }
+
+
+IN_MEMORY_SOURCES = frozenset(
+    {"agents.status", "agents.decisions_recent", "risk.status", "market.quotes", "watchdog.status"}
+)
 
 
 async def _read(read: Callable[[], Any]) -> Any:
