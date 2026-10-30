@@ -54,3 +54,9 @@ def test_invalid_calibration_configuration_is_rejected() -> None:
         calibration_report([(0.5, 1)], bin_count=1)
     with pytest.raises(ValueError):
         calibration_report([(0.5, 1)], epsilon=0.5)
+
+
+@pytest.mark.parametrize("outcome", [0.5, 1.9, "1", None])
+def test_non_binary_labels_are_not_coerced(outcome) -> None:
+    with pytest.raises(ValueError, match="outcome must be binary"):
+        calibration_report([(0.5, outcome)])
