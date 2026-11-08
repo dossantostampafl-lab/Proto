@@ -709,3 +709,44 @@ def test_create_secrets_never_generates_the_mcp_token() -> None:
     assert "proto-mcp-api-token" in typed and '"${#value}" -lt 32' in typed
     # Stripped before the length check, as the API strips it.
     assert typed.index("[[:space:]]") < typed.index('"${#value}" -lt 32')
+
+
+# ---------- old images no longer fill the boot volume (2026-11-08) ----------
+
+
+def test_a_healthy_deploy_prunes_only_dangling_images(tmp_path: Path) -> None:
+    body = (OCI / "deploy/proto-deploy.sh").read_text()
+    prune = body.split("prune_images() {", 1)[1].split("\n}", 1)[0]
+    # Untagged images only: never -a, which would also drop postgres/caddy and the rollback image.
+    assert "podman image prune -f" in prune and " -a" not in prune
+    # Both healthy exits prune; the failed path keeps the previous image for the rollback.
+    healthy_exits = [
+        chunk for chunk in body.split("exit 0")[:-1] if "ensure_alpaca_executor" in chunk
+    ]
+    assert len(healthy_exits) >= 2
+    assert all(chunk.rstrip().endswith("prune_images") for chunk in healthy_exits[-2:])
+    failed = body.rsplit("is not healthy; its last lines:", 1)[1]
+    assert "prune_images" not in failed
+
+    # A failing prune (full disk, podman busy) only logs: it never fails the deploy.
+    script = tmp_path / "prune.sh"
+    script.write_text(
+        'set -euo pipefail\nsrc="$1"\n'
+        'eval "$(sed -n "/^prune_images() {/,/^}/p" "$src")"\n'
+        'log() { echo "LOG $*"; }\n'
+        'podman() { echo "$*" >>"$CALLS"; return "$RC"; }\n'
+        "prune_images\necho done\n"
+    )
+    for rc, logged in (("0", False), ("1", True)):
+        calls = tmp_path / f"calls-{rc}"
+        calls.write_text("")
+        done = subprocess.run(
+            ["bash", str(script), str(OCI / "deploy/proto-deploy.sh")],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CALLS": str(calls), "RC": rc},
+            check=True,
+        )
+        assert calls.read_text().split() == ["image", "prune", "-f"]
+        assert done.stdout.rstrip().endswith("done")
+        assert ("could not prune unused images" in done.stdout) is logged

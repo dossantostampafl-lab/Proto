@@ -341,10 +341,20 @@ case "$role" in
   executor) ensure_db EXECUTOR_DATABASE_URL ;;
 esac
 
+# Each release leaves the previous :stable/:executor image untagged ("dangling"). Nothing removed
+# them, so 9 days of releases filled the 30 GB boot volume (2026-11-08): podman could no longer
+# write its own database and Postgres refused every connection, so the Risk Engine refused all new
+# risk. Only dangling images go: tagged ones (postgres, caddy) and any image a container uses stay,
+# and so does good-image, which is the running revision once a deploy is healthy.
+prune_images() {
+  podman image prune -f >/dev/null 2>&1 || log "could not prune unused images"
+}
+
 # An API container from before the ChatGPT mount is restarted once to gain it.
 if [ "$new" = "$current" ] && [ "$running" = true ] && ! $force && chatgpt_mounted; then
   ensure_caddy
   ensure_alpaca_executor "$new"
+  prune_images
   exit 0
 fi
 
@@ -355,6 +365,7 @@ if healthy; then
   log "healthy on revision $(revision "$new")"
   ensure_caddy
   ensure_alpaca_executor "$new"
+  prune_images
   exit 0
 fi
 
